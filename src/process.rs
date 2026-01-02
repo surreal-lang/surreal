@@ -21,6 +21,8 @@ pub struct Process {
     pub timeout: Option<u32>,
     /// Call stack for function calls (stores return addresses)
     pub call_stack: Vec<usize>,
+    /// Data stack for saving/restoring values (Push/Pop)
+    pub stack: Vec<Value>,
 }
 
 /// Process execution status
@@ -50,6 +52,7 @@ impl Process {
             status: ProcessStatus::Ready,
             timeout: None,
             call_stack: Vec::new(),
+            stack: Vec::new(),
         }
     }
 }

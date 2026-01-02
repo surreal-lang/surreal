@@ -103,6 +103,14 @@ pub enum Instruction {
     /// Return from function: pop return address from call stack, jump to it
     /// If call stack is empty, ends the process
     Return,
+
+    // ========== Stack Operations ==========
+    /// Push a value onto the data stack
+    Push { source: Operand },
+
+    /// Pop a value from the data stack into a register
+    /// Crashes if stack is empty
+    Pop { dest: Register },
 }
 
 /// An operand for arithmetic/comparison operations

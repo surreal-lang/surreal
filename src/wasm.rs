@@ -305,6 +305,17 @@ fn parse_program(program: JsValue) -> Result<Vec<Instruction>, JsError> {
 
             "return" => Instruction::Return,
 
+            // Stack operations
+            "push" => {
+                let source = get_operand(&obj, "source")?;
+                Instruction::Push { source }
+            }
+
+            "pop" => {
+                let dest = get_register(&obj, "dest")?;
+                Instruction::Pop { dest }
+            }
+
             other => return Err(JsError::new(&format!("unknown op: {}", other))),
         };
 

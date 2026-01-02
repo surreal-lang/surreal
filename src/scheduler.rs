@@ -504,6 +504,33 @@ impl Scheduler {
                     ExecResult::Done
                 }
             }
+
+            Instruction::Push { source } => {
+                let Some(process) = self.processes.get(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let value = match &source {
+                    Operand::Int(n) => Value::Int(*n),
+                    Operand::Reg(r) => process.registers[r.0 as usize].clone(),
+                };
+                if let Some(p) = self.processes.get_mut(&pid) {
+                    p.stack.push(value);
+                }
+                ExecResult::Continue(1)
+            }
+
+            Instruction::Pop { dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                if let Some(value) = process.stack.pop() {
+                    process.registers[dest.0 as usize] = value;
+                    ExecResult::Continue(1)
+                } else {
+                    // Empty stack - crash
+                    ExecResult::Crash
+                }
+            }
         }
     }
 
@@ -1734,5 +1761,228 @@ mod tests {
         let process = scheduler.processes.get(&Pid(0)).unwrap();
         assert_eq!(process.registers[0], Value::Int(42));
         assert_eq!(process.status, ProcessStatus::Done);
+    }
+
+    // ========== Stack Operation Tests ==========
+
+    #[test]
+    fn test_push_pop() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            // Push some values
+            Instruction::Push {
+                source: Operand::Int(10),
+            },
+            Instruction::Push {
+                source: Operand::Int(20),
+            },
+            Instruction::Push {
+                source: Operand::Int(30),
+            },
+            // Pop in reverse order (LIFO)
+            Instruction::Pop { dest: Register(0) }, // 30
+            Instruction::Pop { dest: Register(1) }, // 20
+            Instruction::Pop { dest: Register(2) }, // 10
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[0], Value::Int(30));
+        assert_eq!(process.registers[1], Value::Int(20));
+        assert_eq!(process.registers[2], Value::Int(10));
+    }
+
+    #[test]
+    fn test_push_register() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::LoadInt {
+                value: 42,
+                dest: Register(0),
+            },
+            Instruction::Push {
+                source: Operand::Reg(Register(0)),
+            },
+            Instruction::LoadInt {
+                value: 0,
+                dest: Register(0),
+            },
+            Instruction::Pop { dest: Register(1) },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[0], Value::Int(0)); // Overwritten
+        assert_eq!(process.registers[1], Value::Int(42)); // Restored from stack
+    }
+
+    #[test]
+    fn test_pop_empty_crashes() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::Pop { dest: Register(0) },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let (_, _, _, crashed) = scheduler.process_count();
+        assert_eq!(crashed, 1);
+    }
+
+    #[test]
+    fn test_recursive_factorial_with_stack() {
+        let mut scheduler = Scheduler::new();
+
+        // Calculate factorial(5) = 120 using proper stack frames
+        // R0 = argument/result
+        let program = vec![
+            // 0: Load 5 into R0
+            Instruction::LoadInt {
+                value: 5,
+                dest: Register(0),
+            },
+            // 1: Call factorial at 4
+            Instruction::Call { target: 4 },
+            // 2: End (R0 has result)
+            Instruction::End,
+            // 3: (padding)
+            Instruction::End,
+            // === factorial function at 4 ===
+            // 4: If R0 <= 1, return R0 (base case)
+            Instruction::Lte {
+                a: Operand::Reg(Register(0)),
+                b: Operand::Int(1),
+                dest: Register(1),
+            },
+            // 5: Jump to return if base case
+            Instruction::JumpIf {
+                cond: Operand::Reg(Register(1)),
+                target: 13,
+            },
+            // 6: Save R0 onto stack
+            Instruction::Push {
+                source: Operand::Reg(Register(0)),
+            },
+            // 7: R0 = R0 - 1
+            Instruction::Sub {
+                a: Operand::Reg(Register(0)),
+                b: Operand::Int(1),
+                dest: Register(0),
+            },
+            // 8: Recursive call
+            Instruction::Call { target: 4 },
+            // 9: Pop saved value into R1
+            Instruction::Pop { dest: Register(1) },
+            // 10: R0 = R0 * R1
+            Instruction::Mul {
+                a: Operand::Reg(Register(0)),
+                b: Operand::Reg(Register(1)),
+                dest: Register(0),
+            },
+            // 11: Return
+            Instruction::Return,
+            // 12: (padding)
+            Instruction::End,
+            // 13: Base case - R0 is already 1, just return
+            Instruction::Return,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[0], Value::Int(120)); // 5! = 120
+    }
+
+    #[test]
+    fn test_recursive_fibonacci() {
+        let mut scheduler = Scheduler::new();
+
+        // Calculate fibonacci(10) = 55
+        // R0 = argument/result
+        let program = vec![
+            // 0: Load 10 into R0
+            Instruction::LoadInt {
+                value: 10,
+                dest: Register(0),
+            },
+            // 1: Call fib at 4
+            Instruction::Call { target: 4 },
+            // 2: End
+            Instruction::End,
+            // 3: (padding)
+            Instruction::End,
+            // === fib function at 4 ===
+            // 4: If R0 <= 1, return R0
+            Instruction::Lte {
+                a: Operand::Reg(Register(0)),
+                b: Operand::Int(1),
+                dest: Register(1),
+            },
+            // 5: Jump to return if base case
+            Instruction::JumpIf {
+                cond: Operand::Reg(Register(1)),
+                target: 16,
+            },
+            // 6: Save n onto stack
+            Instruction::Push {
+                source: Operand::Reg(Register(0)),
+            },
+            // 7: R0 = n - 1
+            Instruction::Sub {
+                a: Operand::Reg(Register(0)),
+                b: Operand::Int(1),
+                dest: Register(0),
+            },
+            // 8: Call fib(n-1)
+            Instruction::Call { target: 4 },
+            // 9: Move fib(n-1) to R2
+            Instruction::Add {
+                a: Operand::Reg(Register(0)),
+                b: Operand::Int(0),
+                dest: Register(2),
+            },
+            // 10: Pop original n into R0
+            Instruction::Pop { dest: Register(0) },
+            // 11: Push fib(n-1) for later
+            Instruction::Push {
+                source: Operand::Reg(Register(2)),
+            },
+            // 12: R0 = n - 2
+            Instruction::Sub {
+                a: Operand::Reg(Register(0)),
+                b: Operand::Int(2),
+                dest: Register(0),
+            },
+            // 13: Call fib(n-2)
+            Instruction::Call { target: 4 },
+            // 14: Pop fib(n-1) into R1
+            Instruction::Pop { dest: Register(1) },
+            // 15: R0 = fib(n-1) + fib(n-2)
+            Instruction::Add {
+                a: Operand::Reg(Register(0)),
+                b: Operand::Reg(Register(1)),
+                dest: Register(0),
+            },
+            // 16: Return
+            Instruction::Return,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[0], Value::Int(55)); // fib(10) = 55
     }
 }
