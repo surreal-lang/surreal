@@ -1286,6 +1286,72 @@ impl Scheduler {
                 process.registers[dest.0 as usize] = Value::Int(if found { 1 } else { 0 });
                 ExecResult::Continue(1)
             }
+
+            Instruction::IsInteger { source, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let is_int = matches!(process.registers[source.0 as usize], Value::Int(_));
+                process.registers[dest.0 as usize] = Value::Int(if is_int { 1 } else { 0 });
+                ExecResult::Continue(1)
+            }
+
+            Instruction::IsAtom { source, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let is_atom = matches!(process.registers[source.0 as usize], Value::Atom(_));
+                process.registers[dest.0 as usize] = Value::Int(if is_atom { 1 } else { 0 });
+                ExecResult::Continue(1)
+            }
+
+            Instruction::IsTuple { source, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let is_tuple = matches!(process.registers[source.0 as usize], Value::Tuple(_));
+                process.registers[dest.0 as usize] = Value::Int(if is_tuple { 1 } else { 0 });
+                ExecResult::Continue(1)
+            }
+
+            Instruction::IsList { source, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let is_list = matches!(process.registers[source.0 as usize], Value::List(_));
+                process.registers[dest.0 as usize] = Value::Int(if is_list { 1 } else { 0 });
+                ExecResult::Continue(1)
+            }
+
+            Instruction::IsPid { source, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let is_pid = matches!(process.registers[source.0 as usize], Value::Pid(_));
+                process.registers[dest.0 as usize] = Value::Int(if is_pid { 1 } else { 0 });
+                ExecResult::Continue(1)
+            }
+
+            Instruction::IsFunction { source, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let is_fun = matches!(
+                    process.registers[source.0 as usize],
+                    Value::Fun { .. } | Value::Closure { .. }
+                );
+                process.registers[dest.0 as usize] = Value::Int(if is_fun { 1 } else { 0 });
+                ExecResult::Continue(1)
+            }
+
+            Instruction::IsString { source, dest } => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let is_string = matches!(process.registers[source.0 as usize], Value::String(_));
+                process.registers[dest.0 as usize] = Value::Int(if is_string { 1 } else { 0 });
+                ExecResult::Continue(1)
+            }
         }
     }
 
@@ -4967,5 +5033,344 @@ mod tests {
             process.registers[3],
             Value::List(vec![Value::Int(1), Value::Int(2)])
         );
+    }
+
+    // ========== Type Checking Tests ==========
+
+    #[test]
+    fn test_is_integer() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            // R0 = 42 (integer)
+            Instruction::LoadInt {
+                value: 42,
+                dest: Register(0),
+            },
+            Instruction::IsInteger {
+                source: Register(0),
+                dest: Register(1),
+            },
+            // R2 = :atom (not an integer)
+            Instruction::LoadAtom {
+                name: "test".to_string(),
+                dest: Register(2),
+            },
+            Instruction::IsInteger {
+                source: Register(2),
+                dest: Register(3),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[1], Value::Int(1)); // 42 is an integer
+        assert_eq!(process.registers[3], Value::Int(0)); // :test is not an integer
+    }
+
+    #[test]
+    fn test_is_atom() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            // R0 = :ok (atom)
+            Instruction::LoadAtom {
+                name: "ok".to_string(),
+                dest: Register(0),
+            },
+            Instruction::IsAtom {
+                source: Register(0),
+                dest: Register(1),
+            },
+            // R2 = 42 (not an atom)
+            Instruction::LoadInt {
+                value: 42,
+                dest: Register(2),
+            },
+            Instruction::IsAtom {
+                source: Register(2),
+                dest: Register(3),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[1], Value::Int(1)); // :ok is an atom
+        assert_eq!(process.registers[3], Value::Int(0)); // 42 is not an atom
+    }
+
+    #[test]
+    fn test_is_tuple() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            // Create tuple {1, 2}
+            Instruction::Push {
+                source: Operand::Int(1),
+            },
+            Instruction::Push {
+                source: Operand::Int(2),
+            },
+            Instruction::MakeTuple {
+                arity: 2,
+                dest: Register(0),
+            },
+            Instruction::IsTuple {
+                source: Register(0),
+                dest: Register(1),
+            },
+            // R2 = 42 (not a tuple)
+            Instruction::LoadInt {
+                value: 42,
+                dest: Register(2),
+            },
+            Instruction::IsTuple {
+                source: Register(2),
+                dest: Register(3),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[1], Value::Int(1)); // {1, 2} is a tuple
+        assert_eq!(process.registers[3], Value::Int(0)); // 42 is not a tuple
+    }
+
+    #[test]
+    fn test_is_list() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            // Create list [1, 2]
+            Instruction::Push {
+                source: Operand::Int(1),
+            },
+            Instruction::Push {
+                source: Operand::Int(2),
+            },
+            Instruction::MakeList {
+                length: 2,
+                dest: Register(0),
+            },
+            Instruction::IsList {
+                source: Register(0),
+                dest: Register(1),
+            },
+            // Empty list is also a list
+            Instruction::MakeList {
+                length: 0,
+                dest: Register(2),
+            },
+            Instruction::IsList {
+                source: Register(2),
+                dest: Register(3),
+            },
+            // R4 = 42 (not a list)
+            Instruction::LoadInt {
+                value: 42,
+                dest: Register(4),
+            },
+            Instruction::IsList {
+                source: Register(4),
+                dest: Register(5),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[1], Value::Int(1)); // [1, 2] is a list
+        assert_eq!(process.registers[3], Value::Int(1)); // [] is a list
+        assert_eq!(process.registers[5], Value::Int(0)); // 42 is not a list
+    }
+
+    #[test]
+    fn test_is_pid() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            // Spawn a process to get a PID
+            Instruction::Spawn {
+                code: vec![Instruction::End],
+                dest: Register(0),
+            },
+            Instruction::IsPid {
+                source: Register(0),
+                dest: Register(1),
+            },
+            // R2 = 42 (not a PID)
+            Instruction::LoadInt {
+                value: 42,
+                dest: Register(2),
+            },
+            Instruction::IsPid {
+                source: Register(2),
+                dest: Register(3),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[1], Value::Int(1)); // spawned PID is a PID
+        assert_eq!(process.registers[3], Value::Int(0)); // 42 is not a PID
+    }
+
+    #[test]
+    fn test_is_function() {
+        use crate::Module;
+
+        let mut scheduler = Scheduler::new();
+
+        // Create a module with a function
+        let mut math = Module::new("math".to_string());
+        math.add_function("id".to_string(), 1, vec![Instruction::Return]);
+        math.export("id", 1);
+        scheduler.load_module(math).unwrap();
+
+        let program = vec![
+            // Create a function reference
+            Instruction::MakeFun {
+                module: "math".to_string(),
+                function: "id".to_string(),
+                arity: 1,
+                dest: Register(0),
+            },
+            Instruction::IsFunction {
+                source: Register(0),
+                dest: Register(1),
+            },
+            // R2 = 42 (not a function)
+            Instruction::LoadInt {
+                value: 42,
+                dest: Register(2),
+            },
+            Instruction::IsFunction {
+                source: Register(2),
+                dest: Register(3),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[1], Value::Int(1)); // fun is a function
+        assert_eq!(process.registers[3], Value::Int(0)); // 42 is not a function
+    }
+
+    #[test]
+    fn test_is_function_closure() {
+        use crate::Module;
+
+        let mut scheduler = Scheduler::new();
+
+        // Create a module with a function
+        let mut math = Module::new("math".to_string());
+        math.add_function("add".to_string(), 2, vec![
+            Instruction::Add {
+                a: Operand::Reg(Register(0)),
+                b: Operand::Reg(Register(1)),
+                dest: Register(0),
+            },
+            Instruction::Return,
+        ]);
+        math.export("add", 2);
+        scheduler.load_module(math).unwrap();
+
+        let program = vec![
+            // R1 = 5 (value to capture)
+            Instruction::LoadInt {
+                value: 5,
+                dest: Register(1),
+            },
+            // Create a closure
+            Instruction::MakeClosure {
+                module: "math".to_string(),
+                function: "add".to_string(),
+                arity: 1,
+                captures: vec![Register(1)],
+                dest: Register(0),
+            },
+            Instruction::IsFunction {
+                source: Register(0),
+                dest: Register(2),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[2], Value::Int(1)); // closure is a function
+    }
+
+    #[test]
+    fn test_type_checks_comprehensive() {
+        let mut scheduler = Scheduler::new();
+
+        // Test that each type only matches its own check
+        let program = vec![
+            // R0 = 42 (integer)
+            Instruction::LoadInt {
+                value: 42,
+                dest: Register(0),
+            },
+            // Create list [1]
+            Instruction::Push {
+                source: Operand::Int(1),
+            },
+            Instruction::MakeList {
+                length: 1,
+                dest: Register(1),
+            },
+            // Check integer against all types
+            Instruction::IsInteger {
+                source: Register(0),
+                dest: Register(2),
+            },
+            Instruction::IsAtom {
+                source: Register(0),
+                dest: Register(3),
+            },
+            Instruction::IsTuple {
+                source: Register(0),
+                dest: Register(4),
+            },
+            Instruction::IsList {
+                source: Register(0),
+                dest: Register(5),
+            },
+            Instruction::IsPid {
+                source: Register(0),
+                dest: Register(6),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[2], Value::Int(1)); // is_integer(42) = true
+        assert_eq!(process.registers[3], Value::Int(0)); // is_atom(42) = false
+        assert_eq!(process.registers[4], Value::Int(0)); // is_tuple(42) = false
+        assert_eq!(process.registers[5], Value::Int(0)); // is_list(42) = false
+        assert_eq!(process.registers[6], Value::Int(0)); // is_pid(42) = false
     }
 }

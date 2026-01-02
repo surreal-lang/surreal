@@ -255,6 +255,35 @@ pub enum Instruction {
     /// Check if an element is a member of a list
     /// Stores 1 (true) or 0 (false)
     ListMember { elem: Register, list: Register, dest: Register },
+
+    // ========== Type Checking ==========
+    /// Check if value is an integer
+    /// Stores 1 (true) or 0 (false)
+    IsInteger { source: Register, dest: Register },
+
+    /// Check if value is an atom
+    /// Stores 1 (true) or 0 (false)
+    IsAtom { source: Register, dest: Register },
+
+    /// Check if value is a tuple
+    /// Stores 1 (true) or 0 (false)
+    IsTuple { source: Register, dest: Register },
+
+    /// Check if value is a list (including empty list)
+    /// Stores 1 (true) or 0 (false)
+    IsList { source: Register, dest: Register },
+
+    /// Check if value is a PID
+    /// Stores 1 (true) or 0 (false)
+    IsPid { source: Register, dest: Register },
+
+    /// Check if value is a function (Fun or Closure)
+    /// Stores 1 (true) or 0 (false)
+    IsFunction { source: Register, dest: Register },
+
+    /// Check if value is a string/binary
+    /// Stores 1 (true) or 0 (false)
+    IsString { source: Register, dest: Register },
 }
 
 /// An operand for arithmetic/comparison operations
