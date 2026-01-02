@@ -3,7 +3,7 @@
 use js_sys::{Array, Object, Reflect};
 use wasm_bindgen::prelude::{wasm_bindgen, JsError, JsValue};
 
-use crate::{Instruction, Pid, Register, Scheduler, Source, StepResult};
+use crate::{Instruction, Operand, Pid, Register, Scheduler, Source, StepResult};
 
 /// JS-friendly wrapper around the scheduler
 #[wasm_bindgen]
@@ -180,6 +180,94 @@ fn parse_program(program: JsValue) -> Result<Vec<Instruction>, JsError> {
 
             "crash" => Instruction::Crash,
 
+            // Arithmetic
+            "load_int" => {
+                let value = Reflect::get(&obj, &"value".into())
+                    .ok()
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0) as i64;
+                let dest = get_register(&obj, "dest")?;
+                Instruction::LoadInt { value, dest }
+            }
+
+            "add" => {
+                let a = get_operand(&obj, "a")?;
+                let b = get_operand(&obj, "b")?;
+                let dest = get_register(&obj, "dest")?;
+                Instruction::Add { a, b, dest }
+            }
+
+            "sub" => {
+                let a = get_operand(&obj, "a")?;
+                let b = get_operand(&obj, "b")?;
+                let dest = get_register(&obj, "dest")?;
+                Instruction::Sub { a, b, dest }
+            }
+
+            "mul" => {
+                let a = get_operand(&obj, "a")?;
+                let b = get_operand(&obj, "b")?;
+                let dest = get_register(&obj, "dest")?;
+                Instruction::Mul { a, b, dest }
+            }
+
+            "div" => {
+                let a = get_operand(&obj, "a")?;
+                let b = get_operand(&obj, "b")?;
+                let dest = get_register(&obj, "dest")?;
+                Instruction::Div { a, b, dest }
+            }
+
+            "mod" => {
+                let a = get_operand(&obj, "a")?;
+                let b = get_operand(&obj, "b")?;
+                let dest = get_register(&obj, "dest")?;
+                Instruction::Mod { a, b, dest }
+            }
+
+            // Comparisons
+            "eq" => {
+                let a = get_operand(&obj, "a")?;
+                let b = get_operand(&obj, "b")?;
+                let dest = get_register(&obj, "dest")?;
+                Instruction::Eq { a, b, dest }
+            }
+
+            "ne" => {
+                let a = get_operand(&obj, "a")?;
+                let b = get_operand(&obj, "b")?;
+                let dest = get_register(&obj, "dest")?;
+                Instruction::Ne { a, b, dest }
+            }
+
+            "lt" => {
+                let a = get_operand(&obj, "a")?;
+                let b = get_operand(&obj, "b")?;
+                let dest = get_register(&obj, "dest")?;
+                Instruction::Lt { a, b, dest }
+            }
+
+            "lte" => {
+                let a = get_operand(&obj, "a")?;
+                let b = get_operand(&obj, "b")?;
+                let dest = get_register(&obj, "dest")?;
+                Instruction::Lte { a, b, dest }
+            }
+
+            "gt" => {
+                let a = get_operand(&obj, "a")?;
+                let b = get_operand(&obj, "b")?;
+                let dest = get_register(&obj, "dest")?;
+                Instruction::Gt { a, b, dest }
+            }
+
+            "gte" => {
+                let a = get_operand(&obj, "a")?;
+                let b = get_operand(&obj, "b")?;
+                let dest = get_register(&obj, "dest")?;
+                Instruction::Gte { a, b, dest }
+            }
+
             other => return Err(JsError::new(&format!("unknown op: {}", other))),
         };
 
@@ -248,4 +336,37 @@ fn get_source(obj: &Object, field: &str) -> Result<Source, JsError> {
 
     // Default to register 0
     Ok(Source::Reg(Register(0)))
+}
+
+/// Parse an operand from a JS object field.
+/// Operands can be:
+/// - A number (immediate integer): `{ a: 42 }`
+/// - An object with type "reg": `{ a: { type: "reg", reg: 0 } }`
+fn get_operand(obj: &Object, field: &str) -> Result<Operand, JsError> {
+    let val = Reflect::get(obj, &field.into())
+        .map_err(|_| JsError::new(&format!("missing '{}'", field)))?;
+
+    // Check if it's a number (immediate value)
+    if let Some(n) = val.as_f64() {
+        return Ok(Operand::Int(n as i64));
+    }
+
+    // Check if it's an object with type field
+    if val.is_object() {
+        let obj = Object::from(val);
+        let type_val = Reflect::get(&obj, &"type".into()).ok();
+
+        if let Some(t) = type_val.and_then(|v| v.as_string()) {
+            if t == "reg" {
+                let idx = Reflect::get(&obj, &"reg".into())
+                    .ok()
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0) as u8;
+                return Ok(Operand::Reg(Register(idx)));
+            }
+        }
+    }
+
+    // Default to immediate 0
+    Ok(Operand::Int(0))
 }

@@ -48,6 +48,53 @@ pub enum Instruction {
 
     /// Crash the process (for testing links)
     Crash,
+
+    // ========== Arithmetic & Logic ==========
+    /// Load an immediate integer into a register
+    LoadInt { value: i64, dest: Register },
+
+    /// Add two operands, store result in dest
+    Add { a: Operand, b: Operand, dest: Register },
+
+    /// Subtract b from a, store result in dest
+    Sub { a: Operand, b: Operand, dest: Register },
+
+    /// Multiply two operands, store result in dest
+    Mul { a: Operand, b: Operand, dest: Register },
+
+    /// Divide a by b, store result in dest (integer division)
+    Div { a: Operand, b: Operand, dest: Register },
+
+    /// Modulo a by b, store result in dest
+    Mod { a: Operand, b: Operand, dest: Register },
+
+    // ========== Comparisons ==========
+    /// Compare equal: dest = (a == b) ? 1 : 0
+    Eq { a: Operand, b: Operand, dest: Register },
+
+    /// Compare not equal: dest = (a != b) ? 1 : 0
+    Ne { a: Operand, b: Operand, dest: Register },
+
+    /// Compare less than: dest = (a < b) ? 1 : 0
+    Lt { a: Operand, b: Operand, dest: Register },
+
+    /// Compare less than or equal: dest = (a <= b) ? 1 : 0
+    Lte { a: Operand, b: Operand, dest: Register },
+
+    /// Compare greater than: dest = (a > b) ? 1 : 0
+    Gt { a: Operand, b: Operand, dest: Register },
+
+    /// Compare greater than or equal: dest = (a >= b) ? 1 : 0
+    Gte { a: Operand, b: Operand, dest: Register },
+}
+
+/// An operand for arithmetic/comparison operations
+#[derive(Debug, Clone)]
+pub enum Operand {
+    /// Read from a register
+    Reg(Register),
+    /// Immediate integer value
+    Int(i64),
 }
 
 /// Where to read a value from

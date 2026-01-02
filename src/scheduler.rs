@@ -3,7 +3,8 @@
 use std::collections::{HashMap, VecDeque};
 
 use crate::{
-    DownReason, Instruction, Message, Pid, Process, ProcessStatus, Source, SystemMsg, Value,
+    DownReason, Instruction, Message, Operand, Pid, Process, ProcessStatus, Source, SystemMsg,
+    Value,
 };
 
 /// Result of stepping the scheduler
@@ -369,6 +370,146 @@ impl Scheduler {
             }
 
             Instruction::Crash => ExecResult::Crash,
+
+            // ========== Arithmetic ==========
+            Instruction::LoadInt { value, dest } => {
+                if let Some(p) = self.processes.get_mut(&pid) {
+                    p.registers[dest.0 as usize] = Value::Int(value);
+                }
+                ExecResult::Continue(1)
+            }
+
+            Instruction::Add { a, b, dest } => {
+                self.arith_op(pid, &a, &b, dest, |x, y| x.wrapping_add(y))
+            }
+
+            Instruction::Sub { a, b, dest } => {
+                self.arith_op(pid, &a, &b, dest, |x, y| x.wrapping_sub(y))
+            }
+
+            Instruction::Mul { a, b, dest } => {
+                self.arith_op(pid, &a, &b, dest, |x, y| x.wrapping_mul(y))
+            }
+
+            Instruction::Div { a, b, dest } => {
+                let Some(process) = self.processes.get(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let av = self.resolve_operand(process, &a);
+                let bv = self.resolve_operand(process, &b);
+                match (av, bv) {
+                    (Some(x), Some(y)) if y != 0 => {
+                        if let Some(p) = self.processes.get_mut(&pid) {
+                            p.registers[dest.0 as usize] = Value::Int(x / y);
+                        }
+                        ExecResult::Continue(1)
+                    }
+                    (Some(_), Some(0)) => ExecResult::Crash, // Division by zero
+                    _ => ExecResult::Crash,
+                }
+            }
+
+            Instruction::Mod { a, b, dest } => {
+                let Some(process) = self.processes.get(&pid) else {
+                    return ExecResult::Crash;
+                };
+                let av = self.resolve_operand(process, &a);
+                let bv = self.resolve_operand(process, &b);
+                match (av, bv) {
+                    (Some(x), Some(y)) if y != 0 => {
+                        if let Some(p) = self.processes.get_mut(&pid) {
+                            p.registers[dest.0 as usize] = Value::Int(x % y);
+                        }
+                        ExecResult::Continue(1)
+                    }
+                    (Some(_), Some(0)) => ExecResult::Crash, // Division by zero
+                    _ => ExecResult::Crash,
+                }
+            }
+
+            // ========== Comparisons ==========
+            Instruction::Eq { a, b, dest } => {
+                self.cmp_op(pid, &a, &b, dest, |x, y| x == y)
+            }
+
+            Instruction::Ne { a, b, dest } => {
+                self.cmp_op(pid, &a, &b, dest, |x, y| x != y)
+            }
+
+            Instruction::Lt { a, b, dest } => {
+                self.cmp_op(pid, &a, &b, dest, |x, y| x < y)
+            }
+
+            Instruction::Lte { a, b, dest } => {
+                self.cmp_op(pid, &a, &b, dest, |x, y| x <= y)
+            }
+
+            Instruction::Gt { a, b, dest } => {
+                self.cmp_op(pid, &a, &b, dest, |x, y| x > y)
+            }
+
+            Instruction::Gte { a, b, dest } => {
+                self.cmp_op(pid, &a, &b, dest, |x, y| x >= y)
+            }
+        }
+    }
+
+    /// Helper for arithmetic operations
+    fn arith_op(
+        &mut self,
+        pid: Pid,
+        a: &Operand,
+        b: &Operand,
+        dest: crate::Register,
+        op: fn(i64, i64) -> i64,
+    ) -> ExecResult {
+        let Some(process) = self.processes.get(&pid) else {
+            return ExecResult::Crash;
+        };
+        let av = self.resolve_operand(process, a);
+        let bv = self.resolve_operand(process, b);
+        match (av, bv) {
+            (Some(x), Some(y)) => {
+                if let Some(p) = self.processes.get_mut(&pid) {
+                    p.registers[dest.0 as usize] = Value::Int(op(x, y));
+                }
+                ExecResult::Continue(1)
+            }
+            _ => ExecResult::Crash,
+        }
+    }
+
+    /// Helper for comparison operations
+    fn cmp_op(
+        &mut self,
+        pid: Pid,
+        a: &Operand,
+        b: &Operand,
+        dest: crate::Register,
+        op: fn(i64, i64) -> bool,
+    ) -> ExecResult {
+        let Some(process) = self.processes.get(&pid) else {
+            return ExecResult::Crash;
+        };
+        let av = self.resolve_operand(process, a);
+        let bv = self.resolve_operand(process, b);
+        match (av, bv) {
+            (Some(x), Some(y)) => {
+                let result = if op(x, y) { 1 } else { 0 };
+                if let Some(p) = self.processes.get_mut(&pid) {
+                    p.registers[dest.0 as usize] = Value::Int(result);
+                }
+                ExecResult::Continue(1)
+            }
+            _ => ExecResult::Crash,
+        }
+    }
+
+    /// Resolve an operand to an integer value
+    fn resolve_operand(&self, process: &Process, operand: &Operand) -> Option<i64> {
+        match operand {
+            Operand::Int(n) => Some(*n),
+            Operand::Reg(r) => process.registers[r.0 as usize].as_int(),
         }
     }
 
@@ -498,7 +639,7 @@ impl Default for Scheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Register;
+    use crate::{Operand, Register};
 
     fn run_to_idle(scheduler: &mut Scheduler) {
         loop {
@@ -847,5 +988,313 @@ mod tests {
         let output = scheduler.take_output();
         assert_eq!(output.len(), 1);
         assert!(output[0].contains("Pid(0)"));
+    }
+
+    // ========== Arithmetic Tests ==========
+
+    #[test]
+    fn test_load_int() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::LoadInt {
+                value: 42,
+                dest: Register(0),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[0], Value::Int(42));
+    }
+
+    #[test]
+    fn test_add() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::LoadInt {
+                value: 10,
+                dest: Register(0),
+            },
+            Instruction::Add {
+                a: Operand::Reg(Register(0)),
+                b: Operand::Int(5),
+                dest: Register(1),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[1], Value::Int(15));
+    }
+
+    #[test]
+    fn test_sub() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::Sub {
+                a: Operand::Int(20),
+                b: Operand::Int(7),
+                dest: Register(0),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[0], Value::Int(13));
+    }
+
+    #[test]
+    fn test_mul() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::LoadInt {
+                value: 6,
+                dest: Register(0),
+            },
+            Instruction::LoadInt {
+                value: 7,
+                dest: Register(1),
+            },
+            Instruction::Mul {
+                a: Operand::Reg(Register(0)),
+                b: Operand::Reg(Register(1)),
+                dest: Register(2),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[2], Value::Int(42));
+    }
+
+    #[test]
+    fn test_div() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::Div {
+                a: Operand::Int(100),
+                b: Operand::Int(7),
+                dest: Register(0),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[0], Value::Int(14)); // Integer division
+    }
+
+    #[test]
+    fn test_div_by_zero_crashes() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::Div {
+                a: Operand::Int(10),
+                b: Operand::Int(0),
+                dest: Register(0),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let (_, _, _, crashed) = scheduler.process_count();
+        assert_eq!(crashed, 1);
+    }
+
+    #[test]
+    fn test_mod() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::Mod {
+                a: Operand::Int(17),
+                b: Operand::Int(5),
+                dest: Register(0),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[0], Value::Int(2));
+    }
+
+    // ========== Comparison Tests ==========
+
+    #[test]
+    fn test_eq() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::Eq {
+                a: Operand::Int(5),
+                b: Operand::Int(5),
+                dest: Register(0),
+            },
+            Instruction::Eq {
+                a: Operand::Int(5),
+                b: Operand::Int(3),
+                dest: Register(1),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[0], Value::Int(1)); // true
+        assert_eq!(process.registers[1], Value::Int(0)); // false
+    }
+
+    #[test]
+    fn test_lt_gt() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::Lt {
+                a: Operand::Int(3),
+                b: Operand::Int(5),
+                dest: Register(0),
+            },
+            Instruction::Gt {
+                a: Operand::Int(3),
+                b: Operand::Int(5),
+                dest: Register(1),
+            },
+            Instruction::Lt {
+                a: Operand::Int(5),
+                b: Operand::Int(3),
+                dest: Register(2),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[0], Value::Int(1)); // 3 < 5 = true
+        assert_eq!(process.registers[1], Value::Int(0)); // 3 > 5 = false
+        assert_eq!(process.registers[2], Value::Int(0)); // 5 < 3 = false
+    }
+
+    #[test]
+    fn test_lte_gte() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::Lte {
+                a: Operand::Int(5),
+                b: Operand::Int(5),
+                dest: Register(0),
+            },
+            Instruction::Gte {
+                a: Operand::Int(5),
+                b: Operand::Int(5),
+                dest: Register(1),
+            },
+            Instruction::Lte {
+                a: Operand::Int(3),
+                b: Operand::Int(5),
+                dest: Register(2),
+            },
+            Instruction::Gte {
+                a: Operand::Int(3),
+                b: Operand::Int(5),
+                dest: Register(3),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[0], Value::Int(1)); // 5 <= 5 = true
+        assert_eq!(process.registers[1], Value::Int(1)); // 5 >= 5 = true
+        assert_eq!(process.registers[2], Value::Int(1)); // 3 <= 5 = true
+        assert_eq!(process.registers[3], Value::Int(0)); // 3 >= 5 = false
+    }
+
+    #[test]
+    fn test_ne() {
+        let mut scheduler = Scheduler::new();
+
+        let program = vec![
+            Instruction::Ne {
+                a: Operand::Int(5),
+                b: Operand::Int(3),
+                dest: Register(0),
+            },
+            Instruction::Ne {
+                a: Operand::Int(5),
+                b: Operand::Int(5),
+                dest: Register(1),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[0], Value::Int(1)); // 5 != 3 = true
+        assert_eq!(process.registers[1], Value::Int(0)); // 5 != 5 = false
+    }
+
+    #[test]
+    fn test_arithmetic_chain() {
+        let mut scheduler = Scheduler::new();
+
+        // Calculate (10 + 5) * 2 - 3 = 27
+        let program = vec![
+            Instruction::Add {
+                a: Operand::Int(10),
+                b: Operand::Int(5),
+                dest: Register(0),
+            },
+            Instruction::Mul {
+                a: Operand::Reg(Register(0)),
+                b: Operand::Int(2),
+                dest: Register(0),
+            },
+            Instruction::Sub {
+                a: Operand::Reg(Register(0)),
+                b: Operand::Int(3),
+                dest: Register(0),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[0], Value::Int(27));
     }
 }
