@@ -1,0 +1,12 @@
+// Hello world example
+
+mod hello {
+    pub fn main() -> int {
+        42
+    }
+
+    pub fn greet() -> int {
+        // Returns an atom (once we have proper atom support in output)
+        1
+    }
+}
