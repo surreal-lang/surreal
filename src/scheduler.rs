@@ -484,6 +484,26 @@ impl Scheduler {
                     _ => ExecResult::Continue(1), // Truthy, continue
                 }
             }
+
+            Instruction::Call { target } => {
+                if let Some(p) = self.processes.get_mut(&pid) {
+                    // Push return address (next instruction after call)
+                    p.call_stack.push(p.pc + 1);
+                }
+                ExecResult::Jump(target, 1)
+            }
+
+            Instruction::Return => {
+                let Some(process) = self.processes.get_mut(&pid) else {
+                    return ExecResult::Crash;
+                };
+                if let Some(return_addr) = process.call_stack.pop() {
+                    ExecResult::Jump(return_addr, 1)
+                } else {
+                    // Empty call stack - end the process
+                    ExecResult::Done
+                }
+            }
         }
     }
 
@@ -1548,5 +1568,171 @@ mod tests {
 
         let process = scheduler.processes.get(&Pid(0)).unwrap();
         assert_eq!(process.registers[1], Value::Int(1)); // 10 > 5, so then branch
+    }
+
+    // ========== Function Call Tests ==========
+
+    #[test]
+    fn test_simple_call_return() {
+        let mut scheduler = Scheduler::new();
+
+        // Main calls a function that sets R0 = 42, then returns
+        let program = vec![
+            // 0: Call function at 3
+            Instruction::Call { target: 3 },
+            // 1: After return, end
+            Instruction::End,
+            // 2: (unreachable)
+            Instruction::LoadInt {
+                value: 999,
+                dest: Register(0),
+            },
+            // 3: Function start - set R0 = 42
+            Instruction::LoadInt {
+                value: 42,
+                dest: Register(0),
+            },
+            // 4: Return to caller
+            Instruction::Return,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[0], Value::Int(42));
+    }
+
+    #[test]
+    fn test_nested_calls() {
+        let mut scheduler = Scheduler::new();
+
+        // Main calls func_a, which calls func_b, which sets R0 = 100
+        let program = vec![
+            // 0: Call func_a at 3
+            Instruction::Call { target: 3 },
+            // 1: After return, end
+            Instruction::End,
+            // 2: (padding)
+            Instruction::End,
+            // 3: func_a - call func_b at 6
+            Instruction::Call { target: 6 },
+            // 4: Add 10 to R0
+            Instruction::Add {
+                a: Operand::Reg(Register(0)),
+                b: Operand::Int(10),
+                dest: Register(0),
+            },
+            // 5: Return from func_a
+            Instruction::Return,
+            // 6: func_b - set R0 = 100
+            Instruction::LoadInt {
+                value: 100,
+                dest: Register(0),
+            },
+            // 7: Return from func_b
+            Instruction::Return,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        // func_b sets 100, func_a adds 10 = 110
+        assert_eq!(process.registers[0], Value::Int(110));
+    }
+
+    #[test]
+    fn test_function_with_loop() {
+        let mut scheduler = Scheduler::new();
+
+        // Main sets R0 = 5, calls factorial function which computes iteratively
+        // factorial(n): R1 = 1, while n > 0: R1 *= n, n--; return R1 in R0
+        let program = vec![
+            // 0: Load 5 into R0 (argument)
+            Instruction::LoadInt {
+                value: 5,
+                dest: Register(0),
+            },
+            // 1: Call factorial at 4
+            Instruction::Call { target: 4 },
+            // 2: End (R0 has result)
+            Instruction::End,
+            // 3: (padding)
+            Instruction::End,
+            // === factorial function at 4 ===
+            // R0 = n (input), R1 = accumulator (result)
+            // 4: R1 = 1 (accumulator)
+            Instruction::LoadInt {
+                value: 1,
+                dest: Register(1),
+            },
+            // 5: Loop start - check if R0 <= 0
+            Instruction::Lte {
+                a: Operand::Reg(Register(0)),
+                b: Operand::Int(0),
+                dest: Register(2),
+            },
+            // 6: If R0 <= 0, jump to return
+            Instruction::JumpIf {
+                cond: Operand::Reg(Register(2)),
+                target: 10,
+            },
+            // 7: R1 = R1 * R0
+            Instruction::Mul {
+                a: Operand::Reg(Register(1)),
+                b: Operand::Reg(Register(0)),
+                dest: Register(1),
+            },
+            // 8: R0 = R0 - 1
+            Instruction::Sub {
+                a: Operand::Reg(Register(0)),
+                b: Operand::Int(1),
+                dest: Register(0),
+            },
+            // 9: Jump back to loop start
+            Instruction::Jump { target: 5 },
+            // 10: Move result to R0 and return
+            Instruction::Add {
+                a: Operand::Reg(Register(1)),
+                b: Operand::Int(0),
+                dest: Register(0),
+            },
+            // 11: Return
+            Instruction::Return,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[0], Value::Int(120)); // 5! = 120
+    }
+
+    #[test]
+    fn test_return_without_call_ends_process() {
+        let mut scheduler = Scheduler::new();
+
+        // Return without a call should end the process
+        let program = vec![
+            Instruction::LoadInt {
+                value: 42,
+                dest: Register(0),
+            },
+            Instruction::Return,
+            // These should never execute
+            Instruction::LoadInt {
+                value: 999,
+                dest: Register(0),
+            },
+            Instruction::End,
+        ];
+
+        scheduler.spawn(program);
+        run_to_idle(&mut scheduler);
+
+        let process = scheduler.processes.get(&Pid(0)).unwrap();
+        assert_eq!(process.registers[0], Value::Int(42));
+        assert_eq!(process.status, ProcessStatus::Done);
     }
 }

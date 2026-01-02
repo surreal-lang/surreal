@@ -295,6 +295,16 @@ fn parse_program(program: JsValue) -> Result<Vec<Instruction>, JsError> {
                 Instruction::JumpUnless { cond, target }
             }
 
+            "call" => {
+                let target = Reflect::get(&obj, &"target".into())
+                    .ok()
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0) as usize;
+                Instruction::Call { target }
+            }
+
+            "return" => Instruction::Return,
+
             other => return Err(JsError::new(&format!("unknown op: {}", other))),
         };
 

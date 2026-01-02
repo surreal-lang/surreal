@@ -96,6 +96,13 @@ pub enum Instruction {
 
     /// Jump to target if condition is falsy (zero or non-integer)
     JumpUnless { cond: Operand, target: usize },
+
+    /// Call a function: push return address onto call stack, jump to target
+    Call { target: usize },
+
+    /// Return from function: pop return address from call stack, jump to it
+    /// If call stack is empty, ends the process
+    Return,
 }
 
 /// An operand for arithmetic/comparison operations

@@ -19,6 +19,8 @@ pub struct Process {
     pub status: ProcessStatus,
     /// Remaining timeout (in reductions) when waiting for a message
     pub timeout: Option<u32>,
+    /// Call stack for function calls (stores return addresses)
+    pub call_stack: Vec<usize>,
 }
 
 /// Process execution status
@@ -47,6 +49,7 @@ impl Process {
             monitored_by: Vec::new(),
             status: ProcessStatus::Ready,
             timeout: None,
+            call_stack: Vec::new(),
         }
     }
 }
