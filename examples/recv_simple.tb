@@ -1,0 +1,8 @@
+// Simple receive test
+mod recv_simple {
+    pub fn wait() -> int {
+        receive {
+            x => x
+        }
+    }
+}

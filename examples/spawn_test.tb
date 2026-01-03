@@ -1,4 +1,4 @@
-// Test spawn
+// Test spawn and receive
 
 mod spawn_test {
     pub fn simple() -> int {
@@ -22,5 +22,28 @@ mod spawn_test {
 
     fn add(a: int, b: int) -> int {
         a + b
+    }
+
+    // Wait for any message and return it
+    pub fn wait() -> int {
+        receive {
+            x => x
+        }
+    }
+
+    // Selective receive - only accept :ok messages
+    pub fn wait_ok() -> atom {
+        receive {
+            :ok => :ok
+        }
+    }
+
+    // Echo server: receive a message and send it back
+    pub fn echo_once(reply_to: pid) -> atom {
+        let msg = receive {
+            m => m
+        };
+        reply_to <- msg;
+        :done
     }
 }

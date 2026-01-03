@@ -504,32 +504,12 @@ impl CoreErlangEmitter {
             }
 
             Expr::Receive { arms, timeout } => {
-                self.emit("receive");
-                self.newline();
-                self.indent += 1;
-
-                for (i, arm) in arms.iter().enumerate() {
-                    self.emit_match_arm(arm)?;
-                    if i < arms.len() - 1 {
-                        self.newline();
-                    }
-                }
-
-                self.indent -= 1;
-                self.newline();
-
-                if let Some((time_expr, after_block)) = timeout {
-                    self.emit("after ");
-                    self.emit_expr(time_expr)?;
-                    self.emit(" ->");
-                    self.newline();
-                    self.indent += 1;
-                    self.emit_block(after_block)?;
-                    self.indent -= 1;
-                    self.newline();
-                }
-
-                self.emit("end");
+                // Core Erlang uses primops for receive, not a simple receive...end
+                // Structure:
+                // ( letrec
+                //     'recv$^N'/0 = fun () -> ...
+                //     in apply 'recv$^N'/0() )
+                self.emit_receive_primops(arms, timeout.as_ref())?;
             }
 
             Expr::Return(opt_expr) => {
@@ -651,6 +631,185 @@ impl CoreErlangEmitter {
             }
             self.emit_expr(arg)?;
         }
+        Ok(())
+    }
+
+    /// Emit receive using Core Erlang primops.
+    ///
+    /// Core Erlang doesn't have a simple `receive...end` construct.
+    /// Instead, it uses a letrec with primops:
+    /// - recv_peek_message() - returns {HasMessage, Message}
+    /// - remove_message() - removes current message from mailbox
+    /// - recv_next() - skips to next message (for selective receive)
+    /// - recv_wait_timeout(Timeout) - blocks until message or timeout
+    fn emit_receive_primops(
+        &mut self,
+        arms: &[MatchArm],
+        timeout: Option<&(Box<Expr>, Block)>,
+    ) -> CoreErlangResult<()> {
+        // Generate unique names for this receive
+        let recv_loop = self.fresh_var();
+        let has_msg_var = self.fresh_var();
+        let msg_var = self.fresh_var();
+        let timeout_var = self.fresh_var();
+        let other_var = self.fresh_var();
+
+        // ( letrec
+        self.emit("( letrec");
+        self.indent += 1;
+        self.newline();
+
+        // 'recv$^N'/0 =
+        self.emit(&format!("'{recv_loop}'/0 ="));
+        self.indent += 1;
+        self.newline();
+
+        // fun () ->
+        self.emit("fun () ->");
+        self.indent += 1;
+        self.newline();
+
+        // let <HasMsg, Msg> = primop 'recv_peek_message'()
+        self.emit(&format!(
+            "let <{has_msg_var},{msg_var}> = primop 'recv_peek_message'()"
+        ));
+        self.newline();
+
+        // in case HasMsg of
+        self.emit(&format!("in case {has_msg_var} of"));
+        self.indent += 1;
+        self.newline();
+
+        // <'true'> when 'true' -> (message available)
+        self.emit("<'true'> when 'true' ->");
+        self.indent += 1;
+        self.newline();
+
+        // case Msg of (pattern matching on the message)
+        self.emit(&format!("case {msg_var} of"));
+        self.indent += 1;
+        self.newline();
+
+        // Emit each arm with remove_message before the body
+        for arm in arms {
+            self.emit("<");
+            self.emit_pattern(&arm.pattern)?;
+            self.emit("> when ");
+
+            if let Some(guard) = &arm.guard {
+                self.emit_expr(guard)?;
+            } else {
+                self.emit("'true'");
+            }
+
+            self.emit(" ->");
+            self.indent += 1;
+            self.newline();
+
+            // do primop 'remove_message'() <body>
+            self.emit("do primop 'remove_message'()");
+            self.newline();
+            self.emit_expr(&arm.body)?;
+
+            self.indent -= 1;
+            self.newline();
+        }
+
+        // Catch-all: message doesn't match any pattern (selective receive)
+        self.emit(&format!("<{other_var}> when 'true' ->"));
+        self.indent += 1;
+        self.newline();
+        self.emit("do primop 'recv_next'()");
+        self.newline();
+        self.emit(&format!("apply '{recv_loop}'/0()"));
+        self.indent -= 1;
+
+        // end (case Msg of)
+        self.indent -= 1; // back to inner case level (same as case keyword)
+        self.newline();
+        self.emit("end");
+
+        // Back out of the true branch to outer case level
+        self.indent -= 1; // back to outer case level (same as <'true'> pattern)
+        self.newline();
+
+        // <'false'> when 'true' -> (no message available)
+        self.emit("<'false'> when 'true' ->");
+        self.indent += 1;
+        self.newline();
+
+        // Determine timeout expression
+        let timeout_expr = if let Some((time_expr, _)) = timeout {
+            // Clone the expression to format it
+            let mut timeout_emitter = CoreErlangEmitter::new();
+            timeout_emitter.emit_expr(time_expr)?;
+            timeout_emitter.output
+        } else {
+            "'infinity'".to_string()
+        };
+
+        // let <TimedOut> = primop 'recv_wait_timeout'(Timeout)
+        self.emit(&format!(
+            "let <{timeout_var}> = primop 'recv_wait_timeout'({timeout_expr})"
+        ));
+        self.newline();
+
+        // in case TimedOut of
+        self.emit(&format!("in case {timeout_var} of"));
+        self.indent += 1;
+        self.newline();
+
+        // <'true'> when 'true' -> (timed out)
+        self.emit("<'true'> when 'true' ->");
+        self.indent += 1;
+        self.newline();
+
+        if let Some((_, after_block)) = timeout {
+            // Emit the timeout body
+            self.emit_block(after_block)?;
+        } else {
+            // No timeout specified, this case shouldn't be reached with 'infinity'
+            self.emit("'true'");
+        }
+
+        self.indent -= 1;
+        self.newline();
+
+        // <'false'> when 'true' -> loop again
+        self.emit("<'false'> when 'true' ->");
+        self.indent += 1;
+        self.newline();
+        self.emit(&format!("apply '{recv_loop}'/0()"));
+        self.indent -= 1;
+
+        // end (case TimedOut of)
+        self.newline();
+        self.indent -= 1; // back to timeout case level
+        self.emit("end");
+
+        // Back out of the false branch to outer case level
+        self.indent -= 1; // back from false branch body to outer case level
+        self.newline();
+
+        // end (case HasMsg of)
+        self.emit("end");
+
+        // Close fun () -> and letrec function definition
+        // We're at outer case level (after <'false'> branch end)
+        // Need to go back to function definition level for "in apply"
+        self.indent -= 1; // back from outer case to in case level
+        self.indent -= 1; // back from in case to fun body level
+        self.indent -= 1; // back from fun body to function def level
+        self.newline();
+
+        // in apply 'recv$^N'/0()
+        self.emit(&format!("in apply '{recv_loop}'/0()"));
+        self.newline();
+        self.emit("-| ['letrec_goto'] )");
+
+        // Close letrec - ) already emitted above with annotation
+        self.indent -= 1;
+
         Ok(())
     }
 
