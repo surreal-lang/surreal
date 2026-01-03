@@ -1,0 +1,11 @@
+// Test importing and using stdlib modules
+
+use io::println;
+use list::{reverse, range};
+
+pub fn main() -> atom {
+    let items = range(1, 5);
+    let reversed = reverse(items);
+    println("Hello from stdlib!");
+    :ok
+}

@@ -710,10 +710,10 @@ impl CoreErlangEmitter {
                             self.emit_args(args)?;
                             self.emit(")");
                         } else if let Some((module, original_name)) = self.imports.get(name) {
-                            // Imported function call
+                            // Imported function call - add dream:: prefix for Dream stdlib modules
                             self.emit(&format!(
                                 "call '{}':'{}'(",
-                                module.to_lowercase(),
+                                Self::beam_module_name(&module.to_lowercase()),
                                 original_name
                             ));
                             self.emit_args(args)?;
