@@ -1,0 +1,28 @@
+// Test use statements
+mod math;
+
+use math::add;
+use math::{multiply, square};
+use math::add as plus;
+
+pub fn test_add() -> int {
+    add(2, 3)
+}
+
+pub fn test_multiply() -> int {
+    multiply(4, 5)
+}
+
+pub fn test_square() -> int {
+    square(6)
+}
+
+pub fn test_qualified() -> int {
+    // Still works with qualified calls
+    math::add(10, 20)
+}
+
+pub fn test_rename() -> int {
+    // Test renaming with `as`
+    plus(100, 200)
+}

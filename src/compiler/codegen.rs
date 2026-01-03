@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use crate::compiler::ast::{
     BinOp, BitEndianness, BitSegmentType, BitSignedness, BitStringSegment, Block, Expr, Function,
-    Item, Module as AstModule, Pattern as AstPattern, Stmt, UnaryOp,
+    Item, Module as AstModule, Pattern as AstPattern, Stmt, UnaryOp, UseDecl, UseTree,
 };
 use crate::instruction::{Instruction, Operand, Pattern as VmPattern, Register, Source};
 use crate::Module;
@@ -105,6 +105,8 @@ pub struct Codegen {
     regs: RegisterAllocator,
     /// Labels that need patching (instruction index → placeholder).
     pending_jumps: Vec<usize>,
+    /// Imported names: local_name → (module, original_name)
+    imports: HashMap<String, (String, String)>,
 }
 
 impl Codegen {
@@ -117,6 +119,28 @@ impl Codegen {
             exports: Vec::new(),
             regs: RegisterAllocator::new(),
             pending_jumps: Vec::new(),
+            imports: HashMap::new(),
+        }
+    }
+
+    /// Collect imports from a UseDecl into the imports map.
+    fn collect_imports(&mut self, use_decl: &UseDecl) {
+        match &use_decl.tree {
+            UseTree::Path { module, name, rename } => {
+                let local_name = rename.as_ref().unwrap_or(name).clone();
+                self.imports.insert(local_name, (module.clone(), name.clone()));
+            }
+            UseTree::Glob { module: _ } => {
+                // Glob imports require knowing what the module exports.
+                // For now, we skip glob imports in codegen.
+                // TODO: Implement glob imports when module metadata is available.
+            }
+            UseTree::Group { module, items } => {
+                for item in items {
+                    let local_name = item.rename.as_ref().unwrap_or(&item.name).clone();
+                    self.imports.insert(local_name, (module.clone(), item.name.clone()));
+                }
+            }
         }
     }
 
@@ -125,7 +149,14 @@ impl Codegen {
         let mut codegen = Codegen::new();
         codegen.module_name = ast.name.clone();
 
-        // Compile all functions
+        // First pass: collect all imports
+        for item in &ast.items {
+            if let Item::Use(use_decl) = item {
+                codegen.collect_imports(use_decl);
+            }
+        }
+
+        // Second pass: compile all functions
         for item in &ast.items {
             match item {
                 Item::Function(func) => {
@@ -139,6 +170,9 @@ impl Codegen {
                     // Module declarations should be resolved by the loader
                     // before codegen runs. If we reach here, it's an error.
                     // For now, just skip them to allow single-module compilation.
+                }
+                Item::Use(_) => {
+                    // Already processed in first pass
                 }
             }
         }
@@ -751,11 +785,20 @@ impl Codegen {
                 // Determine call target
                 match func.as_ref() {
                     Expr::Ident(name) => {
-                        // Local function call
-                        self.emit(Instruction::CallLocal {
-                            function: name.clone(),
-                            arity: args.len() as u8,
-                        });
+                        // Check if it's an imported function
+                        if let Some((module, original_name)) = self.imports.get(name) {
+                            self.emit(Instruction::CallMFA {
+                                module: module.clone(),
+                                function: original_name.clone(),
+                                arity: args.len() as u8,
+                            });
+                        } else {
+                            // Local function call
+                            self.emit(Instruction::CallLocal {
+                                function: name.clone(),
+                                arity: args.len() as u8,
+                            });
+                        }
                     }
                     Expr::Path { segments } => {
                         if segments.len() == 2 {
@@ -945,12 +988,22 @@ impl Codegen {
 
                         match func.as_ref() {
                             Expr::Ident(name) => {
-                                self.emit(Instruction::SpawnMFA {
-                                    module: self.module_name.clone(),
-                                    function: name.clone(),
-                                    arity: args.len() as u8,
-                                    dest,
-                                });
+                                // Check if it's an imported function
+                                if let Some((module, original_name)) = self.imports.get(name) {
+                                    self.emit(Instruction::SpawnMFA {
+                                        module: module.clone(),
+                                        function: original_name.clone(),
+                                        arity: args.len() as u8,
+                                        dest,
+                                    });
+                                } else {
+                                    self.emit(Instruction::SpawnMFA {
+                                        module: self.module_name.clone(),
+                                        function: name.clone(),
+                                        arity: args.len() as u8,
+                                        dest,
+                                    });
+                                }
                             }
                             Expr::Path { segments } if segments.len() == 2 => {
                                 self.emit(Instruction::SpawnMFA {

@@ -57,6 +57,11 @@ impl<'source> Parser<'source> {
 
     /// Parse a top-level item.
     pub fn parse_item(&mut self) -> ParseResult<Item> {
+        // Use statements don't have pub modifier
+        if self.check(&Token::Use) {
+            return self.parse_use_decl();
+        }
+
         let is_pub = self.check(&Token::Pub);
         if is_pub {
             self.advance();
@@ -73,7 +78,7 @@ impl<'source> Parser<'source> {
         } else {
             let span = self.current_span();
             Err(ParseError::new(
-                "expected `fn`, `struct`, `enum`, or `mod`",
+                "expected `fn`, `struct`, `enum`, `mod`, or `use`",
                 span,
             ))
         }
@@ -85,6 +90,59 @@ impl<'source> Parser<'source> {
         let name = self.expect_ident()?;
         self.expect(&Token::Semi)?;
         Ok(Item::ModDecl(ModDecl { name, is_pub }))
+    }
+
+    /// Parse a use declaration: `use foo::bar;` or `use foo::{a, b};` or `use foo::*;`
+    fn parse_use_decl(&mut self) -> ParseResult<Item> {
+        self.expect(&Token::Use)?;
+        let module = self.expect_ident()?;
+        self.expect(&Token::ColonColon)?;
+
+        let tree = if self.check(&Token::Star) {
+            // Glob import: use foo::*;
+            self.advance();
+            self.expect(&Token::Semi)?;
+            UseTree::Glob { module }
+        } else if self.check(&Token::LBrace) {
+            // Group import: use foo::{a, b as c};
+            self.advance();
+            let mut items = Vec::new();
+
+            if !self.check(&Token::RBrace) {
+                loop {
+                    let name = self.expect_ident()?;
+                    let rename = if self.check(&Token::As) {
+                        self.advance();
+                        Some(self.expect_ident()?)
+                    } else {
+                        None
+                    };
+                    items.push(UseTreeItem { name, rename });
+
+                    if !self.check(&Token::Comma) {
+                        break;
+                    }
+                    self.advance();
+                }
+            }
+
+            self.expect(&Token::RBrace)?;
+            self.expect(&Token::Semi)?;
+            UseTree::Group { module, items }
+        } else {
+            // Single import: use foo::bar; or use foo::bar as baz;
+            let name = self.expect_ident()?;
+            let rename = if self.check(&Token::As) {
+                self.advance();
+                Some(self.expect_ident()?)
+            } else {
+                None
+            };
+            self.expect(&Token::Semi)?;
+            UseTree::Path { module, name, rename }
+        };
+
+        Ok(Item::Use(UseDecl { tree }))
     }
 
     /// Parse a function definition.

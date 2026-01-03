@@ -30,6 +30,8 @@ pub enum Item {
     Enum(EnumDef),
     /// External module declaration: `mod foo;`
     ModDecl(ModDecl),
+    /// Use declaration: `use foo::bar;`
+    Use(UseDecl),
 }
 
 /// External module declaration.
@@ -38,6 +40,37 @@ pub enum Item {
 pub struct ModDecl {
     pub name: String,
     pub is_pub: bool,
+}
+
+/// Use declaration for importing names.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UseDecl {
+    pub tree: UseTree,
+}
+
+/// A use tree representing what to import.
+#[derive(Debug, Clone, PartialEq)]
+pub enum UseTree {
+    /// Simple path: `use foo::bar;` or `use foo::bar as baz;`
+    Path {
+        module: String,
+        name: String,
+        rename: Option<String>,
+    },
+    /// Glob import: `use foo::*;`
+    Glob { module: String },
+    /// Grouped imports: `use foo::{a, b as c};`
+    Group {
+        module: String,
+        items: Vec<UseTreeItem>,
+    },
+}
+
+/// An item in a use group.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UseTreeItem {
+    pub name: String,
+    pub rename: Option<String>,
 }
 
 /// A function definition.

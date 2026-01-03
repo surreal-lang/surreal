@@ -3,9 +3,11 @@
 //! This module generates Core Erlang source code from the AST,
 //! which can then be compiled to BEAM bytecode using `erlc +from_core`.
 
+use std::collections::HashMap;
+
 use crate::compiler::ast::{
     BinOp, BitEndianness, BitSegmentType, BitSignedness, BitStringSegment, Block, Expr, Function,
-    Item, MatchArm, Module, Pattern, Stmt, UnaryOp,
+    Item, MatchArm, Module, Pattern, Stmt, UnaryOp, UseDecl, UseTree,
 };
 
 /// Core Erlang emitter error.
@@ -42,6 +44,8 @@ pub struct CoreErlangEmitter {
     /// Current module name (needed for local function calls)
     #[allow(dead_code)]
     module_name: String,
+    /// Imported names: local_name → (module, original_name)
+    imports: HashMap<String, (String, String)>,
 }
 
 impl CoreErlangEmitter {
@@ -51,6 +55,27 @@ impl CoreErlangEmitter {
             indent: 0,
             var_counter: 0,
             module_name: String::new(),
+            imports: HashMap::new(),
+        }
+    }
+
+    /// Collect imports from a UseDecl into the imports map.
+    fn collect_imports(&mut self, use_decl: &UseDecl) {
+        match &use_decl.tree {
+            UseTree::Path { module, name, rename } => {
+                let local_name = rename.as_ref().unwrap_or(name).clone();
+                self.imports.insert(local_name, (module.clone(), name.clone()));
+            }
+            UseTree::Glob { module: _ } => {
+                // Glob imports require knowing what the module exports.
+                // TODO: Implement glob imports when module metadata is available.
+            }
+            UseTree::Group { module, items } => {
+                for item in items {
+                    let local_name = item.rename.as_ref().unwrap_or(&item.name).clone();
+                    self.imports.insert(local_name, (module.clone(), item.name.clone()));
+                }
+            }
         }
     }
 
@@ -188,6 +213,13 @@ impl CoreErlangEmitter {
     /// Emit a complete Core Erlang module.
     pub fn emit_module(&mut self, module: &Module) -> CoreErlangResult<String> {
         self.module_name = module.name.clone();
+
+        // First pass: collect all imports
+        for item in &module.items {
+            if let Item::Use(use_decl) = item {
+                self.collect_imports(use_decl);
+            }
+        }
 
         // Module header
         self.emit(&format!("module '{}'", module.name));
@@ -490,6 +522,15 @@ impl CoreErlangEmitter {
                         // Check if it's a BIF (built-in function)
                         if Self::is_bif(name) {
                             self.emit(&format!("call 'erlang':'{}'(", name));
+                            self.emit_args(args)?;
+                            self.emit(")");
+                        } else if let Some((module, original_name)) = self.imports.get(name) {
+                            // Imported function call
+                            self.emit(&format!(
+                                "call '{}':'{}'(",
+                                module.to_lowercase(),
+                                original_name
+                            ));
                             self.emit_args(args)?;
                             self.emit(")");
                         } else {

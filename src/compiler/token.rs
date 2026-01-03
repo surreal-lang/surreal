@@ -39,6 +39,10 @@ pub enum Token {
     After,
     #[token("return")]
     Return,
+    #[token("use")]
+    Use,
+    #[token("as")]
+    As,
     #[token("true")]
     True,
     #[token("false")]
@@ -172,6 +176,8 @@ impl std::fmt::Display for Token {
             Token::Receive => write!(f, "receive"),
             Token::After => write!(f, "after"),
             Token::Return => write!(f, "return"),
+            Token::Use => write!(f, "use"),
+            Token::As => write!(f, "as"),
             Token::True => write!(f, "true"),
             Token::False => write!(f, "false"),
             Token::Int(n) => write!(f, "{}", n),
@@ -309,15 +315,15 @@ mod tests {
 
     #[test]
     fn test_rust_keywords_are_valid_idents() {
-        // This isn't Rust - we can use Rust keywords as identifiers
-        let mut lex = Token::lexer("loop while for impl trait type use crate super");
+        // This isn't Rust - we can use most Rust keywords as identifiers
+        // (except `use` and `as` which are now keywords in ToyBEAM)
+        let mut lex = Token::lexer("loop while for impl trait type crate super");
         assert_eq!(lex.next(), Some(Ok(Token::Ident("loop".to_string()))));
         assert_eq!(lex.next(), Some(Ok(Token::Ident("while".to_string()))));
         assert_eq!(lex.next(), Some(Ok(Token::Ident("for".to_string()))));
         assert_eq!(lex.next(), Some(Ok(Token::Ident("impl".to_string()))));
         assert_eq!(lex.next(), Some(Ok(Token::Ident("trait".to_string()))));
         assert_eq!(lex.next(), Some(Ok(Token::Ident("type".to_string()))));
-        assert_eq!(lex.next(), Some(Ok(Token::Ident("use".to_string()))));
         assert_eq!(lex.next(), Some(Ok(Token::Ident("crate".to_string()))));
         assert_eq!(lex.next(), Some(Ok(Token::Ident("super".to_string()))));
     }
