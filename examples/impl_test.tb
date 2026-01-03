@@ -47,7 +47,19 @@ pub fn test_pipe_chain() -> Point {
         |> Point::add(3, 4)
 }
 
-// Simple main for VM testing (no field access)
+// Test struct pattern matching (with shorthand syntax)
+pub fn get_x(p: Point) -> int {
+    match p {
+        Point { x, .. } => x,
+    }
+}
+
+pub fn test_pattern() -> int {
+    let p = Point::new(42, 100);
+    get_x(p)
+}
+
+// Simple main for VM testing
 pub fn main() -> int {
-    Point::sum(10, 20)
+    test_pattern()
 }

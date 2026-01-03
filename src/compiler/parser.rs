@@ -1205,14 +1205,29 @@ impl<'source> Parser<'source> {
                 });
             }
 
-            // Struct pattern: Name { field: pattern, ... }
+            // Struct pattern: Name { field: pattern, ... } or Name { field, ... } or Name { field, .. }
             if self.check(&Token::LBrace) {
                 self.advance();
                 let mut fields = Vec::new();
                 while !self.check(&Token::RBrace) && !self.is_at_end() {
+                    // Check for rest pattern `..` (ignores remaining fields)
+                    if self.check(&Token::DotDot) {
+                        self.advance();
+                        // `..` must be last, skip to closing brace
+                        break;
+                    }
+
                     let field_name = self.expect_ident()?;
-                    self.expect(&Token::Colon)?;
-                    let field_pattern = self.parse_pattern()?;
+
+                    // Support shorthand: `x` is equivalent to `x: x`
+                    let field_pattern = if self.check(&Token::Colon) {
+                        self.advance();
+                        self.parse_pattern()?
+                    } else {
+                        // Shorthand: field name becomes binding pattern
+                        Pattern::Ident(field_name.clone())
+                    };
+
                     fields.push((field_name, field_pattern));
 
                     if self.check(&Token::Comma) {
@@ -1835,6 +1850,83 @@ mod tests {
                     // ok
                 } else {
                     panic!("expected list cons pattern");
+                }
+            } else {
+                panic!("expected match");
+            }
+        } else {
+            panic!("expected function");
+        }
+    }
+
+    #[test]
+    fn test_parse_struct_pattern() {
+        let source = r#"
+            mod test {
+                struct Point { x: int, y: int }
+
+                fn get_x(p: Point) -> int {
+                    match p {
+                        Point { x, y: _ } => x,
+                    }
+                }
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        if let Item::Function(f) = &module.items[1] {
+            if let Some(Expr::Match { arms, .. }) = f.body.expr.as_deref() {
+                if let Pattern::Struct { name, fields } = &arms[0].pattern {
+                    assert_eq!(name, "Point");
+                    assert_eq!(fields.len(), 2);
+                    assert_eq!(fields[0].0, "x");
+                    assert_eq!(fields[1].0, "y");
+                    // x uses shorthand (becomes Ident("x"))
+                    if let Pattern::Ident(n) = &fields[0].1 {
+                        assert_eq!(n, "x");
+                    } else {
+                        panic!("expected ident pattern for shorthand");
+                    }
+                    // y: _ uses wildcard
+                    assert!(matches!(fields[1].1, Pattern::Wildcard));
+                } else {
+                    panic!("expected struct pattern");
+                }
+            } else {
+                panic!("expected match");
+            }
+        } else {
+            panic!("expected function");
+        }
+    }
+
+    #[test]
+    fn test_parse_struct_pattern_rest() {
+        // Test the `..` rest pattern
+        let source = r#"
+            mod test {
+                struct Point { x: int, y: int, z: int }
+
+                fn get_x(p: Point) -> int {
+                    match p {
+                        Point { x, .. } => x,
+                    }
+                }
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        if let Item::Function(f) = &module.items[1] {
+            if let Some(Expr::Match { arms, .. }) = f.body.expr.as_deref() {
+                if let Pattern::Struct { name, fields } = &arms[0].pattern {
+                    assert_eq!(name, "Point");
+                    // Only x is captured, .. ignores y and z
+                    assert_eq!(fields.len(), 1);
+                    assert_eq!(fields[0].0, "x");
+                } else {
+                    panic!("expected struct pattern");
                 }
             } else {
                 panic!("expected match");

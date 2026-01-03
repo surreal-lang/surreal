@@ -156,6 +156,8 @@ pub enum Token {
     Colon,
     #[token(";")]
     Semi,
+    #[token("..")]
+    DotDot,
     #[token(".")]
     Dot,
     #[token("_")]
@@ -230,6 +232,7 @@ impl std::fmt::Display for Token {
             Token::Comma => write!(f, ","),
             Token::Colon => write!(f, ":"),
             Token::Semi => write!(f, ";"),
+            Token::DotDot => write!(f, ".."),
             Token::Dot => write!(f, "."),
             Token::Underscore => write!(f, "_"),
         }

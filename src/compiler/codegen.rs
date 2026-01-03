@@ -1301,18 +1301,31 @@ impl Codegen {
             }
 
             AstPattern::Struct { name, fields } => {
-                // Struct pattern becomes tuple pattern: {:Name, field1, field2, ...}
+                // Struct pattern becomes map pattern with __struct__ check
                 // Check if the struct name is imported
                 let tag_name = if let Some((module, original_name)) = self.imports.get(name) {
                     format!("{}_{}", module, original_name)
                 } else {
                     name.clone()
                 };
-                let mut vm_patterns = vec![VmPattern::Atom(tag_name)];
-                for (_, field_pattern) in fields {
-                    vm_patterns.push(self.compile_pattern(field_pattern)?);
+
+                let mut map_patterns = Vec::new();
+
+                // Add __struct__ => StructName pattern
+                map_patterns.push((
+                    VmPattern::Atom("__struct__".to_string()),
+                    VmPattern::Atom(tag_name),
+                ));
+
+                // Add field patterns
+                for (field_name, field_pattern) in fields {
+                    map_patterns.push((
+                        VmPattern::Atom(field_name.clone()),
+                        self.compile_pattern(field_pattern)?,
+                    ));
                 }
-                Ok(VmPattern::Tuple(vm_patterns))
+
+                Ok(VmPattern::Map(map_patterns))
             }
 
             AstPattern::Enum {
