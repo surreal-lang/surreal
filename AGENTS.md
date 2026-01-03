@@ -1,31 +1,28 @@
 # Dream
 
-A BEAM virtual machine in Rust that compiles to WebAssembly.
+A programming language with Rust-like syntax that compiles to Core Erlang and runs on the BEAM.
 
 ## Goal
 
-Build a Rust-like syntax language that compiles to Dream bytecode, combining Rust's syntax with Erlang's concurrency semantics (processes, message passing, pattern matching).
+Combine Rust's familiar syntax with Erlang's battle-tested concurrency model (processes, message passing, pattern matching), compiling to Core Erlang for execution on the BEAM VM.
 
 ## Architecture
 
 ```
-Source Code → Lexer → Parser → AST → Codegen → Dream Bytecode
-                                                      ↓
-                                              Dream VM (Rust/WASM)
+Source Code → Lexer → Parser → AST → Codegen → Core Erlang → BEAM
 ```
 
-## Current VM Features
+## Language Features
 
-- **Processes**: spawn, spawn_link, parent tracking
-- **Message Passing**: send, receive, receive_timeout, receive_match (selective)
+- **Processes**: spawn, spawn_link, self()
+- **Message Passing**: send (`!`), receive, receive with timeout
 - **Links & Monitors**: bidirectional crash notification, one-way DOWN messages
 - **Process Registry**: register/unregister/whereis named processes
-- **Data Types**: integers, atoms, tuples, lists, strings, PIDs
-- **Pattern Matching**: wildcards, variables, literals, tuple/list destructuring
-- **Control Flow**: jump, jump_if, jump_unless, call, return
-- **Stack**: push, pop operations
-- **Arithmetic**: add, sub, mul, div, mod
-- **Comparisons**: eq, ne, lt, lte, gt, gte
+- **Data Types**: integers, atoms, tuples, lists, strings, PIDs, binaries
+- **Pattern Matching**: wildcards, variables, literals, tuple/list/struct destructuring, guards
+- **Structs & Enums**: Rust-style type definitions
+- **Traits**: trait definitions and implementations
+- **Pipe Operator**: `|>` for function chaining
 
 ## Building
 
@@ -33,15 +30,15 @@ Source Code → Lexer → Parser → AST → Codegen → Dream Bytecode
 # Run tests
 cargo test
 
-# Build WASM
-wasm-pack build --target web
+# Build the compiler
+cargo build --release
 ```
 
 ## Commands
 
 - `cargo test` - run all tests
 - `cargo check` - type check
-- `wasm-pack build --target web` - build WASM package
+- `cargo build --release` - build compiler
 
 ---
 
