@@ -1,0 +1,26 @@
+// Test spawn
+
+mod spawn_test {
+    pub fn simple() -> int {
+        3
+    }
+
+    pub fn get_self() -> pid {
+        self()
+    }
+
+    // Spawn a process that runs a function
+    pub fn test_spawn() -> pid {
+        spawn(simple())
+    }
+
+    // Test spawning with closure
+    pub fn spawn_adder() -> pid {
+        let x = 10;
+        spawn(add(x, 5))
+    }
+
+    fn add(a: int, b: int) -> int {
+        a + b
+    }
+}

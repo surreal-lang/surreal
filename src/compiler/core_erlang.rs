@@ -77,6 +77,76 @@ impl CoreErlangEmitter {
         }
     }
 
+    /// Check if a function name is a built-in function (BIF).
+    fn is_bif(name: &str) -> bool {
+        matches!(
+            name,
+            "self"
+                | "is_atom"
+                | "is_binary"
+                | "is_integer"
+                | "is_float"
+                | "is_list"
+                | "is_tuple"
+                | "is_pid"
+                | "is_reference"
+                | "is_function"
+                | "is_map"
+                | "is_boolean"
+                | "is_number"
+                | "hd"
+                | "tl"
+                | "length"
+                | "tuple_size"
+                | "map_size"
+                | "element"
+                | "setelement"
+                | "make_ref"
+                | "throw"
+                | "error"
+                | "exit"
+                | "abs"
+                | "trunc"
+                | "round"
+                | "float"
+                | "atom_to_list"
+                | "list_to_atom"
+                | "integer_to_list"
+                | "list_to_integer"
+                | "float_to_list"
+                | "list_to_float"
+                | "tuple_to_list"
+                | "list_to_tuple"
+                | "binary_to_list"
+                | "list_to_binary"
+                | "term_to_binary"
+                | "binary_to_term"
+                | "size"
+                | "byte_size"
+                | "bit_size"
+                | "node"
+                | "nodes"
+                | "now"
+                | "time"
+                | "date"
+                | "register"
+                | "unregister"
+                | "whereis"
+                | "registered"
+                | "link"
+                | "unlink"
+                | "spawn_link"
+                | "monitor"
+                | "demonitor"
+                | "process_info"
+                | "processes"
+                | "put"
+                | "get"
+                | "erase"
+                | "get_keys"
+        )
+    }
+
     /// Emit a string to the output.
     fn emit(&mut self, s: &str) {
         self.output.push_str(s);
@@ -285,11 +355,18 @@ impl CoreErlangEmitter {
                 // Check if it's a local function call or external
                 match func.as_ref() {
                     Expr::Ident(name) => {
-                        // Local function call
-                        self.emit(&format!("apply '{}'/{}", name, args.len()));
-                        self.emit("(");
-                        self.emit_args(args)?;
-                        self.emit(")");
+                        // Check if it's a BIF (built-in function)
+                        if Self::is_bif(name) {
+                            self.emit(&format!("call 'erlang':'{}'(", name));
+                            self.emit_args(args)?;
+                            self.emit(")");
+                        } else {
+                            // Local function call
+                            self.emit(&format!("apply '{}'/{}", name, args.len()));
+                            self.emit("(");
+                            self.emit_args(args)?;
+                            self.emit(")");
+                        }
                     }
                     Expr::Path { segments } if segments.len() == 2 => {
                         // Module:Function call
@@ -387,23 +464,35 @@ impl CoreErlangEmitter {
             }
 
             Expr::Spawn(expr) => {
-                self.emit("call 'erlang':'spawn'(fun () ->");
+                // Core Erlang requires binding the fun to a variable first
+                let tmp_var = self.fresh_var();
+                self.emit(&format!("let <{}> =", tmp_var));
+                self.newline();
+                self.indent += 1;
+                self.emit("fun () ->");
                 self.newline();
                 self.indent += 1;
                 self.emit_expr(expr)?;
                 self.indent -= 1;
+                self.indent -= 1;
                 self.newline();
-                self.emit("end)");
+                self.emit(&format!("in call 'erlang':'spawn'({})", tmp_var));
             }
 
             Expr::SpawnClosure(block) => {
-                self.emit("call 'erlang':'spawn'(fun () ->");
+                // Core Erlang requires binding the fun to a variable first
+                let tmp_var = self.fresh_var();
+                self.emit(&format!("let <{}> =", tmp_var));
+                self.newline();
+                self.indent += 1;
+                self.emit("fun () ->");
                 self.newline();
                 self.indent += 1;
                 self.emit_block(block)?;
                 self.indent -= 1;
+                self.indent -= 1;
                 self.newline();
-                self.emit("end)");
+                self.emit(&format!("in call 'erlang':'spawn'({})", tmp_var));
             }
 
             Expr::Send { to, msg } => {
@@ -419,12 +508,15 @@ impl CoreErlangEmitter {
                 self.newline();
                 self.indent += 1;
 
-                for arm in arms {
+                for (i, arm) in arms.iter().enumerate() {
                     self.emit_match_arm(arm)?;
-                    self.newline();
+                    if i < arms.len() - 1 {
+                        self.newline();
+                    }
                 }
 
                 self.indent -= 1;
+                self.newline();
 
                 if let Some((time_expr, after_block)) = timeout {
                     self.emit("after ");
