@@ -65,8 +65,17 @@ pub enum Token {
     })]
     String(String),
 
+    // Simple atoms: :ok, :error, :my_atom
     #[regex(r":[a-z_][a-z0-9_]*", |lex| Some(lex.slice()[1..].to_string()))]
     Atom(String),
+
+    // Quoted atoms for Elixir modules: :'Elixir.Enum', :'my-atom'
+    #[regex(r":'[^']*'", |lex| {
+        let s = lex.slice();
+        // Extract content between :' and '
+        Some(s[2..s.len()-1].to_string())
+    })]
+    QuotedAtom(String),
 
     #[regex(r"[a-z_][a-z0-9_]*", |lex| Some(lex.slice().to_string()), priority = 1)]
     Ident(String),
@@ -196,6 +205,7 @@ impl std::fmt::Display for Token {
             Token::Int(n) => write!(f, "{}", n),
             Token::String(s) => write!(f, "\"{}\"", s),
             Token::Atom(a) => write!(f, ":{}", a),
+            Token::QuotedAtom(a) => write!(f, ":'{}'", a),
             Token::Ident(s) => write!(f, "{}", s),
             Token::TypeIdent(s) => write!(f, "{}", s),
             Token::Big => write!(f, "big"),

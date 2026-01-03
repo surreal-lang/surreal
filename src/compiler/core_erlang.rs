@@ -966,6 +966,13 @@ impl CoreErlangEmitter {
                 }
             }
 
+            Expr::ExternCall { module, function, args } => {
+                // External function call: :erlang::abs(x) → call 'erlang':'abs'(X)
+                self.emit(&format!("call '{}':'{}'(", module, function));
+                self.emit_args(args)?;
+                self.emit(")");
+            }
+
             Expr::Pipe { left, right } => {
                 // Transform `left |> right` where right is typically a call expression.
                 // `a |> f(b, c)` becomes `f(a, b, c)`
@@ -1548,5 +1555,61 @@ mod tests {
 
         let result = emit_core_erlang(source).unwrap();
         assert!(result.contains("call 'erlang':'spawn'"));
+    }
+
+    #[test]
+    fn test_extern_call() {
+        let source = r#"
+            mod test {
+                pub fn abs_value(x: int) -> int {
+                    :erlang::abs(x)
+                }
+            }
+        "#;
+
+        let result = emit_core_erlang(source).unwrap();
+        assert!(result.contains("call 'erlang':'abs'(X)"));
+    }
+
+    #[test]
+    fn test_extern_call_lists() {
+        let source = r#"
+            mod test {
+                pub fn rev(items: [int]) -> [int] {
+                    :lists::reverse(items)
+                }
+            }
+        "#;
+
+        let result = emit_core_erlang(source).unwrap();
+        assert!(result.contains("call 'lists':'reverse'(Items)"));
+    }
+
+    #[test]
+    fn test_extern_call_multiple_args() {
+        let source = r#"
+            mod test {
+                pub fn max_val(a: int, b: int) -> int {
+                    :erlang::max(a, b)
+                }
+            }
+        "#;
+
+        let result = emit_core_erlang(source).unwrap();
+        assert!(result.contains("call 'erlang':'max'(A, B)"));
+    }
+
+    #[test]
+    fn test_quoted_atom_extern_call() {
+        let source = r#"
+            mod test {
+                pub fn map_items(items: [int]) -> [int] {
+                    :'Elixir.Enum'::to_list(items)
+                }
+            }
+        "#;
+
+        let result = emit_core_erlang(source).unwrap();
+        assert!(result.contains("call 'Elixir.Enum':'to_list'(Items)"));
     }
 }

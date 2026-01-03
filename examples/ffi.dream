@@ -1,0 +1,17 @@
+// FFI example - calling Erlang/OTP functions from Dream
+
+pub fn main() -> int {
+    // Call erlang:abs/1
+    let result = :erlang::abs(-42);
+    result
+}
+
+pub fn reverse_list(items: [int]) -> [int] {
+    // Call lists:reverse/1
+    :lists::reverse(items)
+}
+
+pub fn max_value(a: int, b: int) -> int {
+    // Call erlang:max/2
+    :erlang::max(a, b)
+}

@@ -792,8 +792,40 @@ impl<'source> Parser<'source> {
             return Ok(Expr::String(s));
         }
 
-        if let Some(Token::Atom(a)) = self.peek().cloned() {
-            self.advance();
+        // Check for atom or quoted atom (for extern calls or literal atoms)
+        let atom_name = match self.peek().cloned() {
+            Some(Token::Atom(a)) => {
+                self.advance();
+                Some(a)
+            }
+            Some(Token::QuotedAtom(a)) => {
+                self.advance();
+                Some(a)
+            }
+            _ => None,
+        };
+
+        if let Some(a) = atom_name {
+            // Check for extern call: :module::function(args)
+            if self.check(&Token::ColonColon) {
+                self.advance();
+                let function = self.expect_ident()?;
+                self.expect(&Token::LParen)?;
+                let mut args = Vec::new();
+                if !self.check(&Token::RParen) {
+                    args.push(self.parse_expr()?);
+                    while self.check(&Token::Comma) {
+                        self.advance();
+                        args.push(self.parse_expr()?);
+                    }
+                }
+                self.expect(&Token::RParen)?;
+                return Ok(Expr::ExternCall {
+                    module: a,
+                    function,
+                    args,
+                });
+            }
             return Ok(Expr::Atom(a));
         }
 

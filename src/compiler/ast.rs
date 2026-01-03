@@ -231,6 +231,15 @@ pub enum Expr {
     Unit,
     /// Bit string / binary expression: `<<1, 2, X:16/little>>`.
     BitString(Vec<BitStringSegment<Box<Expr>>>),
+    /// External function call: `:erlang::abs(-5)` → erlang:abs(-5) in Core Erlang.
+    ExternCall {
+        /// The module atom (e.g., "erlang", "lists", "Elixir.Enum")
+        module: String,
+        /// The function name
+        function: String,
+        /// Arguments to the function
+        args: Vec<Expr>,
+    },
 }
 
 /// A match arm.

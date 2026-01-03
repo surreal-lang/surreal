@@ -309,7 +309,7 @@ impl Codegen {
     /// Check if an expression contains a function call (which could clobber registers).
     fn contains_call(expr: &Expr) -> bool {
         match expr {
-            Expr::Call { .. } | Expr::Spawn(_) | Expr::SpawnClosure(_) | Expr::Pipe { .. } => true,
+            Expr::Call { .. } | Expr::Spawn(_) | Expr::SpawnClosure(_) | Expr::Pipe { .. } | Expr::ExternCall { .. } => true,
             Expr::Binary { left, right, .. } => Self::contains_call(left) || Self::contains_call(right),
             Expr::Unary { expr, .. } => Self::contains_call(expr),
             Expr::If { cond, then_block, else_block } => {
@@ -1265,6 +1265,36 @@ impl Codegen {
                         "pipe right-hand side must be a function call or identifier",
                     )),
                 }
+            }
+
+            Expr::ExternCall {
+                module,
+                function,
+                args,
+            } => {
+                // External function call - compile as MFA call
+                let saved_next = self.regs.next_reg;
+
+                // Compile arguments into R0, R1, ...
+                for (i, arg) in args.iter().enumerate() {
+                    let arg_reg = self.compile_expr(arg)?;
+                    if arg_reg.0 != i as u8 {
+                        self.emit(Instruction::Move {
+                            source: arg_reg,
+                            dest: Register(i as u8),
+                        });
+                    }
+                }
+
+                // Call the external function
+                self.emit(Instruction::CallMFA {
+                    module: module.clone(),
+                    function: function.clone(),
+                    arity: args.len() as u8,
+                });
+
+                self.regs.next_reg = saved_next.max(1);
+                Ok(Register(0))
             }
         }
     }
