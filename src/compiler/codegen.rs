@@ -3,7 +3,8 @@
 use std::collections::HashMap;
 
 use crate::compiler::ast::{
-    BinOp, Block, Expr, Function, Item, Module as AstModule, Pattern as AstPattern, Stmt, UnaryOp,
+    BinOp, BitEndianness, BitSegmentType, BitSignedness, Block, Expr, Function, Item,
+    Module as AstModule, Pattern as AstPattern, Stmt, UnaryOp,
 };
 use crate::instruction::{Instruction, Operand, Pattern as VmPattern, Register, Source};
 use crate::Module;
@@ -991,6 +992,67 @@ impl Codegen {
                 self.emit(Instruction::LoadInt { value: 0, dest });
                 Ok(dest)
             }
+
+            Expr::BitString(segments) => {
+                // Compile bit string construction
+                let dest = self.regs.alloc();
+
+                // Convert AST segments to VM segments
+                let mut vm_segments = Vec::new();
+                for seg in segments {
+                    // Compile the value expression
+                    let value_reg = self.compile_expr(&seg.value)?;
+
+                    // Convert AST types to instruction types
+                    let bit_type = match seg.segment_type {
+                        BitSegmentType::Integer => crate::BitType::Integer,
+                        BitSegmentType::Float => crate::BitType::Float,
+                        BitSegmentType::Binary => crate::BitType::Binary,
+                        BitSegmentType::Utf8 => crate::BitType::Utf8,
+                    };
+
+                    let endianness = match seg.endianness {
+                        BitEndianness::Big => crate::Endianness::Big,
+                        BitEndianness::Little => crate::Endianness::Little,
+                    };
+
+                    let signedness = match seg.signedness {
+                        BitSignedness::Unsigned => crate::Signedness::Unsigned,
+                        BitSignedness::Signed => crate::Signedness::Signed,
+                    };
+
+                    // Get size (default 8 bits for integer)
+                    let size = if let Some(size_expr) = &seg.size {
+                        match size_expr.as_ref() {
+                            Expr::Int(n) => Some(*n as u32),
+                            _ => Some(8), // TODO: handle dynamic sizes
+                        }
+                    } else {
+                        match bit_type {
+                            crate::BitType::Integer => Some(8),
+                            crate::BitType::Float => Some(64),
+                            crate::BitType::Binary => None, // rest
+                            crate::BitType::Utf8 => None,
+                        }
+                    };
+
+                    let bit_segment = crate::BitSegment {
+                        bit_type,
+                        size,
+                        endianness,
+                        signedness,
+                    };
+
+                    vm_segments.push((crate::SegmentSource::Reg(value_reg), bit_segment));
+                }
+
+                self.emit(Instruction::BinaryConstructSegments {
+                    segments: vm_segments,
+                    dest,
+                });
+
+                Ok(dest)
+            }
         }
     }
 
@@ -1071,6 +1133,42 @@ impl Codegen {
                         vm_patterns.push(self.compile_pattern(field_pattern)?);
                     }
                     Ok(VmPattern::Tuple(vm_patterns))
+                }
+            }
+
+            AstPattern::BitString(segments) => {
+                // For now, compile to a simple binary pattern
+                // Full bit string pattern matching would require runtime support
+                if segments.is_empty() {
+                    // Empty binary pattern: <<>>
+                    Ok(VmPattern::Binary(vec![]))
+                } else if segments.len() == 1 {
+                    // Single segment with literal - extract bytes if possible
+                    let seg = &segments[0];
+                    if let AstPattern::Int(n) = seg.value.as_ref() {
+                        let size = if let Some(size_expr) = &seg.size {
+                            if let Expr::Int(s) = size_expr.as_ref() {
+                                (*s as usize + 7) / 8
+                            } else {
+                                1
+                            }
+                        } else {
+                            1
+                        };
+                        let mut bytes = Vec::with_capacity(size);
+                        for i in (0..size).rev() {
+                            bytes.push(((*n >> (i * 8)) & 0xFF) as u8);
+                        }
+                        Ok(VmPattern::Binary(bytes))
+                    } else {
+                        // Variable pattern - use wildcard for now
+                        // TODO: implement full bit string pattern matching
+                        Ok(VmPattern::Wildcard)
+                    }
+                } else {
+                    // Multiple segments - use wildcard for now
+                    // TODO: implement full bit string pattern matching
+                    Ok(VmPattern::Wildcard)
                 }
             }
         }

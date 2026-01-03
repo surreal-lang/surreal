@@ -148,6 +148,8 @@ pub enum Expr {
     Return(Option<Box<Expr>>),
     /// Unit expression: `()`.
     Unit,
+    /// Bit string / binary expression: `<<1, 2, X:16/little>>`.
+    BitString(Vec<BitStringSegment<Box<Expr>>>),
 }
 
 /// A match arm.
@@ -260,6 +262,73 @@ pub enum Pattern {
         variant: String,
         fields: Vec<Pattern>,
     },
+    /// Bit string / binary pattern: `<<A:8, B:16/little, Rest/binary>>`.
+    BitString(Vec<BitStringSegment<Box<Pattern>>>),
+}
+
+// ========== Bit String / Binary Syntax ==========
+
+/// Type specifier for a binary segment
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BitSegmentType {
+    /// Integer (default)
+    #[default]
+    Integer,
+    /// IEEE 754 float (32 or 64 bits)
+    Float,
+    /// Raw binary/bytes
+    Binary,
+    /// UTF-8 encoded codepoint
+    Utf8,
+}
+
+/// Endianness for multi-byte values
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BitEndianness {
+    /// Big endian (network byte order, default)
+    #[default]
+    Big,
+    /// Little endian
+    Little,
+}
+
+/// Signedness for integer values
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BitSignedness {
+    /// Unsigned (default)
+    #[default]
+    Unsigned,
+    /// Signed (two's complement)
+    Signed,
+}
+
+/// A segment in a bit string expression or pattern.
+/// Syntax: `value:size/type-specifiers`
+/// Examples: `X:16`, `Y:8/little`, `Z:32/signed-little`
+#[derive(Debug, Clone, PartialEq)]
+pub struct BitStringSegment<T> {
+    /// The value (expression for construction, pattern for matching)
+    pub value: T,
+    /// Size in bits (None = default for type, or "rest" for binary)
+    pub size: Option<Box<Expr>>,
+    /// Type specifier
+    pub segment_type: BitSegmentType,
+    /// Endianness
+    pub endianness: BitEndianness,
+    /// Signedness
+    pub signedness: BitSignedness,
+}
+
+impl<T> BitStringSegment<T> {
+    pub fn new(value: T) -> Self {
+        Self {
+            value,
+            size: None,
+            segment_type: BitSegmentType::Integer,
+            endianness: BitEndianness::Big,
+            signedness: BitSignedness::Unsigned,
+        }
+    }
 }
 
 /// Type annotations.

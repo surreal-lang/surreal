@@ -718,8 +718,111 @@ impl<'source> Parser<'source> {
             return Ok(Expr::Ident("self".to_string()));
         }
 
+        // Binary/bit string: <<segments>>
+        if self.check(&Token::LtLt) {
+            return self.parse_bitstring_expr();
+        }
+
         let span = self.current_span();
         Err(ParseError::new("expected expression", span))
+    }
+
+    /// Parse a bit string expression: `<<1, 2, X:16/little>>`
+    fn parse_bitstring_expr(&mut self) -> ParseResult<Expr> {
+        self.expect(&Token::LtLt)?;
+
+        let mut segments = Vec::new();
+
+        // Handle empty binary: <<>>
+        if self.check(&Token::GtGt) {
+            self.advance();
+            return Ok(Expr::BitString(segments));
+        }
+
+        loop {
+            let segment = self.parse_bitstring_segment_expr()?;
+            segments.push(segment);
+
+            if self.check(&Token::Comma) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        self.expect(&Token::GtGt)?;
+        Ok(Expr::BitString(segments))
+    }
+
+    /// Parse a single bit string segment: `value:size/specifiers`
+    fn parse_bitstring_segment_expr(&mut self) -> ParseResult<BitStringSegment<Box<Expr>>> {
+        // Parse the value expression
+        let value = Box::new(self.parse_unary_expr()?);
+
+        let mut segment = BitStringSegment::new(value);
+
+        // Parse optional size: `:size`
+        if self.check(&Token::Colon) {
+            self.advance();
+            segment.size = Some(Box::new(self.parse_unary_expr()?));
+        }
+
+        // Parse optional type specifiers: `/specifier-specifier-...`
+        if self.check(&Token::Slash) {
+            self.advance();
+            self.parse_bitstring_specifiers(&mut segment)?;
+        }
+
+        Ok(segment)
+    }
+
+    /// Parse bit string type specifiers: `big-signed-integer`
+    fn parse_bitstring_specifiers<T>(&mut self, segment: &mut BitStringSegment<T>) -> ParseResult<()> {
+        loop {
+            match self.peek() {
+                Some(Token::Big) => {
+                    self.advance();
+                    segment.endianness = BitEndianness::Big;
+                }
+                Some(Token::Little) => {
+                    self.advance();
+                    segment.endianness = BitEndianness::Little;
+                }
+                Some(Token::Signed) => {
+                    self.advance();
+                    segment.signedness = BitSignedness::Signed;
+                }
+                Some(Token::Unsigned) => {
+                    self.advance();
+                    segment.signedness = BitSignedness::Unsigned;
+                }
+                Some(Token::Integer) => {
+                    self.advance();
+                    segment.segment_type = BitSegmentType::Integer;
+                }
+                Some(Token::Float) => {
+                    self.advance();
+                    segment.segment_type = BitSegmentType::Float;
+                }
+                Some(Token::BinaryKw) | Some(Token::Bytes) => {
+                    self.advance();
+                    segment.segment_type = BitSegmentType::Binary;
+                }
+                Some(Token::Utf8) => {
+                    self.advance();
+                    segment.segment_type = BitSegmentType::Utf8;
+                }
+                _ => break,
+            }
+
+            // Check for more specifiers separated by `-`
+            if self.check(&Token::Minus) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        Ok(())
     }
 
     /// Parse an if expression.
@@ -1018,8 +1121,84 @@ impl<'source> Parser<'source> {
             return Ok(Pattern::List(elements));
         }
 
+        // Binary/bit string pattern: <<segments>>
+        if self.check(&Token::LtLt) {
+            return self.parse_bitstring_pattern();
+        }
+
         let span = self.current_span();
         Err(ParseError::new("expected pattern", span))
+    }
+
+    /// Parse a bit string pattern: `<<A:8, B:16/little, Rest/binary>>`
+    fn parse_bitstring_pattern(&mut self) -> ParseResult<Pattern> {
+        self.expect(&Token::LtLt)?;
+
+        let mut segments = Vec::new();
+
+        // Handle empty binary pattern: <<>>
+        if self.check(&Token::GtGt) {
+            self.advance();
+            return Ok(Pattern::BitString(segments));
+        }
+
+        loop {
+            let segment = self.parse_bitstring_segment_pattern()?;
+            segments.push(segment);
+
+            if self.check(&Token::Comma) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        self.expect(&Token::GtGt)?;
+        Ok(Pattern::BitString(segments))
+    }
+
+    /// Parse a single bit string pattern segment: `pattern:size/specifiers`
+    fn parse_bitstring_segment_pattern(&mut self) -> ParseResult<BitStringSegment<Box<Pattern>>> {
+        // Parse the pattern (simplified: just literals, identifiers, and wildcards)
+        let pattern = if self.check(&Token::Underscore) {
+            self.advance();
+            Pattern::Wildcard
+        } else if let Some(Token::Int(n)) = self.peek().cloned() {
+            self.advance();
+            Pattern::Int(n)
+        } else if let Some(Token::Ident(name)) = self.peek().cloned() {
+            self.advance();
+            Pattern::Ident(name)
+        } else {
+            let span = self.current_span();
+            return Err(ParseError::new("expected pattern in bit string segment", span));
+        };
+
+        let mut segment = BitStringSegment::new(Box::new(pattern));
+
+        // Parse optional size: `:size`
+        if self.check(&Token::Colon) {
+            self.advance();
+            // Size in patterns must be a literal integer
+            if let Some(Token::Int(n)) = self.peek().cloned() {
+                self.advance();
+                segment.size = Some(Box::new(Expr::Int(n)));
+            } else if let Some(Token::Ident(name)) = self.peek().cloned() {
+                self.advance();
+                segment.size = Some(Box::new(Expr::Ident(name)));
+            } else {
+                let span = self.current_span();
+                return Err(ParseError::new("expected size in bit string segment", span));
+            }
+        }
+
+        // Parse optional type specifiers: `/specifier-specifier-...`
+        if self.check(&Token::Slash) {
+            self.advance();
+            self.parse_bitstring_specifiers(&mut segment)?;
+        }
+
+        Ok(segment)
     }
 
     /// Parse optional type parameters: `<T, U>`.
@@ -1642,5 +1821,190 @@ mod tests {
         } else {
             panic!("expected function");
         }
+    }
+
+    #[test]
+    fn test_parse_binary_literal() {
+        let source = r#"
+        mod test {
+            pub fn make_binary() -> int {
+                let x = <<1, 2, 3>>;
+                0
+            }
+        }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        if let Item::Function(f) = &module.items[0] {
+            if let Stmt::Let { value, .. } = &f.body.stmts[0] {
+                if let Expr::BitString(segments) = value {
+                    assert_eq!(segments.len(), 3);
+                    // First segment should be Int(1)
+                    if let Expr::Int(1) = segments[0].value.as_ref() {
+                        // ok
+                    } else {
+                        panic!("expected Int(1)");
+                    }
+                } else {
+                    panic!("expected BitString");
+                }
+            } else {
+                panic!("expected Let");
+            }
+        } else {
+            panic!("expected function");
+        }
+    }
+
+    #[test]
+    fn test_parse_binary_with_size() {
+        let source = r#"
+        mod test {
+            pub fn sized_binary() -> int {
+                let x = <<4660:16>>;
+                0
+            }
+        }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        if let Item::Function(f) = &module.items[0] {
+            if let Stmt::Let { value, .. } = &f.body.stmts[0] {
+                if let Expr::BitString(segments) = value {
+                    assert_eq!(segments.len(), 1);
+                    // Check that size is 16
+                    if let Some(size) = &segments[0].size {
+                        if let Expr::Int(16) = size.as_ref() {
+                            // ok
+                        } else {
+                            panic!("expected size 16");
+                        }
+                    } else {
+                        panic!("expected size");
+                    }
+                } else {
+                    panic!("expected BitString");
+                }
+            } else {
+                panic!("expected Let");
+            }
+        } else {
+            panic!("expected function");
+        }
+    }
+
+    #[test]
+    fn test_parse_binary_with_specifiers() {
+        let source = r#"
+        mod test {
+            pub fn specified_binary() -> int {
+                let x = <<value:16/little-signed>>;
+                0
+            }
+        }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        if let Item::Function(f) = &module.items[0] {
+            if let Stmt::Let { value, .. } = &f.body.stmts[0] {
+                if let Expr::BitString(segments) = value {
+                    assert_eq!(segments.len(), 1);
+                    assert_eq!(segments[0].endianness, BitEndianness::Little);
+                    assert_eq!(segments[0].signedness, BitSignedness::Signed);
+                } else {
+                    panic!("expected BitString");
+                }
+            } else {
+                panic!("expected Let");
+            }
+        } else {
+            panic!("expected function");
+        }
+    }
+
+    #[test]
+    fn test_parse_binary_pattern() {
+        let source = r#"
+        mod test {
+            pub fn match_binary(data: int) -> int {
+                match data {
+                    <<a:8, b:16>> => a,
+                    _ => 0,
+                }
+            }
+        }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        let Item::Function(f) = &module.items[0] else {
+            panic!("expected function");
+        };
+        let Some(ref expr) = f.body.expr else {
+            panic!("expected expression");
+        };
+        let Expr::Match { arms, .. } = expr.as_ref() else {
+            panic!("expected Match");
+        };
+        let Pattern::BitString(segments) = &arms[0].pattern else {
+            panic!("expected BitString pattern");
+        };
+
+        assert_eq!(segments.len(), 2);
+
+        // First segment binds 'a' with 8 bits
+        let Pattern::Ident(name) = segments[0].value.as_ref() else {
+            panic!("expected Ident pattern");
+        };
+        assert_eq!(name, "a");
+
+        let Some(size) = &segments[0].size else {
+            panic!("expected size");
+        };
+        let Expr::Int(8) = size.as_ref() else {
+            panic!("expected size 8");
+        };
+    }
+
+    #[test]
+    fn test_parse_empty_binary() {
+        let source = r#"
+        mod test {
+            pub fn empty() -> int {
+                let x = <<>>;
+                0
+            }
+        }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        if let Item::Function(f) = &module.items[0] {
+            if let Stmt::Let { value, .. } = &f.body.stmts[0] {
+                if let Expr::BitString(segments) = value {
+                    assert_eq!(segments.len(), 0);
+                } else {
+                    panic!("expected BitString");
+                }
+            } else {
+                panic!("expected Let");
+            }
+        } else {
+            panic!("expected function");
+        }
+    }
+
+    #[test]
+    fn test_parse_binary_example_file() {
+        let source = include_str!("../../examples/binary.tb");
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().expect("binary.tb should parse successfully");
+
+        // Should have 8 functions
+        assert_eq!(module.items.len(), 8);
+        assert_eq!(module.name, "binaries");
     }
 }

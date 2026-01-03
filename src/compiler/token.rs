@@ -64,7 +64,31 @@ pub enum Token {
     #[regex(r"[A-Z][a-zA-Z0-9_]*", |lex| Some(lex.slice().to_string()))]
     TypeIdent(String),
 
+    // Binary/bit syntax keywords
+    #[token("big")]
+    Big,
+    #[token("little")]
+    Little,
+    #[token("signed")]
+    Signed,
+    #[token("unsigned")]
+    Unsigned,
+    #[token("integer")]
+    Integer,
+    #[token("float")]
+    Float,
+    #[token("binary")]
+    BinaryKw,
+    #[token("bytes")]
+    Bytes,
+    #[token("utf8")]
+    Utf8,
+
     // Operators (order matters for multi-char operators)
+    #[token("<<")]
+    LtLt,
+    #[token(">>")]
+    GtGt,
     #[token("==")]
     EqEq,
     #[token("!=")]
@@ -155,6 +179,17 @@ impl std::fmt::Display for Token {
             Token::Atom(a) => write!(f, ":{}", a),
             Token::Ident(s) => write!(f, "{}", s),
             Token::TypeIdent(s) => write!(f, "{}", s),
+            Token::Big => write!(f, "big"),
+            Token::Little => write!(f, "little"),
+            Token::Signed => write!(f, "signed"),
+            Token::Unsigned => write!(f, "unsigned"),
+            Token::Integer => write!(f, "integer"),
+            Token::Float => write!(f, "float"),
+            Token::BinaryKw => write!(f, "binary"),
+            Token::Bytes => write!(f, "bytes"),
+            Token::Utf8 => write!(f, "utf8"),
+            Token::LtLt => write!(f, "<<"),
+            Token::GtGt => write!(f, ">>"),
             Token::EqEq => write!(f, "=="),
             Token::BangEq => write!(f, "!="),
             Token::LtEq => write!(f, "<="),

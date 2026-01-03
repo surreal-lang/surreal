@@ -1,0 +1,62 @@
+// Binary/Bit String Syntax example
+// Demonstrates Erlang-style binary construction and pattern matching
+
+mod binaries {
+    // Create a simple binary with byte values
+    pub fn make_bytes() -> int {
+        let bin = <<1, 2, 3, 4>>;
+        0
+    }
+
+    // Create a binary with a 16-bit value (big endian by default)
+    pub fn make_word() -> int {
+        let value: int = 4660;
+        let bin = <<value:16>>;
+        0
+    }
+
+    // Create a binary with explicit little endian
+    pub fn make_little_endian() -> int {
+        let value: int = 4660;
+        let bin = <<value:16/little>>;
+        0
+    }
+
+    // Create a binary with signed values
+    pub fn make_signed() -> int {
+        let neg: int = 0 - 128;
+        let bin = <<neg:8/signed>>;
+        0
+    }
+
+    // Combine multiple segment types
+    pub fn make_packet() -> int {
+        let header: int = 1;
+        let length: int = 256;
+        let payload: int = 42;
+        let bin = <<header:8, length:16/big, payload:32>>;
+        0
+    }
+
+    // Pattern match on binary data
+    pub fn parse_header(data: int) -> int {
+        match data {
+            <<version:8, flags:8, rest:16>> => version,
+            _ => 0,
+        }
+    }
+
+    // Match with specific byte pattern
+    pub fn check_magic(data: int) -> int {
+        match data {
+            <<66, 77, size:32/little>> => size,
+            _ => 0,
+        }
+    }
+
+    // Empty binary
+    pub fn empty_binary() -> int {
+        let empty = <<>>;
+        0
+    }
+}
