@@ -40,7 +40,7 @@ impl<'source> Parser<'source> {
     }
 
     /// Parse a source file as an implicit module.
-    /// Used for lib.tb, main.tb, or any file loaded via `mod foo;`.
+    /// Used for lib.dream, main.dream, or any file loaded via `mod foo;`.
     /// The module name is derived from the filename.
     pub fn parse_file(&mut self, module_name: &str) -> ParseResult<Module> {
         let mut items = Vec::new();
@@ -2375,9 +2375,9 @@ mod tests {
 
     #[test]
     fn test_parse_binary_example_file() {
-        let source = include_str!("../../examples/binary.tb");
+        let source = include_str!("../../examples/binary.dream");
         let mut parser = Parser::new(source);
-        let module = parser.parse_module().expect("binary.tb should parse successfully");
+        let module = parser.parse_module().expect("binary.dream should parse successfully");
 
         // Should have 10 functions
         assert_eq!(module.items.len(), 10);

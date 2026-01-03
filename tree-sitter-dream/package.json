@@ -1,17 +1,17 @@
 {
-  "name": "tree-sitter-toybeam",
+  "name": "tree-sitter-dream",
   "version": "0.1.0",
-  "description": "Tree-sitter grammar for the ToyBEAM language",
+  "description": "Tree-sitter grammar for the Dream language",
   "main": "bindings/node",
   "types": "bindings/node",
   "repository": {
     "type": "git",
-    "url": "https://github.com/scrogson/toybeam"
+    "url": "https://github.com/scrogson/dream"
   },
   "keywords": [
     "tree-sitter",
     "parser",
-    "toybeam",
+    "dream",
     "beam"
   ],
   "files": [
@@ -49,9 +49,9 @@
   },
   "tree-sitter": [
     {
-      "scope": "source.toybeam",
+      "scope": "source.dream",
       "file-types": [
-        "tb"
+        "dream"
       ],
       "highlights": "queries/highlights.scm"
     }

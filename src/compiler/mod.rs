@@ -1,7 +1,7 @@
-//! Compiler for the ToyBEAM language.
+//! Compiler for the Dream language.
 //!
 //! This module contains the lexer, parser, AST types, and code generator
-//! for a Rust-like language that compiles to ToyBEAM bytecode.
+//! for a Rust-like language that compiles to Dream bytecode.
 
 mod ast;
 mod codegen;

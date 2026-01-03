@@ -331,7 +331,7 @@ mod tests {
     #[test]
     fn test_rust_keywords_are_valid_idents() {
         // This isn't Rust - we can use most Rust keywords as identifiers
-        // (except `use`, `as`, `impl`, `trait`, `for` which are now keywords in ToyBEAM)
+        // (except `use`, `as`, `impl`, `trait`, `for` which are now keywords in Dream)
         let mut lex = Token::lexer("loop while type crate super");
         assert_eq!(lex.next(), Some(Ok(Token::Ident("loop".to_string()))));
         assert_eq!(lex.next(), Some(Ok(Token::Ident("while".to_string()))));

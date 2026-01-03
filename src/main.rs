@@ -1,11 +1,11 @@
-//! ToyBEAM CLI - Run ToyBEAM programs.
+//! Dream CLI - Run Dream programs.
 
 use std::env;
 use std::fs;
 use std::path::Path;
 use std::process::ExitCode;
 
-use toybeam::{
+use dream::{
     compiler::{compile_file, CoreErlangEmitter, ModuleLoader},
     Instruction, Register, Scheduler, StepResult, Value,
 };
@@ -24,7 +24,7 @@ fn main() -> ExitCode {
         if target == "beam" || target == "core" {
             if args.len() < 4 {
                 eprintln!("Error: missing source file");
-                eprintln!("Usage: toybeam --target beam <file.tb>");
+                eprintln!("Usage: dream --target beam <file.dream>");
                 return ExitCode::from(1);
             }
             return compile_to_core_erlang(&args[3]);
@@ -40,16 +40,16 @@ fn main() -> ExitCode {
 }
 
 fn print_usage() {
-    eprintln!("Usage: toybeam <file.tb> [function] [args...]");
-    eprintln!("       toybeam --target beam <file.tb>");
+    eprintln!("Usage: dream <file.dream> [function] [args...]");
+    eprintln!("       dream --target beam <file.dream>");
     eprintln!();
     eprintln!("Targets:");
     eprintln!("  beam, core  Emit Core Erlang (.core file) for BEAM compilation");
     eprintln!();
     eprintln!("Examples:");
-    eprintln!("  toybeam examples/hello.tb              # Run main/0");
-    eprintln!("  toybeam examples/math.tb factorial 5   # Run factorial(5)");
-    eprintln!("  toybeam --target beam examples/math.tb # Emit math.core");
+    eprintln!("  dream examples/hello.dream              # Run main/0");
+    eprintln!("  dream examples/math.dream factorial 5   # Run factorial(5)");
+    eprintln!("  dream --target beam examples/math.dream # Emit math.core");
 }
 
 fn compile_to_core_erlang(filename: &str) -> ExitCode {

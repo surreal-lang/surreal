@@ -1,4 +1,4 @@
-//! ToyBEAM - A toy BEAM virtual machine in Rust.
+//! Dream - A BEAM virtual machine in Rust.
 //!
 //! This is a lightweight BEAM-inspired VM that can compile to WebAssembly.
 //! It implements core BEAM primitives:

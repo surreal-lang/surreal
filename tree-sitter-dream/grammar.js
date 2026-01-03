@@ -2,7 +2,7 @@
 // @ts-check
 
 module.exports = grammar({
-  name: "toybeam",
+  name: "dream",
 
   extras: ($) => [/\s/, $.line_comment, $.block_comment],
 

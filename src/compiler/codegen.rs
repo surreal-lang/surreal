@@ -1,4 +1,4 @@
-//! Code generation from AST to ToyBEAM bytecode.
+//! Code generation from AST to Dream bytecode.
 
 use std::collections::{HashMap, HashSet};
 

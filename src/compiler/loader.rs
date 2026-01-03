@@ -84,18 +84,18 @@ impl ModuleLoader {
     }
 
     /// Resolve module path for a mod declaration.
-    /// Looks for `<dir>/<name>.tb` or `<dir>/<name>/mod.tb`.
+    /// Looks for `<dir>/<name>.dream` or `<dir>/<name>/mod.dream`.
     pub fn resolve_module_path(&self, name: &str, from: &Path) -> LoadResult<PathBuf> {
         let parent = from.parent().unwrap_or(Path::new("."));
 
-        // Try <dir>/<name>.tb
-        let file_path = parent.join(format!("{}.tb", name));
+        // Try <dir>/<name>.dream
+        let file_path = parent.join(format!("{}.dream", name));
         if file_path.exists() {
             return Ok(file_path);
         }
 
-        // Try <dir>/<name>/mod.tb
-        let dir_path = parent.join(name).join("mod.tb");
+        // Try <dir>/<name>/mod.dream
+        let dir_path = parent.join(name).join("mod.dream");
         if dir_path.exists() {
             return Ok(dir_path);
         }
@@ -176,11 +176,11 @@ impl ModuleLoader {
     }
 
     /// Load a project from an entry point.
-    /// If path is a directory, looks for main.tb or lib.tb.
+    /// If path is a directory, looks for main.dream or lib.dream.
     pub fn load_project(&mut self, path: &Path) -> LoadResult<Module> {
         let entry = if path.is_dir() {
-            let main_path = path.join("main.tb");
-            let lib_path = path.join("lib.tb");
+            let main_path = path.join("main.dream");
+            let lib_path = path.join("lib.dream");
 
             if main_path.exists() {
                 main_path
@@ -188,7 +188,7 @@ impl ModuleLoader {
                 lib_path
             } else {
                 return Err(LoadError::with_path(
-                    "no main.tb or lib.tb found in directory",
+                    "no main.dream or lib.dream found in directory",
                     path.to_path_buf(),
                 ));
             }
@@ -242,7 +242,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = create_temp_file(
             dir.path(),
-            "math.tb",
+            "math.dream",
             "pub fn add(x: int, y: int) -> int { x + y }",
         );
 
@@ -260,12 +260,12 @@ mod tests {
         // Create lib.tb that depends on math.tb
         create_temp_file(
             dir.path(),
-            "lib.tb",
+            "lib.dream",
             "mod math;\npub fn main() -> int { math::add(1, 2) }",
         );
         create_temp_file(
             dir.path(),
-            "math.tb",
+            "math.dream",
             "pub fn add(x: int, y: int) -> int { x + y }",
         );
 
@@ -285,12 +285,12 @@ mod tests {
         // Create lib.tb -> utils/mod.tb structure
         create_temp_file(
             dir.path(),
-            "lib.tb",
+            "lib.dream",
             "mod utils;",
         );
         create_temp_file(
             dir.path(),
-            "utils/mod.tb",
+            "utils/mod.dream",
             "pub fn helper() -> int { 42 }",
         );
 
@@ -306,11 +306,11 @@ mod tests {
     fn test_circular_dependency_detection() {
         let dir = TempDir::new().unwrap();
 
-        create_temp_file(dir.path(), "a.tb", "mod b;");
-        create_temp_file(dir.path(), "b.tb", "mod a;");
+        create_temp_file(dir.path(), "a.dream", "mod b;");
+        create_temp_file(dir.path(), "b.dream", "mod a;");
 
         let mut loader = ModuleLoader::new();
-        let result = loader.load(&dir.path().join("a.tb"));
+        let result = loader.load(&dir.path().join("a.dream"));
 
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -320,10 +320,10 @@ mod tests {
     #[test]
     fn test_module_not_found() {
         let dir = TempDir::new().unwrap();
-        create_temp_file(dir.path(), "lib.tb", "mod missing;");
+        create_temp_file(dir.path(), "lib.dream", "mod missing;");
 
         let mut loader = ModuleLoader::new();
-        let result = loader.load(&dir.path().join("lib.tb"));
+        let result = loader.load(&dir.path().join("lib.dream"));
 
         assert!(result.is_err());
         let err = result.unwrap_err();
