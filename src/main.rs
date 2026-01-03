@@ -2,22 +2,97 @@
 
 use std::env;
 use std::fs;
+use std::path::Path;
 use std::process::ExitCode;
 
-use toybeam::{compiler::compile, Instruction, Register, Scheduler, StepResult, Value};
+use toybeam::{
+    compiler::{compile, emit_core_erlang},
+    Instruction, Register, Scheduler, StepResult, Value,
+};
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 {
-        eprintln!("Usage: toybeam <file.tb> [function] [args...]");
-        eprintln!();
-        eprintln!("Examples:");
-        eprintln!("  toybeam examples/hello.tb");
-        eprintln!("  toybeam examples/math.tb factorial 5");
+        print_usage();
         return ExitCode::from(1);
     }
 
+    // Check for --target flag
+    if args.len() >= 3 && args[1] == "--target" {
+        let target = &args[2];
+        if target == "beam" || target == "core" {
+            if args.len() < 4 {
+                eprintln!("Error: missing source file");
+                eprintln!("Usage: toybeam --target beam <file.tb>");
+                return ExitCode::from(1);
+            }
+            return compile_to_core_erlang(&args[3]);
+        } else {
+            eprintln!("Error: unknown target '{}'", target);
+            eprintln!("Available targets: beam, core");
+            return ExitCode::from(1);
+        }
+    }
+
+    // Normal execution mode
+    run_program(&args)
+}
+
+fn print_usage() {
+    eprintln!("Usage: toybeam <file.tb> [function] [args...]");
+    eprintln!("       toybeam --target beam <file.tb>");
+    eprintln!();
+    eprintln!("Targets:");
+    eprintln!("  beam, core  Emit Core Erlang (.core file) for BEAM compilation");
+    eprintln!();
+    eprintln!("Examples:");
+    eprintln!("  toybeam examples/hello.tb              # Run main/0");
+    eprintln!("  toybeam examples/math.tb factorial 5   # Run factorial(5)");
+    eprintln!("  toybeam --target beam examples/math.tb # Emit math.core");
+}
+
+fn compile_to_core_erlang(filename: &str) -> ExitCode {
+    // Read source file
+    let source = match fs::read_to_string(filename) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error reading {}: {}", filename, e);
+            return ExitCode::from(1);
+        }
+    };
+
+    // Compile to Core Erlang
+    let core_erlang = match emit_core_erlang(&source) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Compile error: {}", e);
+            return ExitCode::from(1);
+        }
+    };
+
+    // Determine output filename
+    let input_path = Path::new(filename);
+    let stem = input_path.file_stem().unwrap_or_default().to_str().unwrap_or("output");
+    let output_filename = format!("{}.core", stem);
+
+    // Write Core Erlang file
+    match fs::write(&output_filename, &core_erlang) {
+        Ok(_) => {
+            println!("Wrote {}", output_filename);
+            println!();
+            println!("To compile to BEAM:");
+            println!("  erlc +from_core {}", output_filename);
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("Error writing {}: {}", output_filename, e);
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn run_program(args: &[String]) -> ExitCode {
     let filename = &args[1];
 
     // Read source file
@@ -145,10 +220,19 @@ fn format_value(value: &Value) -> String {
                 .collect();
             format!("%{{{}}}", inner.join(", "))
         }
-        Value::Fun { module, function, arity } => {
+        Value::Fun {
+            module,
+            function,
+            arity,
+        } => {
             format!("&{}:{}/{}", module, function, arity)
         }
-        Value::Closure { module, function, arity, .. } => {
+        Value::Closure {
+            module,
+            function,
+            arity,
+            ..
+        } => {
             format!("#Closure<{}:{}/{}>", module, function, arity)
         }
         Value::None => "none".to_string(),
