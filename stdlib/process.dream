@@ -1,0 +1,74 @@
+// Dream Standard Library - Process Module
+//
+// Provides process management and communication functions.
+
+/// Get the current process's PID.
+/// Note: You can also use the built-in `self` expression directly.
+pub fn current() -> pid {
+    self
+}
+
+/// Sleep for the given number of milliseconds.
+pub fn sleep(ms: int) -> atom {
+    :timer::sleep(ms)
+}
+
+/// Check if a process is alive.
+pub fn is_alive(p: pid) -> bool {
+    :erlang::is_process_alive(p)
+}
+
+/// Send a message to a process (returns the message).
+pub fn send<T>(p: pid, msg: T) -> T {
+    :erlang::send(p, msg)
+}
+
+/// Register a process with a name.
+pub fn register(name: atom, p: pid) -> atom {
+    :erlang::register(name, p)
+}
+
+/// Unregister a process name.
+pub fn unregister(name: atom) -> atom {
+    :erlang::unregister(name)
+}
+
+/// Look up a registered process by name.
+pub fn whereis(name: atom) -> pid {
+    :erlang::whereis(name)
+}
+
+/// Get a list of all registered process names.
+pub fn registered() -> [atom] {
+    :erlang::registered()
+}
+
+/// Link to another process.
+pub fn link(p: pid) -> atom {
+    :erlang::link(p)
+}
+
+/// Unlink from another process.
+pub fn unlink(p: pid) -> atom {
+    :erlang::unlink(p)
+}
+
+/// Exit the current process with a reason.
+pub fn exit(reason: atom) -> atom {
+    :erlang::exit(reason)
+}
+
+/// Exit another process with a reason.
+pub fn exit_pid(p: pid, reason: atom) -> atom {
+    :erlang::exit(p, reason)
+}
+
+/// Get a list of all processes.
+pub fn list() -> [pid] {
+    :erlang::processes()
+}
+
+/// Set the process flag for trapping exits.
+pub fn trap_exit(flag: bool) -> bool {
+    :erlang::process_flag(:trap_exit, flag)
+}

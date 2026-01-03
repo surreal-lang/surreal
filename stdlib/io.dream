@@ -1,0 +1,33 @@
+// Dream Standard Library - I/O Module
+//
+// Provides console input/output functions.
+
+/// Print a string followed by a newline.
+pub fn println(s: string) -> atom {
+    :io::format("~s~n", [s])
+}
+
+/// Print a string without a newline.
+pub fn print(s: string) -> atom {
+    :io::format("~s", [s])
+}
+
+/// Print an integer followed by a newline.
+pub fn println_int(n: int) -> atom {
+    :io::format("~p~n", [n])
+}
+
+/// Print any term followed by a newline (uses Erlang term format).
+pub fn inspect(term: T) -> atom {
+    :io::format("~p~n", [term])
+}
+
+/// Read a line from standard input.
+pub fn read_line() -> string {
+    :io::get_line("")
+}
+
+/// Read a line with a prompt.
+pub fn read_line_prompt(prompt: string) -> string {
+    :io::get_line(prompt)
+}

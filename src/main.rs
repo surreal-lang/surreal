@@ -207,13 +207,15 @@ fn compile_and_emit(entry_file: &Path, build_dir: &Path, target: &str) -> ExitCo
             }
         };
 
-        let core_file = build_dir.join(format!("{}.core", module.name));
+        // Use prefixed module name for output files (e.g., dream::io.core)
+        let beam_name = CoreErlangEmitter::beam_module_name(&module.name);
+        let core_file = build_dir.join(format!("{}.core", beam_name));
         if let Err(e) = fs::write(&core_file, &core_erlang) {
             eprintln!("Error writing {}: {}", core_file.display(), e);
             return ExitCode::from(1);
         }
 
-        println!("  Compiled {}.core", module.name);
+        println!("  Compiled {}.core", beam_name);
         core_files.push(core_file);
     }
 
@@ -249,6 +251,8 @@ fn compile_and_emit(entry_file: &Path, build_dir: &Path, target: &str) -> ExitCo
                 Ok(s) if s.success() => {
                     let beam_name = core_file.file_stem().unwrap().to_string_lossy();
                     println!("  Compiled {}.beam", beam_name);
+                    // Clean up intermediate .core file
+                    let _ = fs::remove_file(core_file);
                 }
                 Ok(s) => {
                     eprintln!("erlc failed with exit code {:?}", s.code());
@@ -281,12 +285,12 @@ fn cmd_run(file: Option<&Path>, function: &str, args: &[String]) -> ExitCode {
             return build_result;
         }
 
-        // Module name comes from the file name
-        let module_name = source_file
+        // Module name comes from the file name (with dream:: prefix)
+        let base_name = source_file
             .file_stem()
             .and_then(|s| s.to_str())
-            .unwrap_or("main")
-            .to_string();
+            .unwrap_or("main");
+        let module_name = CoreErlangEmitter::beam_module_name(base_name);
 
         (build_dir, module_name)
     } else {
@@ -305,7 +309,7 @@ fn cmd_run(file: Option<&Path>, function: &str, args: &[String]) -> ExitCode {
             }
         };
 
-        (config.beam_dir(&project_root), "main".to_string())
+        (config.beam_dir(&project_root), CoreErlangEmitter::beam_module_name("main"))
     };
 
     // Check if erl is available
@@ -323,12 +327,12 @@ fn cmd_run(file: Option<&Path>, function: &str, args: &[String]) -> ExitCode {
     };
 
     println!();
-    println!("Running {}:{}({})...", module_name, function, args_str);
+    println!("Running '{}':{}({})...", module_name, function, args_str);
     println!();
 
-    // Run with erl
+    // Run with erl (module name must be quoted for special chars like ::)
     let eval_expr = format!(
-        "io:format(\"~p~n\", [{}:{}({})]), halt().",
+        "io:format(\"~p~n\", ['{}':{}({})]), halt().",
         module_name, function, args_str
     );
 

@@ -100,9 +100,19 @@ impl ProjectConfig {
         project_root.join("_build")
     }
 
-    /// Get the BEAM output directory.
+    /// Get the BEAM output directory following Elixir's structure:
+    /// `_build/{env}/lib/{app}/ebin/`
     pub fn beam_dir(&self, project_root: &Path) -> PathBuf {
-        self.build_dir(project_root).join("beam")
+        self.beam_dir_for_env(project_root, "dev")
+    }
+
+    /// Get the BEAM output directory for a specific environment.
+    pub fn beam_dir_for_env(&self, project_root: &Path, env: &str) -> PathBuf {
+        self.build_dir(project_root)
+            .join(env)
+            .join("lib")
+            .join(&self.package.name)
+            .join("ebin")
     }
 }
 

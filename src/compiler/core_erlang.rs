@@ -303,9 +303,18 @@ impl CoreErlangEmitter {
         Ok(())
     }
 
+    /// Prefix for Dream modules in the BEAM (like Elixir's "Elixir." prefix).
+    pub const MODULE_PREFIX: &'static str = "dream::";
+
+    /// Get the BEAM module name for a Dream module (with prefix).
+    pub fn beam_module_name(name: &str) -> String {
+        format!("{}{}", Self::MODULE_PREFIX, name)
+    }
+
     /// Emit a complete Core Erlang module.
     pub fn emit_module(&mut self, module: &Module) -> CoreErlangResult<String> {
-        self.module_name = module.name.clone();
+        // Prefix module name with "dream::" for BEAM namespace
+        self.module_name = format!("{}{}", Self::MODULE_PREFIX, module.name);
 
         // First pass: collect imports, traits, and register impl methods
         for item in &module.items {
@@ -346,8 +355,8 @@ impl CoreErlangEmitter {
             }
         }
 
-        // Module header
-        self.emit(&format!("module '{}'", module.name));
+        // Module header (with Dream. prefix)
+        self.emit(&format!("module '{}'", self.module_name));
 
         // Collect exported functions (including impl block methods)
         let mut exports: Vec<String> = Vec::new();
@@ -1497,7 +1506,7 @@ mod tests {
         "#;
 
         let result = emit_core_erlang(source).unwrap();
-        assert!(result.contains("module 'test'"));
+        assert!(result.contains("module 'dream::test'"));
         assert!(result.contains("'add'/2"));
         assert!(result.contains("call 'erlang':'+'"));
     }
