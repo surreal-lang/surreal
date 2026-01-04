@@ -212,7 +212,7 @@ fn compile_modules<'a>(
     // Type check each module (warnings only for now)
     for module in &modules {
         if let Err(e) = check_module(module) {
-            eprintln!("  Type warning in {}: {}", module.name, e);
+            eprintln!("  Type warning in {}: {:?}", module.name, miette::Report::new(e));
         }
     }
 

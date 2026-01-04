@@ -1,20 +1,38 @@
-//! Parse errors.
+//! Compiler errors with rich diagnostics.
 
 use crate::compiler::lexer::Span;
 use crate::compiler::token::Token;
+use miette::{Diagnostic, NamedSource, SourceSpan};
+use thiserror::Error;
 
-/// A parse error.
-#[derive(Debug, Clone, PartialEq)]
+/// A parse error with source location.
+#[derive(Error, Debug, Diagnostic, Clone)]
+#[error("{message}")]
+#[diagnostic()]
 pub struct ParseError {
     pub message: String,
-    pub span: Span,
+
+    #[label("here")]
+    pub span: SourceSpan,
+
+    #[help]
+    pub help: Option<String>,
 }
 
 impl ParseError {
     pub fn new(message: impl Into<String>, span: Span) -> Self {
         Self {
             message: message.into(),
-            span,
+            span: span.into(),
+            help: None,
+        }
+    }
+
+    pub fn with_help(message: impl Into<String>, span: Span, help: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            span: span.into(),
+            help: Some(help.into()),
         }
     }
 
@@ -23,17 +41,110 @@ impl ParseError {
     }
 
     pub fn unexpected_eof(expected: &str) -> Self {
-        Self::new(format!("unexpected end of input, expected {}", expected), 0..0)
+        Self::new(
+            format!("unexpected end of input, expected {}", expected),
+            0..0,
+        )
     }
 }
 
-impl std::fmt::Display for ParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "error at {:?}: {}", self.span, self.message)
+impl PartialEq for ParseError {
+    fn eq(&self, other: &Self) -> bool {
+        self.message == other.message
+            && self.span.offset() == other.span.offset()
+            && self.span.len() == other.span.len()
     }
 }
-
-impl std::error::Error for ParseError {}
 
 /// Result type for parsing.
 pub type ParseResult<T> = Result<T, ParseError>;
+
+/// A type error with source location.
+#[derive(Error, Debug, Diagnostic, Clone)]
+#[error("{message}")]
+#[diagnostic(code(dream::type_error))]
+pub struct TypeError {
+    pub message: String,
+
+    #[label("type mismatch here")]
+    pub span: Option<SourceSpan>,
+
+    #[help]
+    pub help: Option<String>,
+}
+
+impl TypeError {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            span: None,
+            help: None,
+        }
+    }
+
+    pub fn with_span(message: impl Into<String>, span: Span) -> Self {
+        Self {
+            message: message.into(),
+            span: Some(span.into()),
+            help: None,
+        }
+    }
+
+    pub fn with_help(message: impl Into<String>, help: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            span: None,
+            help: Some(help.into()),
+        }
+    }
+}
+
+/// Result type for type checking.
+pub type TypeResult<T> = Result<T, TypeError>;
+
+/// A compiler error that can include source code context.
+#[derive(Error, Debug, Diagnostic)]
+#[error("{kind}")]
+#[diagnostic()]
+pub struct CompilerError {
+    #[source_code]
+    pub src: NamedSource<String>,
+
+    pub kind: CompilerErrorKind,
+}
+
+/// The kind of compiler error.
+#[derive(Error, Debug, Diagnostic)]
+pub enum CompilerErrorKind {
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Parse(#[from] ParseError),
+
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Type(#[from] TypeError),
+}
+
+impl CompilerError {
+    /// Create a compiler error from a parse error with source context.
+    pub fn parse(filename: impl Into<String>, source: impl Into<String>, err: ParseError) -> Self {
+        let filename: String = filename.into();
+        Self {
+            src: NamedSource::new(filename, source.into()),
+            kind: CompilerErrorKind::Parse(err),
+        }
+    }
+
+    /// Create a compiler error from a type error with source context.
+    pub fn type_error(
+        filename: impl Into<String>,
+        source: impl Into<String>,
+        err: TypeError,
+    ) -> Self {
+        let filename: String = filename.into();
+        Self {
+            src: NamedSource::new(filename, source.into()),
+            kind: CompilerErrorKind::Type(err),
+        }
+    }
+}

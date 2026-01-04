@@ -8,43 +8,7 @@ use std::collections::HashMap;
 use crate::compiler::ast::{
     self, BinOp, Block, Expr, Function, ImplBlock, Item, MatchArm, Module, Pattern, Stmt, UnaryOp,
 };
-
-/// Type checking errors.
-#[derive(Debug, Clone)]
-pub struct TypeError {
-    pub message: String,
-    pub hint: Option<String>,
-}
-
-impl TypeError {
-    pub fn new(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-            hint: None,
-        }
-    }
-
-    pub fn with_hint(message: impl Into<String>, hint: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-            hint: Some(hint.into()),
-        }
-    }
-}
-
-impl std::fmt::Display for TypeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.message)?;
-        if let Some(hint) = &self.hint {
-            write!(f, "\n  hint: {}", hint)?;
-        }
-        Ok(())
-    }
-}
-
-impl std::error::Error for TypeError {}
-
-pub type TypeResult<T> = Result<T, TypeError>;
+use crate::compiler::error::{TypeError, TypeResult};
 
 /// Internal type representation for type checking.
 /// This is separate from ast::Type to allow for inference variables.
@@ -285,7 +249,8 @@ pub struct TypeChecker {
     errors: Vec<TypeError>,
     /// Current function's return type (for checking return statements)
     current_return_type: Option<Ty>,
-    /// Type variable substitutions from unification
+    /// Type variable substitutions from unification (reserved for future use)
+    #[allow(dead_code)]
     substitutions: HashMap<u32, Ty>,
 }
 
@@ -495,7 +460,7 @@ impl TypeChecker {
 
         // Check return type matches
         if !self.types_compatible(&body_ty, &ret_ty) {
-            self.error(TypeError::with_hint(
+            self.error(TypeError::with_help(
                 format!(
                     "function '{}' returns {} but body has type {}",
                     func.name, ret_ty, body_ty
@@ -541,7 +506,7 @@ impl TypeChecker {
                 if let Some(ann_ty) = ty {
                     let expected = self.ast_type_to_ty(ann_ty);
                     if !self.types_compatible(&value_ty, &expected) {
-                        self.error(TypeError::with_hint(
+                        self.error(TypeError::with_help(
                             format!("type mismatch in let binding"),
                             format!("expected {}, found {}", expected, value_ty),
                         ));
@@ -656,7 +621,7 @@ impl TypeChecker {
             Expr::If { cond, then_block, else_block } => {
                 let cond_ty = self.infer_expr(cond)?;
                 if !self.types_compatible(&cond_ty, &Ty::Bool) {
-                    self.error(TypeError::with_hint(
+                    self.error(TypeError::with_help(
                         "if condition must be bool",
                         format!("found {}", cond_ty),
                     ));
@@ -667,7 +632,7 @@ impl TypeChecker {
                 if let Some(else_blk) = else_block {
                     let else_ty = self.check_block(else_blk)?;
                     if !self.types_compatible(&then_ty, &else_ty) {
-                        self.error(TypeError::with_hint(
+                        self.error(TypeError::with_help(
                             "if branches have different types",
                             format!("then: {}, else: {}", then_ty, else_ty),
                         ));
@@ -705,7 +670,7 @@ impl TypeChecker {
                     for expr in &exprs[1..] {
                         let ty = self.infer_expr(expr)?;
                         if !self.types_compatible(&ty, &elem_ty) {
-                            self.error(TypeError::with_hint(
+                            self.error(TypeError::with_help(
                                 "list elements must have the same type",
                                 format!("expected {}, found {}", elem_ty, ty),
                             ));
@@ -723,7 +688,7 @@ impl TypeChecker {
                         let field_ty = self.infer_expr(field_expr)?;
                         if let Some((_, expected_ty)) = info.fields.iter().find(|(n, _)| n == field_name) {
                             if !self.types_compatible(&field_ty, expected_ty) {
-                                self.error(TypeError::with_hint(
+                                self.error(TypeError::with_help(
                                     format!("type mismatch for field '{}'", field_name),
                                     format!("expected {}, found {}", expected_ty, field_ty),
                                 ));
@@ -763,7 +728,7 @@ impl TypeChecker {
                         for (arg, expected_ty) in args.iter().zip(expected_tys.iter()) {
                             let arg_ty = self.infer_expr(arg)?;
                             if !self.types_compatible(&arg_ty, expected_ty) {
-                                self.error(TypeError::with_hint(
+                                self.error(TypeError::with_help(
                                     format!("type mismatch in variant '{}'", variant),
                                     format!("expected {}, found {}", expected_ty, arg_ty),
                                 ));
@@ -832,7 +797,7 @@ impl TypeChecker {
 
                 if let Some(expected) = &self.current_return_type {
                     if !self.types_compatible(&ret_ty, expected) {
-                        self.error(TypeError::with_hint(
+                        self.error(TypeError::with_help(
                             "return type mismatch",
                             format!("expected {}, found {}", expected, ret_ty),
                         ));
@@ -849,7 +814,7 @@ impl TypeChecker {
             Expr::Send { to, msg: _ } => {
                 let to_ty = self.infer_expr(to)?;
                 if !self.types_compatible(&to_ty, &Ty::Pid) {
-                    self.error(TypeError::with_hint(
+                    self.error(TypeError::with_help(
                         "send target must be a pid",
                         format!("found {}", to_ty),
                     ));
@@ -894,13 +859,13 @@ impl TypeChecker {
             // Arithmetic: int -> int -> int
             BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
                 if !self.types_compatible(left, &Ty::Int) {
-                    self.error(TypeError::with_hint(
+                    self.error(TypeError::with_help(
                         format!("operator {} requires int operands", op),
                         format!("left operand is {}", left),
                     ));
                 }
                 if !self.types_compatible(right, &Ty::Int) {
-                    self.error(TypeError::with_hint(
+                    self.error(TypeError::with_help(
                         format!("operator {} requires int operands", op),
                         format!("right operand is {}", right),
                     ));
@@ -911,7 +876,7 @@ impl TypeChecker {
             // Comparison: T -> T -> bool
             BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
                 if !self.types_compatible(left, right) {
-                    self.error(TypeError::with_hint(
+                    self.error(TypeError::with_help(
                         "comparison operands must have the same type",
                         format!("left: {}, right: {}", left, right),
                     ));
@@ -922,13 +887,13 @@ impl TypeChecker {
             // Logical: bool -> bool -> bool
             BinOp::And | BinOp::Or => {
                 if !self.types_compatible(left, &Ty::Bool) {
-                    self.error(TypeError::with_hint(
+                    self.error(TypeError::with_help(
                         format!("operator {} requires bool operands", op),
                         format!("left operand is {}", left),
                     ));
                 }
                 if !self.types_compatible(right, &Ty::Bool) {
-                    self.error(TypeError::with_hint(
+                    self.error(TypeError::with_help(
                         format!("operator {} requires bool operands", op),
                         format!("right operand is {}", right),
                     ));
@@ -943,7 +908,7 @@ impl TypeChecker {
         match op {
             UnaryOp::Neg => {
                 if !self.types_compatible(ty, &Ty::Int) {
-                    self.error(TypeError::with_hint(
+                    self.error(TypeError::with_help(
                         "negation requires int operand",
                         format!("found {}", ty),
                     ));
@@ -952,7 +917,7 @@ impl TypeChecker {
             }
             UnaryOp::Not => {
                 if !self.types_compatible(ty, &Ty::Bool) {
-                    self.error(TypeError::with_hint(
+                    self.error(TypeError::with_help(
                         "logical not requires bool operand",
                         format!("found {}", ty),
                     ));
@@ -981,7 +946,7 @@ impl TypeChecker {
                     for (arg, (_, param_ty)) in args.iter().zip(info.params.iter()) {
                         let arg_ty = self.infer_expr(arg)?;
                         if !self.types_compatible(&arg_ty, param_ty) {
-                            self.error(TypeError::with_hint(
+                            self.error(TypeError::with_help(
                                 format!("type mismatch in call to '{}'", name),
                                 format!("expected {}, found {}", param_ty, arg_ty),
                             ));
@@ -1033,7 +998,7 @@ impl TypeChecker {
                 for (arg, (_, param_ty)) in args.iter().zip(info.params.iter().skip(1)) {
                     let arg_ty = self.infer_expr(arg)?;
                     if !self.types_compatible(&arg_ty, param_ty) {
-                        self.error(TypeError::with_hint(
+                        self.error(TypeError::with_help(
                             format!("type mismatch in method call '{}'", method),
                             format!("expected {}, found {}", param_ty, arg_ty),
                         ));
@@ -1071,7 +1036,7 @@ impl TypeChecker {
             if let Some(guard) = &arm.guard {
                 let guard_ty = self.infer_expr(guard)?;
                 if !self.types_compatible(&guard_ty, &Ty::Bool) {
-                    self.error(TypeError::with_hint(
+                    self.error(TypeError::with_help(
                         "match guard must be bool",
                         format!("found {}", guard_ty),
                     ));
@@ -1086,7 +1051,7 @@ impl TypeChecker {
             // Check all arms have compatible types
             if let Some(ref expected) = result_ty {
                 if !self.types_compatible(&body_ty, expected) {
-                    self.error(TypeError::with_hint(
+                    self.error(TypeError::with_help(
                         "match arms have different types",
                         format!("expected {}, found {}", expected, body_ty),
                     ));
