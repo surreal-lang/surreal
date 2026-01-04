@@ -1063,9 +1063,17 @@ impl TypeChecker {
 
             // Closure - return function type
             Expr::Closure { params, body } => {
-                // For now, infer the body and return a function type
-                // TODO: Track param types with inference
+                // Create a child scope and bind closure parameters
+                let mut scope = self.env.child();
+                for param in params {
+                    scope.bind_var(param.clone(), Ty::Any);
+                }
+
+                // Check body with params in scope
+                let old_env = std::mem::replace(&mut self.env, scope);
                 self.check_block(body)?;
+                self.env = old_env;
+
                 Ok(Ty::Fn {
                     params: params.iter().map(|_| Ty::Any).collect(),
                     ret: Box::new(Ty::Any),
