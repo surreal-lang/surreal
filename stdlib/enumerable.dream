@@ -30,8 +30,8 @@
 ///   fn reverse(self) - Reverse order
 ///
 /// Example:
-///   let seniors = people_map.filter(fn(e) { e.age > 30 });
-///   let names = seniors.map(fn(e) { e.name });
+///   let seniors = people_map.filter(|e| { e.age > 30 });
+///   let names = seniors.map(|e| { e.name });
 trait Iter {
     /// Convert to a list for iteration.
     fn to_list(self);
@@ -54,7 +54,7 @@ pub fn filter<T>(items: [T], pred: fn(T) -> bool) -> [T] {
 /// Remove elements where the predicate returns true.
 pub fn reject<T>(items: [T], pred: fn(T) -> bool) -> [T] {
     // Can't use nested closure with outer param, use filtermap
-    :lists::filtermap(fn(x) {
+    :lists::filtermap(|x| {
         if pred(x) {
             false
         } else {
@@ -249,8 +249,8 @@ pub fn reverse<T>(items: [T]) -> [T] {
 pub fn shuffle<T>(items: [T]) -> [T] {
     // Fisher-Yates shuffle using Erlang's random
     let indexed = :lists::zip(:lists::seq(1, :erlang::length(items)), items);
-    let shuffled = :lists::sort(fn(a, b) { :rand::uniform(100) < 50 }, indexed);
-    map(shuffled, fn(pair) { :erlang::element(2, pair) })
+    let shuffled = :lists::sort(|a, b| { :rand::uniform(100) < 50 }, indexed);
+    map(shuffled, |pair| { :erlang::element(2, pair) })
 }
 
 // =============================================================================
@@ -287,7 +287,7 @@ fn dedup_loop<T>(items: [T], prev: T, acc: [T]) -> [T] {
 
 /// Group elements by a key function.
 pub fn group_by<T, K>(items: [T], key_fn: fn(T) -> K) -> map {
-    reduce(items, :maps::new(), fn(item, acc) {
+    reduce(items, :maps::new(), |item, acc| {
         let key = key_fn(item);
         let existing = :maps::get(key, acc, []);
         :maps::put(key, :lists::append([item], existing), acc)
@@ -310,7 +310,7 @@ pub fn sum(items: [int]) -> int {
 
 /// Sum using a function to extract the value.
 pub fn sum_by<T>(items: [T], f: fn(T) -> int) -> int {
-    reduce(items, 0, fn(item, acc) { acc + f(item) })
+    reduce(items, 0, |item, acc| { acc + f(item) })
 }
 
 /// Find the maximum value.
@@ -325,7 +325,7 @@ pub fn min<T>(items: [T]) -> T {
 
 /// Find the maximum by a custom comparison.
 pub fn max_by<T>(items: [T], f: fn(T) -> int) -> T {
-    reduce(:lists::tl(items), :lists::hd(items), fn(item, best) {
+    reduce(:lists::tl(items), :lists::hd(items), |item, best| {
         if f(item) > f(best) {
             item
         } else {
@@ -336,7 +336,7 @@ pub fn max_by<T>(items: [T], f: fn(T) -> int) -> T {
 
 /// Find the minimum by a custom comparison.
 pub fn min_by<T>(items: [T], f: fn(T) -> int) -> T {
-    reduce(:lists::tl(items), :lists::hd(items), fn(item, best) {
+    reduce(:lists::tl(items), :lists::hd(items), |item, best| {
         if f(item) < f(best) {
             item
         } else {
@@ -374,7 +374,7 @@ fn each_with_index_loop<T>(items: [T], idx: int, f: fn(T, int) -> ()) -> atom {
 /// Map with index.
 pub fn map_with_index<T, U>(items: [T], f: fn(T, int) -> U) -> [U] {
     let indexed = :lists::zip(:lists::seq(0, :erlang::length(items) - 1), items);
-    map(indexed, fn(pair) { f(:erlang::element(2, pair), :erlang::element(1, pair)) })
+    map(indexed, |pair| { f(:erlang::element(2, pair), :erlang::element(1, pair)) })
 }
 
 // =============================================================================

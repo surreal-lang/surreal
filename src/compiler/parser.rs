@@ -1071,23 +1071,28 @@ impl<'source> Parser<'source> {
             return self.parse_bitstring_expr();
         }
 
-        // Anonymous function / closure: fn(x, y) { body }
-        if self.check(&Token::Fn) {
-            self.advance();
-            self.expect(&Token::LParen)?;
-
+        // Closure: |x, y| { body } or || { body }
+        if self.check(&Token::Pipe) || self.check(&Token::OrOr) {
             let mut params = Vec::new();
-            if !self.check(&Token::RParen) {
-                params.push(self.expect_ident()?);
-                while self.check(&Token::Comma) {
-                    self.advance();
-                    if self.check(&Token::RParen) {
-                        break;
-                    }
+
+            if self.check(&Token::OrOr) {
+                // Empty params: || { body }
+                self.advance();
+            } else {
+                // |x, y| { body }
+                self.advance(); // consume opening |
+                if !self.check(&Token::Pipe) {
                     params.push(self.expect_ident()?);
+                    while self.check(&Token::Comma) {
+                        self.advance();
+                        if self.check(&Token::Pipe) {
+                            break;
+                        }
+                        params.push(self.expect_ident()?);
+                    }
                 }
+                self.expect(&Token::Pipe)?; // consume closing |
             }
-            self.expect(&Token::RParen)?;
 
             let body = self.parse_block()?;
             return Ok(Expr::Closure { params, body });

@@ -9,7 +9,7 @@ pub fn main() -> atom {
     let s = "  Hello, World!  ";
     io::format("Original: '~s'~n", [s]);
     io::format("Trimmed: '~s'~n", [trim(s)]);
-    io::format("Upper: '~s'~n", [to_upper(trim(s))]);
+    io::format("Upper: '~s'~n", [s |> trim() |> to_upper()]);
     io::format("Lower: '~s'~n", [to_lower(trim(s))]);
     io::format("Length: ~p~n", [len(trim(s))]);
     io::format("Reversed: '~s'~n", [reverse(trim(s))]);

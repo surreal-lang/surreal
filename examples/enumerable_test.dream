@@ -32,69 +32,69 @@ fn assert_false(value: bool, name: string) {
 fn test_map() {
     :io::format("~n--- map ---~n", []);
 
-    let result = enumerable::map([1, 2, 3], fn(x) { x * 2 });
+    let result = enumerable::map([1, 2, 3], |x| { x * 2 });
     assert_eq(result, [2, 4, 6], "map doubles values");
 
-    let empty = enumerable::map([], fn(x) { x });
+    let empty = enumerable::map([], |x| { x });
     assert_eq(empty, [], "map on empty list");
 }
 
 fn test_filter() {
     :io::format("~n--- filter ---~n", []);
 
-    let evens = enumerable::filter([1, 2, 3, 4, 5], fn(x) { x % 2 == 0 });
+    let evens = enumerable::filter([1, 2, 3, 4, 5], |x| { x % 2 == 0 });
     assert_eq(evens, [2, 4], "filter keeps evens");
 
-    let none = enumerable::filter([1, 3, 5], fn(x) { x % 2 == 0 });
+    let none = enumerable::filter([1, 3, 5], |x| { x % 2 == 0 });
     assert_eq(none, [], "filter returns empty when no matches");
 
-    let all = enumerable::filter([2, 4, 6], fn(x) { x % 2 == 0 });
+    let all = enumerable::filter([2, 4, 6], |x| { x % 2 == 0 });
     assert_eq(all, [2, 4, 6], "filter keeps all when all match");
 }
 
 fn test_reduce() {
     :io::format("~n--- reduce ---~n", []);
 
-    let sum = enumerable::reduce([1, 2, 3, 4], 0, fn(x, acc) { x + acc });
+    let sum = enumerable::reduce([1, 2, 3, 4], 0, |x, acc| { x + acc });
     assert_eq(sum, 10, "reduce sums values");
 
-    let product = enumerable::reduce([1, 2, 3, 4], 1, fn(x, acc) { x * acc });
+    let product = enumerable::reduce([1, 2, 3, 4], 1, |x, acc| { x * acc });
     assert_eq(product, 24, "reduce multiplies values");
 
-    let empty = enumerable::reduce([], 42, fn(x, acc) { x + acc });
+    let empty = enumerable::reduce([], 42, |x, acc| { x + acc });
     assert_eq(empty, 42, "reduce on empty list returns init");
 }
 
 fn test_find() {
     :io::format("~n--- find ---~n", []);
 
-    let found = enumerable::find([1, 2, 3, 4, 5], fn(x) { x > 3 });
+    let found = enumerable::find([1, 2, 3, 4, 5], |x| { x > 3 });
     assert_eq(found, Some(4), "find returns first match");
 
-    let not_found = enumerable::find([1, 2, 3], fn(x) { x > 10 });
+    let not_found = enumerable::find([1, 2, 3], |x| { x > 10 });
     assert_eq(not_found, None, "find returns None when no match");
 }
 
 fn test_any_all() {
     :io::format("~n--- any/all ---~n", []);
 
-    let has_even = enumerable::any([1, 2, 3], fn(x) { x % 2 == 0 });
+    let has_even = enumerable::any([1, 2, 3], |x| { x % 2 == 0 });
     assert_true(has_even, "any finds even");
 
-    let no_negative = enumerable::any([1, 2, 3], fn(x) { x < 0 });
+    let no_negative = enumerable::any([1, 2, 3], |x| { x < 0 });
     assert_false(no_negative, "any returns false when none match");
 
-    let all_positive = enumerable::all([1, 2, 3], fn(x) { x > 0 });
+    let all_positive = enumerable::all([1, 2, 3], |x| { x > 0 });
     assert_true(all_positive, "all positive");
 
-    let not_all_even = enumerable::all([1, 2, 3], fn(x) { x % 2 == 0 });
+    let not_all_even = enumerable::all([1, 2, 3], |x| { x % 2 == 0 });
     assert_false(not_all_even, "not all even");
 }
 
 fn test_count() {
     :io::format("~n--- count ---~n", []);
 
-    let num_evens = enumerable::count([1, 2, 3, 4, 5], fn(x) { x % 2 == 0 });
+    let num_evens = enumerable::count([1, 2, 3, 4, 5], |x| { x % 2 == 0 });
     assert_eq(num_evens, 2, "count evens");
 
     let total = enumerable::count_all([1, 2, 3, 4, 5]);
@@ -124,7 +124,7 @@ fn test_zip() {
 fn test_flat_map() {
     :io::format("~n--- flat_map ---~n", []);
 
-    let expanded = enumerable::flat_map([1, 2, 3], fn(x) { [x, x * 10] });
+    let expanded = enumerable::flat_map([1, 2, 3], |x| { [x, x * 10] });
     assert_eq(expanded, [1, 10, 2, 20, 3, 30], "flat_map expands");
 }
 
@@ -248,7 +248,7 @@ fn test_map_filter() {
     let m = m.put("bob", 25);
     let m = m.put("charlie", 35);
 
-    let seniors = m.filter(fn(entry) {
+    let seniors = m.filter(|entry| {
         let age = :erlang::element(2, entry);
         age >= 30
     });
@@ -265,7 +265,7 @@ fn test_map_map() {
     let m = m.put("b", 2);
     let m = m.put("c", 3);
 
-    let values = m.map(fn(entry) {
+    let values = m.map(|entry| {
         :erlang::element(2, entry)
     });
 
@@ -281,7 +281,7 @@ fn test_map_reduce() {
     let m = m.put("b", 20);
     let m = m.put("c", 30);
 
-    let total = m.reduce(0, fn(entry, acc) {
+    let total = m.reduce(0, |entry, acc| {
         acc + :erlang::element(2, entry)
     });
 
@@ -296,12 +296,12 @@ fn test_map_any_all() {
     let m = m.put("b", 20);
     let m = m.put("c", 30);
 
-    let has_big = m.any(fn(entry) {
+    let has_big = m.any(|entry| {
         :erlang::element(2, entry) > 25
     });
     assert_true(has_big, "any > 25");
 
-    let all_positive = m.all(fn(entry) {
+    let all_positive = m.all(|entry| {
         :erlang::element(2, entry) > 0
     });
     assert_true(all_positive, "all > 0");
@@ -315,7 +315,7 @@ fn test_map_count() {
     let m = m.put("b", 20);
     let m = m.put("c", 30);
 
-    let big_count = m.count(fn(entry) {
+    let big_count = m.count(|entry| {
         :erlang::element(2, entry) >= 20
     });
 
