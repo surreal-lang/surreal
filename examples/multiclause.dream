@@ -1,0 +1,40 @@
+// Multi-clause functions example
+
+mod multiclause {
+    use io::{println, format};
+
+    // Factorial with pattern matching on parameter
+    pub fn factorial(0) -> int { 1 }
+    pub fn factorial(n: int) -> int { n * factorial(n - 1) }
+
+    // Fibonacci with multiple base cases
+    pub fn fib(0) -> int { 0 }
+    pub fn fib(1) -> int { 1 }
+    pub fn fib(n: int) -> int { fib(n - 1) + fib(n - 2) }
+
+    // Pattern matching on atoms
+    pub fn greet(:hello) -> string { "Hello there!" }
+    pub fn greet(:bye) -> string { "Goodbye!" }
+    pub fn greet(_: atom) -> string { "Unknown greeting" }
+
+    pub fn main() -> atom {
+        println("=== Multi-Clause Functions ===");
+        println("");
+
+        format("factorial(0) = ~p~n", [factorial(0)]);
+        format("factorial(5) = ~p~n", [factorial(5)]);
+        format("factorial(10) = ~p~n", [factorial(10)]);
+
+        println("");
+        format("fib(0) = ~p~n", [fib(0)]);
+        format("fib(1) = ~p~n", [fib(1)]);
+        format("fib(10) = ~p~n", [fib(10)]);
+
+        println("");
+        format("greet(:hello) = ~p~n", [greet(:hello)]);
+        format("greet(:bye) = ~p~n", [greet(:bye)]);
+        format("greet(:other) = ~p~n", [greet(:other)]);
+
+        :ok
+    }
+}

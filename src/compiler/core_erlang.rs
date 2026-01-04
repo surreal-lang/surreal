@@ -472,13 +472,32 @@ impl CoreErlangEmitter {
         // Module header (with Dream. prefix)
         self.emit(&format!("module '{}'", self.module_name));
 
+        // Group functions by (name, arity) for multi-clause support
+        let mut func_groups: std::collections::HashMap<(String, usize), Vec<&Function>> =
+            std::collections::HashMap::new();
+        for item in &module.items {
+            if let Item::Function(f) = item {
+                func_groups
+                    .entry((f.name.clone(), f.params.len()))
+                    .or_default()
+                    .push(f);
+            }
+        }
+
         // Collect exported functions (including impl block methods)
+        // Note: Only one export per (name, arity) even with multiple clauses
         let mut exports: Vec<String> = Vec::new();
+        let mut exported: std::collections::HashSet<(String, usize)> =
+            std::collections::HashSet::new();
 
         for item in &module.items {
             match item {
                 Item::Function(f) if f.is_pub => {
-                    exports.push(format!("'{}'/{}", f.name, f.params.len()));
+                    let key = (f.name.clone(), f.params.len());
+                    if !exported.contains(&key) {
+                        exports.push(format!("'{}'/{}", f.name, f.params.len()));
+                        exported.insert(key);
+                    }
                 }
                 Item::Impl(impl_block) => {
                     for method in &impl_block.methods {
@@ -512,49 +531,62 @@ impl CoreErlangEmitter {
         self.emit("    attributes []");
         self.newline();
 
-        // Emit each function (including impl block methods)
+        // Emit grouped functions (supports multi-clause functions)
+        let mut emitted_funcs: std::collections::HashSet<(String, usize)> =
+            std::collections::HashSet::new();
         for item in &module.items {
-            match item {
-                Item::Function(f) => {
+            if let Item::Function(f) = item {
+                let key = (f.name.clone(), f.params.len());
+                if !emitted_funcs.contains(&key) {
+                    emitted_funcs.insert(key.clone());
+                    if let Some(clauses) = func_groups.get(&key) {
+                        self.newline();
+                        self.emit_function_clauses(&f.name, f.params.len(), clauses)?;
+                    }
+                }
+            }
+        }
+
+        // Emit impl block methods
+        for item in &module.items {
+            if let Item::Impl(impl_block) = item {
+                for method in &impl_block.methods {
+                    let mangled_name = format!("{}_{}", impl_block.type_name, method.name);
+                    let mangled_method = Function {
+                        name: mangled_name,
+                        type_params: method.type_params.clone(),
+                        params: method.params.clone(),
+                        return_type: method.return_type.clone(),
+                        body: method.body.clone(),
+                        is_pub: method.is_pub,
+                        span: method.span.clone(),
+                    };
                     self.newline();
-                    self.emit_function(f)?;
+                    self.emit_function(&mangled_method)?;
                 }
-                Item::Impl(impl_block) => {
-                    for method in &impl_block.methods {
-                        let mangled_name = format!("{}_{}", impl_block.type_name, method.name);
-                        let mangled_method = Function {
-                            name: mangled_name,
-                            type_params: method.type_params.clone(),
-                            params: method.params.clone(),
-                            return_type: method.return_type.clone(),
-                            body: method.body.clone(),
-                            is_pub: method.is_pub,
-                            span: method.span.clone(),
-                        };
-                        self.newline();
-                        self.emit_function(&mangled_method)?;
-                    }
+            }
+        }
+
+        // Emit trait impl methods
+        for item in &module.items {
+            if let Item::TraitImpl(trait_impl) = item {
+                for method in &trait_impl.methods {
+                    let mangled_name = format!(
+                        "{}_{}_{}",
+                        trait_impl.trait_name, trait_impl.type_name, method.name
+                    );
+                    let mangled_method = Function {
+                        name: mangled_name,
+                        type_params: method.type_params.clone(),
+                        params: method.params.clone(),
+                        return_type: method.return_type.clone(),
+                        body: method.body.clone(),
+                        is_pub: method.is_pub,
+                        span: method.span.clone(),
+                    };
+                    self.newline();
+                    self.emit_function(&mangled_method)?;
                 }
-                Item::TraitImpl(trait_impl) => {
-                    for method in &trait_impl.methods {
-                        let mangled_name = format!(
-                            "{}_{}_{}",
-                            trait_impl.trait_name, trait_impl.type_name, method.name
-                        );
-                        let mangled_method = Function {
-                            name: mangled_name,
-                            type_params: method.type_params.clone(),
-                            params: method.params.clone(),
-                            return_type: method.return_type.clone(),
-                            body: method.body.clone(),
-                            is_pub: method.is_pub,
-                            span: method.span.clone(),
-                        };
-                        self.newline();
-                        self.emit_function(&mangled_method)?;
-                    }
-                }
-                _ => {}
             }
         }
 
@@ -610,6 +642,100 @@ impl CoreErlangEmitter {
 
         self.indent -= 1;
         // Reset after function
+        self.has_self_param = false;
+        Ok(())
+    }
+
+    /// Emit a function with multiple clauses (for pattern matching on parameters).
+    /// Core Erlang doesn't support multi-clause fun directly, so we generate:
+    /// ```text
+    /// 'factorial'/1 =
+    ///     fun (_@p0) ->
+    ///         case _@p0 of
+    ///             <0> when 'true' -> 1
+    ///             <N> when 'true' -> call 'erlang':'*'(N, ...)
+    ///         end
+    /// ```
+    fn emit_function_clauses(
+        &mut self,
+        name: &str,
+        arity: usize,
+        clauses: &[&Function],
+    ) -> CoreErlangResult<()> {
+        // For single-clause functions, use simpler direct emission
+        if clauses.len() == 1 {
+            return self.emit_function(clauses[0]);
+        }
+
+        self.emit(&format!("'{}'/{} =", name, arity));
+        self.newline();
+        self.indent += 1;
+
+        // Generate parameter names
+        let param_names: Vec<String> = (0..arity).map(|i| format!("_@p{}", i)).collect();
+
+        self.emit("fun (");
+        self.emit(&param_names.join(", "));
+        self.emit(") ->");
+        self.newline();
+
+        self.indent += 1;
+
+        // For single param, case on that param directly
+        // For multiple params, case on a tuple of params
+        if arity == 1 {
+            self.emit(&format!("case {} of", param_names[0]));
+        } else {
+            self.emit("case {");
+            self.emit(&param_names.join(", "));
+            self.emit("} of");
+        }
+
+        self.newline();
+        self.indent += 1;
+
+        // Emit each clause as a case arm
+        for clause in clauses.iter() {
+            // Collect pattern variables for this clause
+            self.variables.clear();
+            for p in &clause.params {
+                self.collect_pattern_vars(&p.pattern);
+            }
+
+            // Check for self parameter
+            self.has_self_param = clause.params.iter().any(|p| {
+                matches!(&p.pattern, Pattern::Ident(n) if n == "self")
+            });
+
+            // Emit pattern
+            self.emit("<");
+            if arity == 1 {
+                self.emit_pattern(&clause.params[0].pattern)?;
+            } else {
+                self.emit("{");
+                for (j, param) in clause.params.iter().enumerate() {
+                    if j > 0 {
+                        self.emit(", ");
+                    }
+                    self.emit_pattern(&param.pattern)?;
+                }
+                self.emit("}");
+            }
+            self.emit("> when 'true' ->");
+            self.newline();
+
+            self.indent += 1;
+            self.emit_block(&clause.body)?;
+            self.indent -= 1;
+            self.newline();
+        }
+
+        self.indent -= 1;
+        self.emit("end");
+
+        self.indent -= 1;
+
+        self.indent -= 1;
         self.has_self_param = false;
         Ok(())
     }

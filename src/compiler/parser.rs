@@ -382,8 +382,44 @@ impl<'source> Parser<'source> {
         }
 
         let pattern = self.parse_pattern()?;
-        self.expect(&Token::Colon)?;
-        let ty = self.parse_type()?;
+
+        // Type is optional for literal patterns (type can be inferred)
+        let ty = if self.check(&Token::Colon) {
+            self.advance();
+            self.parse_type()?
+        } else {
+            // Infer type from pattern for literals
+            match &pattern {
+                Pattern::Int(_) => Type::Named {
+                    name: "int".to_string(),
+                    type_args: vec![],
+                },
+                Pattern::Atom(_) => Type::Named {
+                    name: "atom".to_string(),
+                    type_args: vec![],
+                },
+                Pattern::Bool(_) => Type::Named {
+                    name: "bool".to_string(),
+                    type_args: vec![],
+                },
+                Pattern::String(_) => Type::Named {
+                    name: "string".to_string(),
+                    type_args: vec![],
+                },
+                Pattern::Wildcard => Type::Named {
+                    name: "any".to_string(),
+                    type_args: vec![],
+                },
+                _ => {
+                    let span = self.current_span();
+                    return Err(ParseError::new(
+                        "type annotation required for this pattern",
+                        span,
+                    ));
+                }
+            }
+        };
+
         Ok(Param { pattern, ty })
     }
 
