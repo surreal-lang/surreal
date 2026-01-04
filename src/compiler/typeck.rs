@@ -822,7 +822,7 @@ impl TypeChecker {
             }
 
             // Method calls
-            Expr::MethodCall { receiver, method, args } => {
+            Expr::MethodCall { receiver, method, args, .. } => {
                 let recv_ty = self.infer_expr(receiver)?;
                 self.infer_method_call(&recv_ty, method, args)
             }
@@ -1427,6 +1427,373 @@ impl Default for TypeChecker {
 pub fn check_module(module: &Module) -> TypeResult<()> {
     let mut checker = TypeChecker::new();
     checker.check_module(module)
+}
+
+// =============================================================================
+// UFCS Method Resolution
+// =============================================================================
+
+/// Map primitive types to their stdlib module.
+/// Returns None for types without a stdlib module (user-defined types, etc.).
+fn primitive_module(ty: &Ty) -> Option<&'static str> {
+    match ty {
+        Ty::String => Some("string"),
+        Ty::List(_) => Some("enumerable"),
+        Ty::RawMap => Some("map"),
+        // Future: extend for user-defined types
+        _ => None,
+    }
+}
+
+/// Infer the return type of a stdlib method.
+/// Used for type-directed resolution of chained method calls.
+fn stdlib_method_return_type(module: &str, method: &str, recv_ty: &Ty) -> Ty {
+    match module {
+        "string" => match method {
+            // String -> String methods
+            "trim" | "to_upper" | "to_lower" | "reverse" | "replace" | "slice" => Ty::String,
+            // String -> Int methods
+            "len" => Ty::Int,
+            // String -> Bool methods
+            "contains" | "starts_with" | "ends_with" | "is_empty" => Ty::Bool,
+            // String -> List methods
+            "split" | "chars" => Ty::List(Box::new(Ty::String)),
+            _ => Ty::Any,
+        },
+        "enumerable" => match method {
+            // List -> List methods (preserve element type)
+            "map" | "filter" | "reject" | "take" | "drop" | "reverse" | "sort" | "uniq" => {
+                recv_ty.clone()
+            }
+            // List -> Int methods
+            "sum" | "count" | "count_all" => Ty::Int,
+            // List -> Bool methods
+            "any" | "all" | "none" | "is_empty" | "member" => Ty::Bool,
+            // List -> element methods (return Any since we don't track element type precisely)
+            "first" | "last" | "find" | "max" | "min" | "reduce" => Ty::Any,
+            _ => Ty::Any,
+        },
+        "map" => match method {
+            // Map operations
+            "get" | "fetch" => Ty::Any,
+            "put" | "delete" | "merge" => Ty::RawMap,
+            "keys" | "values" => Ty::List(Box::new(Ty::Any)),
+            "size" => Ty::Int,
+            "has_key" | "is_empty" => Ty::Bool,
+            _ => Ty::Any,
+        },
+        _ => Ty::Any,
+    }
+}
+
+/// Resolve stdlib method calls in a module.
+/// For method calls on primitive types (string, list, map), fills in `resolved_module`
+/// so codegen can emit UFCS calls to the appropriate stdlib module.
+pub fn resolve_stdlib_methods(module: &mut Module) {
+    let mut resolver = MethodResolver::new();
+    resolver.resolve_module(module);
+}
+
+/// Walks the AST and resolves method calls to stdlib modules.
+struct MethodResolver {
+    /// Variable types in current scope
+    vars: HashMap<String, Ty>,
+}
+
+impl MethodResolver {
+    fn new() -> Self {
+        Self {
+            vars: HashMap::new(),
+        }
+    }
+
+    fn resolve_module(&mut self, module: &mut Module) {
+        for item in &mut module.items {
+            match item {
+                Item::Function(func) => self.resolve_function(func),
+                Item::Impl(impl_block) => {
+                    for method in &mut impl_block.methods {
+                        self.resolve_function(method);
+                    }
+                }
+                Item::TraitImpl(trait_impl) => {
+                    for method in &mut trait_impl.methods {
+                        self.resolve_function(method);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn resolve_function(&mut self, func: &mut Function) {
+        // Bind parameters
+        let old_vars = std::mem::take(&mut self.vars);
+        for param in &func.params {
+            if let Pattern::Ident(name) = &param.pattern {
+                let ty = self.ast_type_to_ty(&param.ty);
+                self.vars.insert(name.clone(), ty);
+            }
+        }
+
+        self.resolve_block(&mut func.body);
+
+        self.vars = old_vars;
+    }
+
+    fn resolve_block(&mut self, block: &mut Block) {
+        for stmt in &mut block.stmts {
+            self.resolve_stmt(stmt);
+        }
+        if let Some(expr) = &mut block.expr {
+            self.resolve_expr(expr);
+        }
+    }
+
+    fn resolve_stmt(&mut self, stmt: &mut Stmt) {
+        match stmt {
+            Stmt::Let { pattern, ty, value } => {
+                self.resolve_expr(value);
+
+                // Bind variable with inferred or annotated type
+                let value_ty = if let Some(ann) = ty {
+                    self.ast_type_to_ty(ann)
+                } else {
+                    self.infer_expr_type(value)
+                };
+
+                if let Pattern::Ident(name) = pattern {
+                    self.vars.insert(name.clone(), value_ty);
+                }
+            }
+            Stmt::Expr(expr) => {
+                self.resolve_expr(expr);
+            }
+        }
+    }
+
+    fn resolve_expr(&mut self, expr: &mut Expr) {
+        match expr {
+            Expr::MethodCall {
+                receiver,
+                method: _,
+                args,
+                resolved_module,
+            } => {
+                // Resolve receiver first
+                self.resolve_expr(receiver);
+
+                // Infer receiver type and look up stdlib module
+                let recv_ty = self.infer_expr_type(receiver);
+                if let Some(module) = primitive_module(&recv_ty) {
+                    *resolved_module = Some(module.to_string());
+                }
+
+                // Resolve args
+                for arg in args {
+                    self.resolve_expr(arg);
+                }
+            }
+
+            // Recursively resolve all other expression types
+            Expr::Binary { left, right, .. } => {
+                self.resolve_expr(left);
+                self.resolve_expr(right);
+            }
+            Expr::Unary { expr, .. } => {
+                self.resolve_expr(expr);
+            }
+            Expr::Call { func, args } => {
+                self.resolve_expr(func);
+                for arg in args {
+                    self.resolve_expr(arg);
+                }
+            }
+            Expr::If {
+                cond,
+                then_block,
+                else_block,
+            } => {
+                self.resolve_expr(cond);
+                self.resolve_block(then_block);
+                if let Some(blk) = else_block {
+                    self.resolve_block(blk);
+                }
+            }
+            Expr::Match { expr, arms } => {
+                self.resolve_expr(expr);
+                for arm in arms {
+                    self.resolve_expr(&mut arm.body);
+                    if let Some(guard) = &mut arm.guard {
+                        self.resolve_expr(guard);
+                    }
+                }
+            }
+            Expr::Block(block) => {
+                self.resolve_block(block);
+            }
+            Expr::Tuple(exprs) | Expr::List(exprs) => {
+                for e in exprs {
+                    self.resolve_expr(e);
+                }
+            }
+            Expr::StructInit { fields, .. } => {
+                for (_, e) in fields {
+                    self.resolve_expr(e);
+                }
+            }
+            Expr::EnumVariant { args, .. } => {
+                for arg in args {
+                    self.resolve_expr(arg);
+                }
+            }
+            Expr::FieldAccess { expr, .. } => {
+                self.resolve_expr(expr);
+            }
+            Expr::Spawn(e) => {
+                self.resolve_expr(e);
+            }
+            Expr::SpawnClosure(block) => {
+                self.resolve_block(block);
+            }
+            Expr::Closure { body, .. } => {
+                self.resolve_block(body);
+            }
+            Expr::Send { to, msg } => {
+                self.resolve_expr(to);
+                self.resolve_expr(msg);
+            }
+            Expr::Pipe { left, right } => {
+                self.resolve_expr(left);
+                self.resolve_expr(right);
+            }
+            Expr::Receive { arms, timeout } => {
+                for arm in arms {
+                    self.resolve_expr(&mut arm.body);
+                }
+                if let Some((timeout_expr, block)) = timeout {
+                    self.resolve_expr(timeout_expr);
+                    self.resolve_block(block);
+                }
+            }
+            Expr::Return(Some(e)) => {
+                self.resolve_expr(e);
+            }
+            Expr::ExternCall { args, .. } => {
+                for arg in args {
+                    self.resolve_expr(arg);
+                }
+            }
+            Expr::BitString(segments) => {
+                for seg in segments {
+                    self.resolve_expr(&mut seg.value);
+                }
+            }
+            // Leaf expressions - no children to resolve
+            Expr::Int(_)
+            | Expr::String(_)
+            | Expr::Atom(_)
+            | Expr::Bool(_)
+            | Expr::Ident(_)
+            | Expr::Path { .. }
+            | Expr::Unit
+            | Expr::Return(None) => {}
+        }
+    }
+
+    /// Simple type inference for the resolver.
+    /// Only needs to determine primitive types for UFCS resolution.
+    fn infer_expr_type(&self, expr: &Expr) -> Ty {
+        match expr {
+            Expr::String(_) => Ty::String,
+            Expr::Int(_) => Ty::Int,
+            Expr::Bool(_) => Ty::Bool,
+            Expr::Atom(_) => Ty::Atom,
+            Expr::Unit => Ty::Unit,
+            Expr::List(_) => Ty::List(Box::new(Ty::Any)),
+            Expr::Tuple(exprs) => {
+                Ty::Tuple(exprs.iter().map(|e| self.infer_expr_type(e)).collect())
+            }
+            Expr::Ident(name) => self.vars.get(name).cloned().unwrap_or(Ty::Any),
+            Expr::FieldAccess { expr, .. } => {
+                // Could look up struct field types, but Any is safe
+                let _ = self.infer_expr_type(expr);
+                Ty::Any
+            }
+            Expr::MethodCall { receiver, method, resolved_module, .. } => {
+                let recv_ty = self.infer_expr_type(receiver);
+                // If resolved to a stdlib module, infer return type
+                if let Some(module) = resolved_module {
+                    stdlib_method_return_type(module, method, &recv_ty)
+                } else {
+                    Ty::Any
+                }
+            }
+            Expr::Call { .. } | Expr::ExternCall { .. } | Expr::Path { .. } => Ty::Any,
+            Expr::Binary { op, .. } => match op {
+                BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => Ty::Int,
+                BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => Ty::Bool,
+                BinOp::And | BinOp::Or => Ty::Bool,
+            },
+            Expr::Unary { op, .. } => match op {
+                UnaryOp::Neg => Ty::Int,
+                UnaryOp::Not => Ty::Bool,
+            },
+            Expr::If { then_block, .. } => {
+                if let Some(expr) = &then_block.expr {
+                    self.infer_expr_type(expr)
+                } else {
+                    Ty::Unit
+                }
+            }
+            Expr::Block(block) => {
+                if let Some(expr) = &block.expr {
+                    self.infer_expr_type(expr)
+                } else {
+                    Ty::Unit
+                }
+            }
+            _ => Ty::Any,
+        }
+    }
+
+    /// Convert AST type to internal Ty (simplified version for resolver).
+    fn ast_type_to_ty(&self, ast_ty: &ast::Type) -> Ty {
+        match ast_ty {
+            ast::Type::Int => Ty::Int,
+            ast::Type::String => Ty::String,
+            ast::Type::Atom => Ty::Atom,
+            ast::Type::Bool => Ty::Bool,
+            ast::Type::Unit => Ty::Unit,
+            ast::Type::Binary => Ty::Binary,
+            ast::Type::Pid => Ty::Pid,
+            ast::Type::Map => Ty::RawMap,
+            ast::Type::Tuple(tys) => {
+                Ty::Tuple(tys.iter().map(|t| self.ast_type_to_ty(t)).collect())
+            }
+            ast::Type::List(t) => Ty::List(Box::new(self.ast_type_to_ty(t))),
+            ast::Type::Named { name, type_args } => {
+                match name.as_str() {
+                    "int" => Ty::Int,
+                    "string" => Ty::String,
+                    "atom" => Ty::Atom,
+                    "bool" => Ty::Bool,
+                    "pid" => Ty::Pid,
+                    "binary" => Ty::Binary,
+                    _ => Ty::Named {
+                        name: name.clone(),
+                        module: None,
+                        args: type_args.iter().map(|t| self.ast_type_to_ty(t)).collect(),
+                    },
+                }
+            }
+            ast::Type::TypeVar(name) => Ty::Var(name.clone()),
+            ast::Type::Fn { params, ret } => Ty::Fn {
+                params: params.iter().map(|t| self.ast_type_to_ty(t)).collect(),
+                ret: Box::new(self.ast_type_to_ty(ret)),
+            },
+        }
+    }
 }
 
 #[cfg(test)]

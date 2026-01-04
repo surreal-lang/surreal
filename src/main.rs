@@ -7,7 +7,7 @@ use std::process::{Command, ExitCode};
 use clap::{Parser, Subcommand};
 
 use dream::{
-    compiler::{check_module, CompilerError, CoreErlangEmitter, Module, ModuleLoader},
+    compiler::{check_module, resolve_stdlib_methods, CompilerError, CoreErlangEmitter, Module, ModuleLoader},
     config::{generate_dream_toml, generate_main_dream, ProjectConfig},
 };
 
@@ -158,7 +158,7 @@ fn cmd_build(file: Option<&Path>, target: &str, output: Option<&Path>) -> ExitCo
     }
 
     // Compile all loaded modules
-    compile_modules(loader.modules(), &build_dir, target)
+    compile_modules(loader.into_modules(), &build_dir, target)
 }
 
 /// Build a standalone .dream file.
@@ -193,16 +193,16 @@ fn compile_and_emit(entry_file: &Path, build_dir: &Path, target: &str) -> ExitCo
         return ExitCode::from(1);
     }
 
-    compile_modules(loader.modules(), build_dir, target)
+    compile_modules(loader.into_modules(), build_dir, target)
 }
 
 /// Compile modules to Core Erlang and optionally BEAM.
-fn compile_modules<'a>(
-    modules: impl Iterator<Item = &'a Module>,
+fn compile_modules(
+    modules: Vec<Module>,
     build_dir: &Path,
     target: &str,
 ) -> ExitCode {
-    let modules: Vec<&Module> = modules.collect();
+    let mut modules = modules;
 
     if modules.is_empty() {
         eprintln!("No modules to compile");
@@ -220,6 +220,11 @@ fn compile_modules<'a>(
                 eprintln!("  Type warning in {}: {:?}", module.name, miette::Report::new(e));
             }
         }
+    }
+
+    // Resolve stdlib method calls (e.g., s.trim() -> string::trim(s))
+    for module in &mut modules {
+        resolve_stdlib_methods(module);
     }
 
     // Compile each module to Core Erlang

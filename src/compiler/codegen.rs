@@ -931,6 +931,7 @@ impl Codegen {
                 receiver,
                 method,
                 args,
+                ..
             } => {
                 // UFCS: x.foo(y, z) becomes foo(x, y, z)
                 let saved_next = self.regs.next_reg;

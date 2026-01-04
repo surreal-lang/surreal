@@ -768,6 +768,7 @@ impl<'source> Parser<'source> {
                         receiver: Box::new(expr),
                         method: field,
                         args,
+                        resolved_module: None,
                     };
                 } else {
                     expr = Expr::FieldAccess {

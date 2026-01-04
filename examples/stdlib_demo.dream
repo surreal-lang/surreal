@@ -9,10 +9,10 @@ pub fn main() -> atom {
     let s = "  Hello, World!  ";
     io::format("Original: '~s'~n", [s]);
     io::format("Trimmed: '~s'~n", [trim(s)]);
-    io::format("Upper: '~s'~n", [s |> trim() |> to_upper()]);
-    io::format("Lower: '~s'~n", [to_lower(trim(s))]);
-    io::format("Length: ~p~n", [len(trim(s))]);
-    io::format("Reversed: '~s'~n", [reverse(trim(s))]);
+    io::format("Upper: '~s'~n", [s.trim().to_upper()]);
+    io::format("Lower: '~s'~n", [s.trim().to_lower()]);
+    io::format("Length: ~p~n", [s.trim().len()]);
+    io::format("Reversed: '~s'~n", [s.trim().reverse()]);
 
     let parts = split("a,b,c,d", ",");
     io::format("Split 'a,b,c,d' by ',': ~p~n", [parts]);

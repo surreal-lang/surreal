@@ -1075,13 +1075,23 @@ impl CoreErlangEmitter {
                 self.emit("}#");
             }
 
-            Expr::MethodCall { receiver, method, args } => {
+            Expr::MethodCall { receiver, method, args, resolved_module } => {
                 // UFCS: Transform expr.method(args) into method(expr, args)
                 let mut all_args = vec![receiver.as_ref().clone()];
                 all_args.extend(args.iter().cloned());
 
-                // Check if it's an imported function
-                if let Some((module, original_name)) = self.imports.get(method) {
+                // Priority 1: Type-directed resolution (from resolve_stdlib_methods pass)
+                if let Some(module) = resolved_module {
+                    self.emit(&format!(
+                        "call '{}':'{}'(",
+                        Self::beam_module_name(module),
+                        method
+                    ));
+                    self.emit_args(&all_args)?;
+                    self.emit(")");
+                }
+                // Priority 2: Check if it's an imported function
+                else if let Some((module, original_name)) = self.imports.get(method) {
                     // Imported function call - add dream:: prefix for Dream stdlib modules
                     self.emit(&format!(
                         "call '{}':'{}'(",

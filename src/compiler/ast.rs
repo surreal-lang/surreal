@@ -180,6 +180,10 @@ pub enum Expr {
         receiver: Box<Expr>,
         method: String,
         args: Vec<Expr>,
+        /// Module for UFCS dispatch, filled by resolution pass.
+        /// When set, `x.foo(args)` becomes `module::foo(x, args)`.
+        /// Currently used for stdlib primitives; extensible to UDTs.
+        resolved_module: Option<String>,
     },
     /// If expression.
     If {
