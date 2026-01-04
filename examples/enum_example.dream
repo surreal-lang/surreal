@@ -1,7 +1,51 @@
 /// Enum module example - demonstrating collection operations
 
-use enumerable::{map, filter, reduce, find, any, all, count, take, drop};
-use enumerable::{flat_map, sort_by, uniq, chunk, zip, reverse, range};
+// Import enumerable functions for list operations
+// Note: We use qualified names for Map methods to avoid conflicts
+use enumerable::{flat_map, sort_by, uniq, chunk, zip, range};
+
+// Local Map struct for the Iter trait demo
+pub struct Map {
+    data: map,
+}
+
+impl Map {
+    pub fn new() -> Map {
+        Map { data: :maps::new() }
+    }
+
+    pub fn put<K, V>(self, key: K, value: V) -> Map {
+        Map { data: :maps::put(key, value, self.data) }
+    }
+
+    // Iter trait method
+    pub fn to_list<K, V>(self) -> [(K, V)] {
+        :maps::to_list(self.data)
+    }
+}
+
+// Enumerable operations for Map - each entry is a (key, value) tuple
+impl Map {
+    pub fn map<K, V, U>(self, f: fn((K, V)) -> U) -> [U] {
+        :lists::map(f, :maps::to_list(self.data))
+    }
+
+    pub fn filter<K, V>(self, pred: fn((K, V)) -> bool) -> [(K, V)] {
+        :lists::filter(pred, :maps::to_list(self.data))
+    }
+
+    pub fn reduce<K, V, Acc>(self, init: Acc, f: fn((K, V), Acc) -> Acc) -> Acc {
+        :lists::foldl(f, init, :maps::to_list(self.data))
+    }
+
+    pub fn any<K, V>(self, pred: fn((K, V)) -> bool) -> bool {
+        :lists::any(pred, :maps::to_list(self.data))
+    }
+
+    pub fn count<K, V>(self, pred: fn((K, V)) -> bool) -> int {
+        :erlang::length(:lists::filter(pred, :maps::to_list(self.data)))
+    }
+}
 
 pub fn main() -> atom {
     :io::format("=== Enum Module Example ===~n", []);
@@ -11,43 +55,43 @@ pub fn main() -> atom {
     :io::format("Numbers: ~p~n", [numbers]);
 
     // Map - transform each element
-    let doubled = map(numbers, fn(x) { x * 2 });
+    let doubled = enumerable::map(numbers, fn(x) { x * 2 });
     :io::format("Doubled: ~p~n", [doubled]);
 
     // Filter - keep matching elements
-    let evens = filter(numbers, fn(x) { x % 2 == 0 });
+    let evens = enumerable::filter(numbers, fn(x) { x % 2 == 0 });
     :io::format("Evens: ~p~n", [evens]);
 
     // Reduce - accumulate a value
-    let sum = reduce(numbers, 0, fn(x, acc) { x + acc });
+    let sum = enumerable::reduce(numbers, 0, fn(x, acc) { x + acc });
     :io::format("Sum: ~p~n", [sum]);
 
     :io::format("~n--- Searching ---~n", []);
 
     // Find - first matching element
-    let first_gt_5 = find(numbers, fn(x) { x > 5 });
+    let first_gt_5 = enumerable::find(numbers, fn(x) { x > 5 });
     :io::format("First > 5: ~p~n", [first_gt_5]);
 
     // Any - check if any match
-    let has_even = any(numbers, fn(x) { x % 2 == 0 });
+    let has_even = enumerable::any(numbers, fn(x) { x % 2 == 0 });
     :io::format("Has even? ~p~n", [has_even]);
 
     // All - check if all match
-    let all_positive = all(numbers, fn(x) { x > 0 });
+    let all_positive = enumerable::all(numbers, fn(x) { x > 0 });
     :io::format("All positive? ~p~n", [all_positive]);
 
     // Count - count matching elements
-    let num_evens = count(numbers, fn(x) { x % 2 == 0 });
+    let num_evens = enumerable::count(numbers, fn(x) { x % 2 == 0 });
     :io::format("Count of evens: ~p~n", [num_evens]);
 
     :io::format("~n--- Slicing ---~n", []);
 
     // Take - first n elements
-    let first_three = take(numbers, 3);
+    let first_three = enumerable::take(numbers, 3);
     :io::format("First 3: ~p~n", [first_three]);
 
     // Drop - skip first n elements
-    let after_three = drop(numbers, 3);
+    let after_three = enumerable::drop(numbers, 3);
     :io::format("After 3: ~p~n", [after_three]);
 
     // Chunk - split into sublists
@@ -80,13 +124,55 @@ pub fn main() -> atom {
     :io::format("Unique: ~p~n", [unique]);
 
     // Reverse
-    let reversed = reverse(numbers);
+    let reversed = enumerable::reverse(numbers);
     :io::format("Reversed: ~p~n", [reversed]);
 
     :io::format("~n--- Ranges ---~n", []);
 
     let r = range(1, 5);
     :io::format("Range 1..5: ~p~n", [r]);
+
+    :io::format("~n--- Iter Trait (Map) ---~n", []);
+
+    // Create a map
+    let m = Map::new();
+    let m = m.put("alice", 30);
+    let m = m.put("bob", 25);
+    let m = m.put("charlie", 35);
+
+    // Use enumerable methods directly on the Map!
+    :io::format("Map entries: ~p~n", [m.to_list()]);
+
+    // Filter map entries where age > 28
+    let seniors = m.filter(fn(entry) {
+        let age = :erlang::element(2, entry);
+        age > 28
+    });
+    :io::format("Age > 28: ~p~n", [seniors]);
+
+    // Map over entries to extract just names
+    let names = m.map(fn(entry) {
+        :erlang::element(1, entry)
+    });
+    :io::format("Names: ~p~n", [names]);
+
+    // Reduce to sum all ages
+    let total_age = m.reduce(0, fn(entry, acc) {
+        acc + :erlang::element(2, entry)
+    });
+    :io::format("Total age: ~p~n", [total_age]);
+
+    // Check if any entry has age > 40
+    let has_over_40 = m.any(fn(entry) {
+        :erlang::element(2, entry) > 40
+    });
+    :io::format("Has anyone over 40? ~p~n", [has_over_40]);
+
+    // Count entries with age >= 30
+    let count_30_plus = m.count(fn(entry) {
+        :erlang::element(2, entry) >= 30
+    });
+    :io::format("Count age >= 30: ~p~n", [count_30_plus]);
 
     :io::format("~nDone!~n", []);
     :ok

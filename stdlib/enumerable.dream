@@ -4,6 +4,40 @@
 // Inspired by Elixir's Enum module.
 
 // =============================================================================
+// Iter Trait
+// =============================================================================
+
+/// Trait for iterable collections.
+///
+/// Types implementing Iter provide enumerable operations as methods,
+/// allowing a fluent interface: `my_map.filter(...).map(...)`
+///
+/// For lists, use the module functions: `enumerable::map(list, f)`
+/// For Iter types, use method syntax: `my_map.map(f)`
+///
+/// Required:
+///   fn to_list(self) - Convert to a list
+///
+/// Recommended methods to implement in impl block:
+///   fn map(self, f) - Transform each element
+///   fn filter(self, pred) - Keep matching elements
+///   fn reduce(self, init, f) - Fold to a single value
+///   fn any(self, pred) - Check if any match
+///   fn all(self, pred) - Check if all match
+///   fn count(self, pred) - Count matches
+///   fn take(self, n) - First n elements
+///   fn drop(self, n) - Skip first n elements
+///   fn reverse(self) - Reverse order
+///
+/// Example:
+///   let seniors = people_map.filter(fn(e) { e.age > 30 });
+///   let names = seniors.map(fn(e) { e.name });
+trait Iter {
+    /// Convert to a list for iteration.
+    fn to_list(self);
+}
+
+// =============================================================================
 // Core Transformations
 // =============================================================================
 

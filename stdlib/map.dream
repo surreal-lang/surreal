@@ -98,3 +98,49 @@ impl Map {
         :maps::size(self.data) == 0
     }
 }
+
+/// Implement Iter trait for Map
+impl Iter for Map {
+    pub fn to_list(self) {
+        :maps::to_list(self.data)
+    }
+}
+
+/// Enumerable operations for Map - each entry is a (key, value) tuple.
+impl Map {
+    pub fn map<K, V, U>(self, f: fn((K, V)) -> U) -> [U] {
+        :lists::map(f, :maps::to_list(self.data))
+    }
+
+    pub fn filter<K, V>(self, pred: fn((K, V)) -> bool) -> [(K, V)] {
+        :lists::filter(pred, :maps::to_list(self.data))
+    }
+
+    pub fn reduce<K, V, Acc>(self, init: Acc, f: fn((K, V), Acc) -> Acc) -> Acc {
+        :lists::foldl(f, init, :maps::to_list(self.data))
+    }
+
+    pub fn any<K, V>(self, pred: fn((K, V)) -> bool) -> bool {
+        :lists::any(pred, :maps::to_list(self.data))
+    }
+
+    pub fn all<K, V>(self, pred: fn((K, V)) -> bool) -> bool {
+        :lists::all(pred, :maps::to_list(self.data))
+    }
+
+    pub fn count<K, V>(self, pred: fn((K, V)) -> bool) -> int {
+        :erlang::length(:lists::filter(pred, :maps::to_list(self.data)))
+    }
+
+    pub fn take<K, V>(self, n: int) -> [(K, V)] {
+        :lists::sublist(:maps::to_list(self.data), n)
+    }
+
+    pub fn drop<K, V>(self, n: int) -> [(K, V)] {
+        :lists::nthtail(n, :maps::to_list(self.data))
+    }
+
+    pub fn reverse<K, V>(self) -> [(K, V)] {
+        :lists::reverse(:maps::to_list(self.data))
+    }
+}
