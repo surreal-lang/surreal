@@ -220,7 +220,7 @@ impl TypeEnv {
     /// Create a child scope that inherits from this environment.
     pub fn child(&self) -> Self {
         Self {
-            vars: HashMap::new(),
+            vars: self.vars.clone(),
             structs: self.structs.clone(),
             enums: self.enums.clone(),
             functions: self.functions.clone(),
