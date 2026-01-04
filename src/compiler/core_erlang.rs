@@ -1346,14 +1346,24 @@ impl CoreErlangEmitter {
             self.newline();
         }
 
-        // Catch-all: message doesn't match any pattern (selective receive)
-        self.emit(&format!("<{other_var}> when 'true' ->"));
-        self.indent += 1;
-        self.newline();
-        self.emit("do primop 'recv_next'()");
-        self.newline();
-        self.emit(&format!("apply '{recv_loop}'/0()"));
-        self.indent -= 1;
+        // Check if any arm has a catch-all pattern (wildcard or unguarded variable)
+        // If so, we don't need the recv_next fallback as it would be unreachable
+        let has_catchall = arms.iter().any(|arm| {
+            arm.guard.is_none()
+                && matches!(arm.pattern, Pattern::Wildcard | Pattern::Ident(_))
+        });
+
+        if !has_catchall {
+            // Catch-all: message doesn't match any pattern (selective receive)
+            self.emit(&format!("<{other_var}> when 'true' ->"));
+            self.indent += 1;
+            self.newline();
+            self.emit("do primop 'recv_next'()");
+            self.newline();
+            self.emit(&format!("apply '{recv_loop}'/0()"));
+            self.indent -= 1;
+            self.newline();
+        }
 
         // end (case Msg of)
         self.indent -= 1; // back to inner case level (same as case keyword)
