@@ -226,18 +226,25 @@ fn compile_modules_with_registry(
     }
 
     // Type check all modules together (allows cross-module type references)
+    let mut has_errors = false;
     for (module_name, result) in check_modules(&modules) {
         if let Err(e) = result {
+            has_errors = true;
             // Find the module to get source for error display
             if let Some(module) = modules.iter().find(|m| m.name == module_name) {
                 if let Some(ref source) = module.source {
                     let err = CompilerError::type_error(&module_name, source, e);
-                    eprintln!("  Type warning in {}:\n{:?}", module_name, miette::Report::new(err));
+                    eprintln!("  Type error in {}:\n{:?}", module_name, miette::Report::new(err));
                 } else {
-                    eprintln!("  Type warning in {}: {:?}", module_name, miette::Report::new(e));
+                    eprintln!("  Type error in {}: {:?}", module_name, miette::Report::new(e));
                 }
             }
         }
+    }
+
+    if has_errors {
+        eprintln!("\nCompilation failed due to type errors.");
+        return ExitCode::from(1);
     }
 
     // Resolve stdlib method calls (e.g., s.trim() -> string::trim(s))
