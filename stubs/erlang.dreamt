@@ -162,7 +162,7 @@ extern mod erlang {
     fn processes() -> [pid];
     fn purge_module(arg0: any) -> atom;
     fn put(arg0: any, arg1: any) -> any;
-    fn raise(arg0: any, arg1: any, arg2: any) -> any;
+    fn raise(arg0: any, arg1: any, arg2: any) -> atom;
     fn read_timer(arg0: any) -> any;
     fn read_timer(arg0: any, arg1: any) -> any;
     fn ref_to_list(arg0: any) -> string;
@@ -293,12 +293,12 @@ extern mod erlang {
     fn port_info(arg0: any, arg1: any) -> any;
     fn port_set_data(arg0: any, arg1: any) -> atom;
     fn port_get_data(arg0: any) -> any;
-    fn dist_ctrl_input_handler(arg0: any, arg1: any) -> any;
-    fn dist_ctrl_put_data(arg0: any, arg1: any) -> any;
+    fn dist_ctrl_input_handler(arg0: any, arg1: any) -> atom;
+    fn dist_ctrl_put_data(arg0: any, arg1: any) -> atom;
     fn dist_ctrl_get_data(arg0: any) -> any;
-    fn dist_ctrl_get_data_notification(arg0: any) -> any;
-    fn dist_ctrl_set_opt(arg0: any, arg1: any, arg2: any) -> any;
-    fn dist_ctrl_get_opt(arg0: any, arg1: any) -> any;
+    fn dist_ctrl_get_data_notification(arg0: any) -> atom;
+    fn dist_ctrl_set_opt(arg0: any, arg1: atom, arg2: any) -> any;
+    fn dist_ctrl_get_opt(arg0: any, arg1: atom) -> any;
     fn dist_get_stat(arg0: any) -> any;
     fn delay_trap(arg0: any, arg1: any) -> any;
     fn set_cookie(arg0: any) -> atom;

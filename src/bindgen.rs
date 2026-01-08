@@ -273,7 +273,13 @@ fn split_top_level(s: &str, delim: char) -> Vec<&str> {
 fn parse_type(s: &str) -> ErlangType {
     let s = s.trim();
 
-    // Strip single quotes from atom type names
+    // Check for atom literals BEFORE stripping quotes
+    if s.starts_with('\'') && s.ends_with('\'') && s.len() > 2 {
+        // Atom literal like 'ok' or 'error'
+        return ErlangType::Named("atom".to_string());
+    }
+
+    // Strip single quotes from atom type names (for types like 'atom')
     let s = s.trim_matches('\'');
 
     // Handle inline annotations: "Name :: Type" -> just Type

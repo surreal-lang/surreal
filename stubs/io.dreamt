@@ -3,11 +3,11 @@
 
 // Erlang module: io
 extern mod io {
-    fn printable_range() -> any;
-    fn put_chars(arg0: any) -> any;
-    fn put_chars(arg0: any, arg1: any) -> any;
-    fn nl() -> any;
-    fn nl(arg0: any) -> any;
+    fn printable_range() -> atom;
+    fn put_chars(arg0: any) -> atom;
+    fn put_chars(arg0: any, arg1: any) -> atom;
+    fn nl() -> atom;
+    fn nl(arg0: any) -> atom;
     fn columns() -> any;
     fn columns(arg0: any) -> any;
     fn rows() -> any;
@@ -20,20 +20,20 @@ extern mod io {
     fn getopts(arg0: any) -> any;
     fn setopts(arg0: any) -> any;
     fn setopts(arg0: any, arg1: any) -> any;
-    fn write(arg0: any) -> any;
-    fn write(arg0: any, arg1: any) -> any;
+    fn write(arg0: any) -> atom;
+    fn write(arg0: any, arg1: any) -> atom;
     fn read(arg0: any) -> any;
     fn read(arg0: any, arg1: any) -> any;
     fn read(arg0: any, arg1: any, arg2: any) -> any;
     fn read(arg0: any, arg1: any, arg2: any, arg3: any) -> any;
-    fn fwrite(arg0: any) -> any;
-    fn fwrite(arg0: any, arg1: any) -> any;
-    fn fwrite(arg0: any, arg1: any, arg2: any) -> any;
+    fn fwrite(arg0: any) -> atom;
+    fn fwrite(arg0: any, arg1: any) -> atom;
+    fn fwrite(arg0: any, arg1: any, arg2: any) -> atom;
     fn fread(arg0: any, arg1: any) -> any;
     fn fread(arg0: any, arg1: any, arg2: any) -> any;
-    fn format(arg0: any) -> any;
-    fn format(arg0: any, arg1: any) -> any;
-    fn format(arg0: any, arg1: any, arg2: any) -> any;
+    fn format(arg0: any) -> atom;
+    fn format(arg0: any, arg1: any) -> atom;
+    fn format(arg0: any, arg1: any, arg2: any) -> atom;
     fn scan_erl_exprs(arg0: any) -> any;
     fn scan_erl_exprs(arg0: any, arg1: any) -> any;
     fn scan_erl_exprs(arg0: any, arg1: any, arg2: any) -> any;
