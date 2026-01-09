@@ -989,10 +989,8 @@ impl CoreErlangEmitter {
         for item in &module.items {
             match item {
                 Item::Function(f) if f.is_pub => {
-                    // Skip generic functions - they are only exported when monomorphized
-                    if !f.type_params.is_empty() {
-                        continue;
-                    }
+                    // Note: Generic functions ARE exported - Erlang is dynamically typed
+                    // so they work at runtime via type erasure
                     let key = (f.name.clone(), f.params.len());
                     if !exported.contains(&key) {
                         exports.push(format!("'{}'/{}", f.name, f.params.len()));
@@ -1058,15 +1056,12 @@ impl CoreErlangEmitter {
         self.newline();
 
         // Emit grouped functions (supports multi-clause functions)
-        // Skip generic functions - they are only emitted via monomorphization
         let mut emitted_funcs: std::collections::HashSet<(String, usize)> =
             std::collections::HashSet::new();
         for item in &module.items {
             if let Item::Function(f) = item {
-                // Skip generic functions - they can only be used via monomorphization
-                if !f.type_params.is_empty() {
-                    continue;
-                }
+                // Note: Generic functions ARE emitted - Erlang is dynamically typed
+                // so they work at runtime via type erasure
                 let key = (f.name.clone(), f.params.len());
                 if !emitted_funcs.contains(&key) {
                     emitted_funcs.insert(key.clone());
@@ -2914,12 +2909,29 @@ impl Default for CoreErlangEmitter {
 
 /// Convenience function to compile source code to Core Erlang.
 pub fn emit_core_erlang(source: &str) -> CoreErlangResult<String> {
+    emit_core_erlang_with_typecheck(source, false)
+}
+
+/// Compile source code to Core Erlang, optionally with type checking and annotation.
+/// When typecheck is true, the module goes through type checking which performs
+/// transformations like wrapping FFI Result<T, E> returns.
+pub fn emit_core_erlang_with_typecheck(source: &str, typecheck: bool) -> CoreErlangResult<String> {
     use crate::compiler::parser::Parser;
 
     let mut parser = Parser::new(source);
     let module = parser
         .parse_module()
         .map_err(|e| CoreErlangError::new(format!("Parse error: {}", e.message)))?;
+
+    let module = if typecheck {
+        use crate::compiler::typeck::check_modules;
+        // Type check and annotate the module
+        let results = check_modules(&[module]);
+        let (_, result) = results.into_iter().next().unwrap();
+        result.map_err(|e| CoreErlangError::new(format!("Type error: {}", e.message)))?
+    } else {
+        module
+    };
 
     let mut emitter = CoreErlangEmitter::new();
     emitter.emit_module(&module)
@@ -3101,5 +3113,60 @@ mod tests {
         // Err("oops") should compile to {'error', "oops"}, not {'err', ...}
         assert!(result.contains("{'error'"));
         assert!(!result.contains("{'err'"));
+    }
+
+    #[test]
+    fn test_extern_call_result_transformation() {
+        // When extern function declares Result<T, E> return type,
+        // the call should be transformed to wrap the Erlang {:ok, T} | {:error, E} tuple
+        let source = r#"
+            mod test {
+                extern mod file {
+                    fn read_file(path: string) -> Result<binary, atom>;
+                }
+
+                pub fn read(path: string) -> Result<binary, atom> {
+                    :file::read_file(path)
+                }
+            }
+        "#;
+
+        // Use typecheck=true to trigger the FFI Result transformation
+        let result = emit_core_erlang_with_typecheck(source, true).unwrap();
+        // Should contain a case expression that wraps the extern call
+        assert!(result.contains("call 'file':'read_file'"), "missing file:read_file call");
+        // Should contain pattern matching on {:ok, _} and {:error, _}
+        assert!(result.contains("'ok'"), "missing 'ok' atom in output:\n{}", result);
+        assert!(result.contains("'error'"), "missing 'error' atom in output:\n{}", result);
+        // Should NOT contain function calls to Ok/Err (which would be apply 'Ok'/1)
+        assert!(!result.contains("apply 'Ok'"), "should not have apply 'Ok' call, got:\n{}", result);
+        assert!(!result.contains("apply 'Err'"), "should not have apply 'Err' call, got:\n{}", result);
+        // Should have proper tuple construction
+        assert!(result.contains("{'ok'"), "should have {{'ok', ...}} tuple construction, got:\n{}", result);
+        assert!(result.contains("{'error'"), "should have {{'error', ...}} tuple construction, got:\n{}", result);
+    }
+
+    #[test]
+    fn test_ffi_result_with_unwrap_or() {
+        // Test that unwrap_or works with FFI Result transformation
+        let source = r#"
+            mod test {
+                extern mod file {
+                    fn read_file(path: any) -> Result<binary, atom>;
+                }
+
+                pub fn read_with_default(path: any) -> binary {
+                    :file::read_file(path).unwrap_or(<<"default">>)
+                }
+            }
+        "#;
+
+        let result = emit_core_erlang_with_typecheck(source, true).unwrap();
+
+        // The FFI call should be transformed to return Result, then unwrap_or is called on it
+        assert!(result.contains("call 'file':'read_file'"), "missing file:read_file call in:\n{}", result);
+        // The Result should have proper tuple construction before unwrap_or is called
+        assert!(result.contains("{'ok'"), "missing {{'ok', ...}} in:\n{}", result);
+        assert!(result.contains("{'error'"), "missing {{'error', ...}} in:\n{}", result);
     }
 }

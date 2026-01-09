@@ -1,0 +1,77 @@
+// FFI Result Example - Demonstrates automatic Result wrapping for FFI calls
+//
+// When an extern function declares Result<T, E> as its return type,
+// the compiler automatically wraps the Erlang {:ok, T} | {:error, E} tuple
+// into Dream's Result type, enabling ergonomic method chaining.
+
+mod ffi_result_example {
+    use io::{println, format};
+
+    // Declare the file module with Result return types
+    // The compiler will automatically wrap Erlang tuples
+    extern mod file {
+        fn read_file(path: any) -> Result<binary, atom>;
+        fn write_file(path: any, content: any) -> Result<(), atom>;
+        fn get_cwd() -> Result<any, atom>;
+        fn list_dir(path: any) -> Result<[any], atom>;
+        fn delete(path: any) -> Result<(), atom>;
+    }
+
+    pub fn main() -> atom {
+        println("=== FFI Result Ergonomics Example ===");
+        println("");
+
+        // Example 1: Direct Result return
+        // The FFI call returns Result<binary, atom> directly
+        println("1. Reading current directory with Result:");
+        let cwd_result = :file::get_cwd();
+        match cwd_result {
+            Ok(dir) => format("   Current dir: ~s~n", [dir]),
+            Err(reason) => format("   Error: ~p~n", [reason])
+        };
+        println("");
+
+        // Example 2: Using is_ok/is_err
+        println("2. Checking result status:");
+        let result = :file::read_file("/etc/hosts");
+        format("   /etc/hosts exists: ~p~n", [result.is_ok()]);
+
+        let bad_result = :file::read_file("/nonexistent/path");
+        format("   Bad path is error: ~p~n", [bad_result.is_err()]);
+        println("");
+
+        // Example 3: Using unwrap_or for default values
+        println("3. Reading a file with unwrap_or:");
+        // Using atom as default to avoid binary literal issues
+        let default_content = "default";
+        let content = :file::read_file("/tmp/nonexistent_file.txt")
+            .unwrap_or(default_content);
+        format("   Content: ~p~n", [content]);
+        println("");
+
+        // Example 4: Chaining with Result methods
+        println("4. Writing and reading a test file:");
+        let test_file = "/tmp/dream_ffi_test.txt";
+        let test_content = "Hello from Dream FFI!";
+
+        // Write returns Result<(), atom>
+        match :file::write_file(test_file, test_content) {
+            Ok(()) => {
+                println("   Write succeeded!");
+                // Read returns Result<binary, atom>
+                match :file::read_file(test_file) {
+                    Ok(data) => format("   Read back: ~s~n", [data]),
+                    Err(e) => format("   Read error: ~p~n", [e])
+                }
+            },
+            Err(e) => format("   Write error: ~p~n", [e])
+        };
+        println("");
+
+        // Clean up (ignore result)
+        let _ = :file::delete(test_file);
+
+        println("=== Done ===");
+        :ok
+    }
+}

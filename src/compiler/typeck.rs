@@ -2396,15 +2396,25 @@ impl TypeChecker {
 
             // Enum variants
             Pattern::Enum { name, variant, fields } => {
+                // If name is empty, infer it from the scrutinee type
+                let enum_name = if name.is_empty() {
+                    match ty {
+                        Ty::Named { name: ty_name, .. } => ty_name.clone(),
+                        _ => name.clone(),
+                    }
+                } else {
+                    name.clone()
+                };
+
                 // Get enum info to determine field types
-                let field_types = self.get_enum_variant_types(name, variant);
+                let field_types = self.get_enum_variant_types(&enum_name, variant);
                 let decon_fields: Vec<DeconstructedPat> = fields
                     .iter()
                     .zip(field_types.iter())
                     .map(|(p, ft)| self.deconstruct_pattern(p, ft))
                     .collect();
                 DeconstructedPat {
-                    ctor: Constructor::Variant(name.clone(), variant.clone(), fields.len()),
+                    ctor: Constructor::Variant(enum_name, variant.clone(), fields.len()),
                     fields: decon_fields,
                     ty: ty.clone(),
                 }
@@ -2935,11 +2945,34 @@ impl TypeChecker {
                 expr: Box::new(self.annotate_expr(expr)),
             },
 
-            Expr::ExternCall { module, function, args } => Expr::ExternCall {
-                module: module.clone(),
-                function: function.clone(),
-                args: args.iter().map(|a| self.annotate_expr(a)).collect(),
-            },
+            Expr::ExternCall { module, function, args } => {
+                let annotated_args: Vec<Expr> = args.iter().map(|a| self.annotate_expr(a)).collect();
+
+                // Check if the extern function returns Result<T, E> or Option<T>
+                // If so, transform to a match expression that wraps the Erlang tuple
+                let arity = args.len();
+                if let Some(info) = self.env.get_extern_function(module, function, arity).cloned() {
+                    // Check for Result<T, E> return type
+                    if let Ty::Named { name, args: type_args, .. } = &info.ret {
+                        if name == "Result" && type_args.len() == 2 {
+                            // Check if Ok type is Unit - Erlang returns just 'ok' for Result<(), E>
+                            let is_unit_ok = matches!(&type_args[0], Ty::Unit);
+                            return self.transform_extern_to_result(module, function, annotated_args, is_unit_ok);
+                        }
+                        if name == "Option" && type_args.len() == 1 {
+                            // Transform: :mod::func(args) => match :mod::func(args) { :undefined => None, v => Some(v) }
+                            return self.transform_extern_to_option(module, function, annotated_args);
+                        }
+                    }
+                }
+
+                // No transformation needed
+                Expr::ExternCall {
+                    module: module.clone(),
+                    function: function.clone(),
+                    args: annotated_args,
+                }
+            }
 
             Expr::BitString(segments) => Expr::BitString(
                 segments.iter().map(|seg| ast::BitStringSegment {
@@ -2966,6 +2999,107 @@ impl TypeChecker {
                 }).collect();
                 Expr::StringInterpolation(annotated_parts)
             }
+        }
+    }
+
+    /// Transform an extern call with Result<T, E> return type into a match expression.
+    /// Converts: :mod::func(args)
+    /// Into: match :mod::func(args) { (:ok, v) => Ok(v), (:error, e) => Err(e) }
+    /// For Result<(), E>, Erlang returns just 'ok' atom instead of {:ok, _}
+    fn transform_extern_to_result(&mut self, module: &str, function: &str, args: Vec<Expr>, is_unit_ok: bool) -> Expr {
+        // Create the raw extern call (this will return {:ok, T} | {:error, E} from Erlang)
+        let extern_call = Expr::ExternCall {
+            module: module.to_string(),
+            function: function.to_string(),
+            args,
+        };
+
+        // Create match arms based on whether Ok type is Unit
+        let ok_arm = if is_unit_ok {
+            // For Result<(), E>: Erlang returns just 'ok' atom
+            // :ok => Ok(())
+            MatchArm {
+                pattern: Pattern::Atom("ok".to_string()),
+                guard: None,
+                body: Expr::EnumVariant {
+                    type_name: Some("Result".to_string()),
+                    variant: "Ok".to_string(),
+                    args: vec![Expr::Unit],
+                },
+            }
+        } else {
+            // For Result<T, E>: Erlang returns {:ok, value}
+            // (:ok, __val) => Ok(__val)
+            MatchArm {
+                pattern: Pattern::Tuple(vec![
+                    Pattern::Atom("ok".to_string()),
+                    Pattern::Ident("__ffi_val".to_string()),
+                ]),
+                guard: None,
+                body: Expr::EnumVariant {
+                    type_name: Some("Result".to_string()),
+                    variant: "Ok".to_string(),
+                    args: vec![Expr::Ident("__ffi_val".to_string())],
+                },
+            }
+        };
+
+        let err_arm = MatchArm {
+            pattern: Pattern::Tuple(vec![
+                Pattern::Atom("error".to_string()),
+                Pattern::Ident("__ffi_err".to_string()),
+            ]),
+            guard: None,
+            body: Expr::EnumVariant {
+                type_name: Some("Result".to_string()),
+                variant: "Err".to_string(),
+                args: vec![Expr::Ident("__ffi_err".to_string())],
+            },
+        };
+
+        Expr::Match {
+            expr: Box::new(extern_call),
+            arms: vec![ok_arm, err_arm],
+        }
+    }
+
+    /// Transform an extern call with Option<T> return type into a match expression.
+    /// Converts: :mod::func(args)
+    /// Into: match :mod::func(args) { :undefined => None, v => Some(v) }
+    fn transform_extern_to_option(&mut self, module: &str, function: &str, args: Vec<Expr>) -> Expr {
+        // Create the raw extern call
+        let extern_call = Expr::ExternCall {
+            module: module.to_string(),
+            function: function.to_string(),
+            args,
+        };
+
+        // Create match arms:
+        // :undefined => None
+        // __val => Some(__val)
+        let none_arm = MatchArm {
+            pattern: Pattern::Atom("undefined".to_string()),
+            guard: None,
+            body: Expr::EnumVariant {
+                type_name: Some("Option".to_string()),
+                variant: "None".to_string(),
+                args: vec![],
+            },
+        };
+
+        let some_arm = MatchArm {
+            pattern: Pattern::Ident("__ffi_val".to_string()),
+            guard: None,
+            body: Expr::EnumVariant {
+                type_name: Some("Option".to_string()),
+                variant: "Some".to_string(),
+                args: vec![Expr::Ident("__ffi_val".to_string())],
+            },
+        };
+
+        Expr::Match {
+            expr: Box::new(extern_call),
+            arms: vec![none_arm, some_arm],
         }
     }
 
@@ -3096,6 +3230,9 @@ fn primitive_module(ty: &Ty) -> Option<&'static str> {
         Ty::String => Some("string"),
         Ty::List(_) => Some("enumerable"),
         Ty::RawMap => Some("map"),
+        // Result and Option types resolve to their stdlib modules
+        Ty::Named { name, .. } if name == "Result" => Some("result"),
+        Ty::Named { name, .. } if name == "Option" => Some("option"),
         // Future: extend for user-defined types
         _ => None,
     }
@@ -3431,6 +3568,32 @@ impl MethodResolver {
                     Ty::Unit
                 }
             }
+            Expr::Match { arms, .. } => {
+                // Infer return type from first arm's body
+                if let Some(arm) = arms.first() {
+                    // Check if arm body is an EnumVariant (e.g., Ok(v) or Err(e))
+                    if let Expr::EnumVariant { type_name: Some(type_name), .. } = &arm.body {
+                        // Return the enum type (e.g., Result, Option)
+                        Ty::Named {
+                            name: type_name.clone(),
+                            module: None,
+                            args: vec![Ty::Any, Ty::Any],
+                        }
+                    } else {
+                        self.infer_expr_type(&arm.body)
+                    }
+                } else {
+                    Ty::Any
+                }
+            }
+            Expr::EnumVariant { type_name: Some(type_name), .. } => {
+                // Return the enum type (e.g., Result, Option)
+                Ty::Named {
+                    name: type_name.clone(),
+                    module: None,
+                    args: vec![Ty::Any, Ty::Any],
+                }
+            }
             _ => Ty::Any,
         }
     }
@@ -3687,6 +3850,58 @@ mod tests {
                 fn test() -> any {
                     let m = :maps::new();
                     :maps::get(:foo, m)
+                }
+            }
+        "#);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_extern_function_result_return_type() {
+        // Extern function with Result<T, E> return type should work
+        // and the caller gets a Result type back
+        let result = parse_and_check(r#"
+            mod test {
+                extern mod file {
+                    fn read_file(path: string) -> Result<binary, atom>;
+                }
+
+                fn test() -> Result<binary, atom> {
+                    :file::read_file("test.txt")
+                }
+            }
+        "#);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_extern_function_result_unwrap() {
+        // Result from extern call can use Result methods
+        let result = parse_and_check(r#"
+            mod test {
+                extern mod file {
+                    fn read_file(path: string) -> Result<binary, atom>;
+                }
+
+                fn test() -> binary {
+                    :file::read_file("test.txt").unwrap()
+                }
+            }
+        "#);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_extern_function_option_return_type() {
+        // Extern function with Option<T> return type should work
+        let result = parse_and_check(r#"
+            mod test {
+                extern mod erlang {
+                    fn get(key: atom) -> Option<any>;
+                }
+
+                fn test() -> Option<any> {
+                    :erlang::get(:my_key)
                 }
             }
         "#);
