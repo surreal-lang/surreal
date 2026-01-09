@@ -1,27 +1,32 @@
 // Tests for the enumerable module and Iter trait
+//
+// Uses Dream stdlib modules for idiomatic code.
+
+use io::{format};
+use list::{len};
 
 // Helper to assert equality - uses any type for flexibility
 fn assert_eq<T>(actual: T, expected: T, name: string) {
     if actual == expected {
-        :io::format("✓ ~s~n", [name])
+        format("✓ ~s~n", [name])
     } else {
-        :io::format("✗ ~s - expected ~p, got ~p~n", [name, expected, actual])
+        format("✗ ~s - expected ~p, got ~p~n", [name, expected, actual])
     }
 }
 
 fn assert_true(value: bool, name: string) {
     if value {
-        :io::format("✓ ~s~n", [name])
+        format("✓ ~s~n", [name])
     } else {
-        :io::format("✗ ~s - expected true~n", [name])
+        format("✗ ~s - expected true~n", [name])
     }
 }
 
 fn assert_false(value: bool, name: string) {
     if !value {
-        :io::format("✓ ~s~n", [name])
+        format("✓ ~s~n", [name])
     } else {
-        :io::format("✗ ~s - expected false~n", [name])
+        format("✗ ~s - expected false~n", [name])
     }
 }
 
@@ -30,7 +35,7 @@ fn assert_false(value: bool, name: string) {
 // ============================================================================
 
 fn test_map() {
-    :io::format("~n--- map ---~n", []);
+    format("~n--- map ---~n", []);
 
     let result = enumerable::map([1, 2, 3], |x| { x * 2 });
     assert_eq(result, [2, 4, 6], "map doubles values");
@@ -40,7 +45,7 @@ fn test_map() {
 }
 
 fn test_filter() {
-    :io::format("~n--- filter ---~n", []);
+    format("~n--- filter ---~n", []);
 
     let evens = enumerable::filter([1, 2, 3, 4, 5], |x| { x % 2 == 0 });
     assert_eq(evens, [2, 4], "filter keeps evens");
@@ -53,7 +58,7 @@ fn test_filter() {
 }
 
 fn test_reduce() {
-    :io::format("~n--- reduce ---~n", []);
+    format("~n--- reduce ---~n", []);
 
     let sum = enumerable::reduce([1, 2, 3, 4], 0, |x, acc| { x + acc });
     assert_eq(sum, 10, "reduce sums values");
@@ -66,7 +71,7 @@ fn test_reduce() {
 }
 
 fn test_find() {
-    :io::format("~n--- find ---~n", []);
+    format("~n--- find ---~n", []);
 
     let found = enumerable::find([1, 2, 3, 4, 5], |x| { x > 3 });
     assert_eq(found, Some(4), "find returns first match");
@@ -76,7 +81,7 @@ fn test_find() {
 }
 
 fn test_any_all() {
-    :io::format("~n--- any/all ---~n", []);
+    format("~n--- any/all ---~n", []);
 
     let has_even = enumerable::any([1, 2, 3], |x| { x % 2 == 0 });
     assert_true(has_even, "any finds even");
@@ -92,7 +97,7 @@ fn test_any_all() {
 }
 
 fn test_count() {
-    :io::format("~n--- count ---~n", []);
+    format("~n--- count ---~n", []);
 
     let num_evens = enumerable::count([1, 2, 3, 4, 5], |x| { x % 2 == 0 });
     assert_eq(num_evens, 2, "count evens");
@@ -102,7 +107,7 @@ fn test_count() {
 }
 
 fn test_take_drop() {
-    :io::format("~n--- take/drop ---~n", []);
+    format("~n--- take/drop ---~n", []);
 
     let first_3 = enumerable::take([1, 2, 3, 4, 5], 3);
     assert_eq(first_3, [1, 2, 3], "take first 3");
@@ -115,21 +120,21 @@ fn test_take_drop() {
 }
 
 fn test_zip() {
-    :io::format("~n--- zip ---~n", []);
+    format("~n--- zip ---~n", []);
 
     let zipped = enumerable::zip([1, 2, 3], ["a", "b", "c"]);
     assert_eq(zipped, [(1, "a"), (2, "b"), (3, "c")], "zip two lists");
 }
 
 fn test_flat_map() {
-    :io::format("~n--- flat_map ---~n", []);
+    format("~n--- flat_map ---~n", []);
 
     let expanded = enumerable::flat_map([1, 2, 3], |x| { [x, x * 10] });
     assert_eq(expanded, [1, 10, 2, 20, 3, 30], "flat_map expands");
 }
 
 fn test_reverse() {
-    :io::format("~n--- reverse ---~n", []);
+    format("~n--- reverse ---~n", []);
 
     let rev = enumerable::reverse([1, 2, 3]);
     assert_eq(rev, [3, 2, 1], "reverse list");
@@ -139,7 +144,7 @@ fn test_reverse() {
 }
 
 fn test_range() {
-    :io::format("~n--- range ---~n", []);
+    format("~n--- range ---~n", []);
 
     let r = enumerable::range(1, 5);
     assert_eq(r, [1, 2, 3, 4, 5], "range 1 to 5");
@@ -149,21 +154,21 @@ fn test_range() {
 }
 
 fn test_uniq() {
-    :io::format("~n--- uniq ---~n", []);
+    format("~n--- uniq ---~n", []);
 
     let unique = enumerable::uniq([1, 2, 2, 3, 3, 3, 4]);
     assert_eq(unique, [1, 2, 3, 4], "uniq removes duplicates");
 }
 
 fn test_chunk() {
-    :io::format("~n--- chunk ---~n", []);
+    format("~n--- chunk ---~n", []);
 
     let chunks = enumerable::chunk([1, 2, 3, 4, 5, 6], 2);
     assert_eq(chunks, [[1, 2], [3, 4], [5, 6]], "chunk by 2");
 }
 
 fn test_sum() {
-    :io::format("~n--- sum ---~n", []);
+    format("~n--- sum ---~n", []);
 
     let total = enumerable::sum([1, 2, 3, 4, 5]);
     assert_eq(total, 15, "sum");
@@ -173,7 +178,7 @@ fn test_sum() {
 }
 
 fn test_max_min() {
-    :io::format("~n--- max/min ---~n", []);
+    format("~n--- max/min ---~n", []);
 
     let maximum = enumerable::max([3, 1, 4, 1, 5, 9, 2, 6]);
     assert_eq(maximum, 9, "max");
@@ -185,6 +190,11 @@ fn test_max_min() {
 // ============================================================================
 // Iter trait tests (for Map)
 // ============================================================================
+
+// This Map implementation demonstrates FFI interop for wrapping Erlang
+// data structures. Direct :maps:: and :lists:: calls are used here to show
+// how to build high-level abstractions on top of Erlang primitives.
+// For production code, prefer using stdlib/map.dream instead.
 
 pub struct Map {
     data: map,
@@ -224,24 +234,24 @@ impl Map {
     }
 
     pub fn count<K, V>(self, pred: fn((K, V)) -> bool) -> int {
-        :erlang::length(:lists::filter(pred, :maps::to_list(self.data)))
+        len(:lists::filter(pred, :maps::to_list(self.data)))
     }
 }
 
 fn test_map_to_list() {
-    :io::format("~n--- Map.to_list ---~n", []);
+    format("~n--- Map.to_list ---~n", []);
 
     let m = Map::new();
     let m = m.put("a", 1);
     let m = m.put("b", 2);
 
     let entries = m.to_list();
-    let len = :erlang::length(entries);
+    let len = len(entries);
     assert_eq(len, 2, "map has 2 entries");
 }
 
 fn test_map_filter() {
-    :io::format("~n--- Map.filter ---~n", []);
+    format("~n--- Map.filter ---~n", []);
 
     let m = Map::new();
     let m = m.put("alice", 30);
@@ -253,12 +263,12 @@ fn test_map_filter() {
         age >= 30
     });
 
-    let count = :erlang::length(seniors);
+    let count = len(seniors);
     assert_eq(count, 2, "filter age >= 30");
 }
 
 fn test_map_map() {
-    :io::format("~n--- Map.map ---~n", []);
+    format("~n--- Map.map ---~n", []);
 
     let m = Map::new();
     let m = m.put("a", 1);
@@ -274,7 +284,7 @@ fn test_map_map() {
 }
 
 fn test_map_reduce() {
-    :io::format("~n--- Map.reduce ---~n", []);
+    format("~n--- Map.reduce ---~n", []);
 
     let m = Map::new();
     let m = m.put("a", 10);
@@ -289,7 +299,7 @@ fn test_map_reduce() {
 }
 
 fn test_map_any_all() {
-    :io::format("~n--- Map.any/all ---~n", []);
+    format("~n--- Map.any/all ---~n", []);
 
     let m = Map::new();
     let m = m.put("a", 10);
@@ -308,7 +318,7 @@ fn test_map_any_all() {
 }
 
 fn test_map_count() {
-    :io::format("~n--- Map.count ---~n", []);
+    format("~n--- Map.count ---~n", []);
 
     let m = Map::new();
     let m = m.put("a", 10);
@@ -327,7 +337,7 @@ fn test_map_count() {
 // ============================================================================
 
 pub fn main() -> atom {
-    :io::format("=== Enumerable Module Tests ===~n", []);
+    format("=== Enumerable Module Tests ===~n", []);
 
     // List tests
     test_map();
@@ -346,7 +356,7 @@ pub fn main() -> atom {
     test_sum();
     test_max_min();
 
-    :io::format("~n=== Iter Trait Tests (Map) ===~n", []);
+    format("~n=== Iter Trait Tests (Map) ===~n", []);
 
     // Map Iter tests
     test_map_to_list();
@@ -356,6 +366,6 @@ pub fn main() -> atom {
     test_map_any_all();
     test_map_count();
 
-    :io::format("~n=== All tests complete ===~n", []);
+    format("~n=== All tests complete ===~n", []);
     :ok
 }

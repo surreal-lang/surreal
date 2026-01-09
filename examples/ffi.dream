@@ -1,17 +1,26 @@
 // FFI example - calling Erlang/OTP functions from Dream
+//
+// NOTE: For most use cases, prefer Dream stdlib modules:
+//   use list::{reverse, head, tail};
+//   use enumerable::{map, filter, reduce};
+//
+// Direct FFI calls are available for advanced use cases.
+
+use list::{reverse};
 
 pub fn main() -> int {
-    // Call erlang:abs/1
+    // Use stdlib for abs - Dream doesn't have a math module yet,
+    // so this is a legitimate FFI use case
     let result = :erlang::abs(-42);
     result
 }
 
 pub fn reverse_list(items: [int]) -> [int] {
-    // Call lists:reverse/1
-    :lists::reverse(items)
+    // Use Dream stdlib list::reverse instead of :lists::reverse
+    reverse(items)
 }
 
 pub fn max_value(a: int, b: int) -> int {
-    // Call erlang:max/2
+    // For max/min, :erlang:: FFI is fine until we have a math stdlib
     :erlang::max(a, b)
 }

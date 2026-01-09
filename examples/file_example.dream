@@ -1,7 +1,10 @@
 // File I/O Example - Demonstrates the file module
+//
+// Uses Dream stdlib modules for idiomatic code.
 
 mod file_example {
     use io::{println, format};
+    use enumerable::{each};
 
     pub fn main() -> atom {
         println("=== File I/O Example ===");
@@ -91,9 +94,9 @@ mod file_example {
         println("Listing directory:");
         match file::ls(test_dir) {
             (:ok, files) => {
-                :lists::foreach(|f| {
+                each(files, |f| {
                     format("  - ~s~n", [f])
-                }, files)
+                })
             },
             (:error, reason) => format("Error listing: ~p~n", [reason])
         };
@@ -112,9 +115,9 @@ mod file_example {
         println("Final directory listing:");
         match file::ls(test_dir) {
             (:ok, files) => {
-                :lists::foreach(|f| {
+                each(files, |f| {
                     format("  - ~s~n", [f])
-                }, files)
+                })
             },
             (:error, reason) => format("Error: ~p~n", [reason])
         };
@@ -133,10 +136,10 @@ mod file_example {
             :true => {
                 match file::ls(path) {
                     (:ok, files) => {
-                        :lists::foreach(|f| {
+                        each(files, |f| {
                             let full_path = :filename::join(path, f);
                             rm_rf_safe(full_path)
-                        }, files);
+                        });
                         file::rmdir(path)
                     },
                     _ => :ok
