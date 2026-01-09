@@ -40,12 +40,14 @@ stubs: build
     ERL_ROOT=$(erl -noshell -eval 'io:format("~s", [code:root_dir()])' -s init stop)
     STDLIB=$(echo "$ERL_ROOT"/lib/stdlib-*/src)
     ERTS=$(echo "$ERL_ROOT"/lib/erts-*/src)
+    KERNEL=$(echo "$ERL_ROOT"/lib/kernel-*/src)
 
     echo "Generating stubs from $ERL_ROOT..."
     ./target/release/dream bindgen "$ERTS/erlang.erl" --output stubs/erlang.dreamt
     ./target/release/dream bindgen "$STDLIB/lists.erl" --output stubs/lists.dreamt
     ./target/release/dream bindgen "$STDLIB/maps.erl" --output stubs/maps.dreamt
     ./target/release/dream bindgen "$STDLIB/io.erl" --output stubs/io.dreamt
+    ./target/release/dream bindgen "$KERNEL/file.erl" --output stubs/file.dreamt
     echo "Generated stubs:"
     wc -l stubs/*.dreamt
 
