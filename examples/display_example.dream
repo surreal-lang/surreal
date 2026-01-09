@@ -1,0 +1,93 @@
+// Display Example - Debugging with io::dbg
+//
+// Demonstrates using io::dbg for debugging values in pipelines
+// and customizing output with DisplayOpts.
+
+mod display_example {
+
+    pub struct User {
+        name: string,
+        age: int,
+        active: bool,
+    }
+
+    impl User {
+        pub fn new(name: string, age: int) -> User {
+            User { name: name, age: age, active: true }
+        }
+
+        pub fn deactivate(self) -> User {
+            User { active: false, ..self }
+        }
+
+        pub fn birthday(self) -> User {
+            User { age: self.age + 1, ..self }
+        }
+    }
+
+    pub fn main() -> atom {
+        io::println("=== Display Example ===");
+        io::println("");
+
+        // Basic dbg - prints and returns value
+        io::println("--- Basic Debug ---");
+        let x = 42;
+        let y = io::dbg(x);
+        io::format("Returned value: ~p~n", [y]);
+        io::println("");
+
+        // Display different types
+        io::println("--- Displaying Types ---");
+        io::dbg(123);                    // integer
+        io::dbg(:hello);                 // atom
+        io::dbg("world");                // string
+        io::dbg((1, 2, 3));              // tuple
+        io::dbg([1, 2, 3, 4, 5]);        // list
+        io::dbg(self());                 // pid
+        io::println("");
+
+        // Display Result and Option types
+        io::println("--- Result and Option ---");
+        io::dbg(Ok(42));                 // Ok(42)
+        io::dbg(Err("oops"));            // Err("oops")
+        io::dbg(Some("hello"));          // Some("hello")
+        io::dbg(None);                   // None
+        io::dbg(Ok(()));                 // Ok(())
+        io::println("");
+
+        // Display with labels
+        io::println("--- Labels ---");
+        let nums = [1, 2, 3, 4, 5];
+        io::dbg_opts(nums, display::DisplayOpts::new().with_label("numbers"));
+
+        let user = User::new("Alice", 30);
+        io::dbg_opts(user, display::DisplayOpts::new().with_label("user"));
+        io::println("");
+
+        // Struct update syntax with dbg
+        io::println("--- Struct Updates ---");
+        let alice = User::new("Alice", 30);
+        io::dbg_opts(alice, display::DisplayOpts::new().with_label("created"));
+
+        let alice = alice.birthday();
+        io::dbg_opts(alice, display::DisplayOpts::new().with_label("after birthday"));
+
+        let alice = alice.deactivate();
+        io::dbg_opts(alice, display::DisplayOpts::new().with_label("deactivated"));
+        io::println("");
+
+        // DisplayOpts builder pattern
+        io::println("--- DisplayOpts Builder ---");
+        let opts = display::DisplayOpts::new()
+            .with_label("debug")
+            .with_limit(3)
+            .with_pretty(true);
+
+        let long_list = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+        io::dbg_opts(long_list, opts);
+        io::println("");
+
+        io::println("Done!");
+        :ok
+    }
+}

@@ -50,16 +50,16 @@ impl Map {
 pub fn main() -> atom {
     io::println("=== Enum Module Example ===");
 
-    // Basic list - using io::inspect for quick debugging
+    // Basic list - using io::dbg for quick debugging
     let numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-    io::inspect_opts(numbers, inspect::InspectOpts::new().with_label("Numbers"));
+    io::dbg_opts(numbers, display::DisplayOpts::new().with_label("Numbers"));
 
-    // Pipeline with inspect for debugging each step
+    // Pipeline with dbg for debugging each step
     let result = numbers
         |> enumerable::map(|x| { x * 2 })
-        |> io::inspect_opts(inspect::InspectOpts::new().with_label("Doubled"))
+        |> io::dbg_opts(display::DisplayOpts::new().with_label("Doubled"))
         |> enumerable::filter(|x| { x % 2 == 0 })
-        |> io::inspect_opts(inspect::InspectOpts::new().with_label("Evens"));
+        |> io::dbg_opts(display::DisplayOpts::new().with_label("Evens"));
 
     // Reduce - accumulate a value
     let sum = enumerable::reduce(numbers, 0, |x, acc| { x + acc });

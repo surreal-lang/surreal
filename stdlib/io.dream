@@ -8,7 +8,7 @@ pub fn println(s: string) -> atom {
 }
 
 /// Print with format string (like Erlang's io:format).
-pub fn format<T>(fmt: string, args: [T]) -> atom {
+pub fn format(fmt: string, args: any) -> atom {
     :io::format(fmt, args)
 }
 
@@ -22,23 +22,23 @@ pub fn println_int(n: int) -> atom {
     :io::format("~p~n", [n])
 }
 
-/// Inspect a term and print it, returning the term for chaining.
+/// Display a term and print it, returning the term for chaining.
 /// This is useful for debugging pipelines.
 ///
 /// Example:
-///   let result = data |> transform() |> io::inspect() |> process();
-pub fn inspect<T>(term: T) -> T {
-    println(inspect::inspect_any(term));
+///   let result = data |> transform() |> io::dbg() |> process();
+pub fn dbg(term: any) -> any {
+    println(display::display_any(term));
     term
 }
 
-/// Inspect a term with options and print it, returning the term for chaining.
+/// Display a term with options and print it, returning the term for chaining.
 ///
 /// Example:
-///   data |> io::inspect_opts(inspect::InspectOpts::pretty())
-///   data |> io::inspect_opts(inspect::InspectOpts::new().with_label("debug"))
-pub fn inspect_opts<T>(term: T, opts: inspect::InspectOpts) -> T {
-    println(inspect::inspect_any_opts(term, opts));
+///   data |> io::dbg_opts(display::DisplayOpts::pretty())
+///   data |> io::dbg_opts(display::DisplayOpts::new().with_label("debug"))
+pub fn dbg_opts(term: any, opts: display::DisplayOpts) -> any {
+    println(display::display_any_opts(term, opts));
     term
 }
 
