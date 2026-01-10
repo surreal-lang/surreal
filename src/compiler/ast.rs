@@ -288,10 +288,12 @@ pub enum Expr {
         inferred_type_args: Vec<Type>,
         args: Vec<Expr>,
     },
-    /// Method call: `expr.method(args)`.
+    /// Method call: `expr.method(args)` or `expr.method::<T>(args)`.
     MethodCall {
         receiver: Box<Expr>,
         method: String,
+        /// Explicit type arguments from turbofish syntax (e.g., `.into::<Wrapper>()`)
+        type_args: Vec<Type>,
         args: Vec<Expr>,
         /// Module for UFCS dispatch, filled by resolution pass.
         /// When set, `x.foo(args)` becomes `module::foo(x, args)`.

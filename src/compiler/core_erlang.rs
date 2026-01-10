@@ -467,6 +467,24 @@ impl CoreErlangEmitter {
         }
     }
 
+    /// Infer the type name of an expression (for method dispatch).
+    /// This is a simple inference for primitive types and identifiers.
+    fn infer_expr_type(&self, expr: &Expr) -> String {
+        match expr {
+            Expr::Int(_) => "int".to_string(),
+            Expr::String(_) | Expr::StringInterpolation(_) => "string".to_string(),
+            Expr::Atom(_) => "atom".to_string(),
+            Expr::Bool(_) => "bool".to_string(),
+            Expr::BitString(_) => "binary".to_string(),
+            Expr::Unit => "unit".to_string(),
+            Expr::List(_) => "list".to_string(),
+            Expr::Tuple(_) => "tuple".to_string(),
+            Expr::StructInit { name, .. } => name.clone(),
+            // For other expressions, default to "any" (runtime dispatch)
+            _ => "any".to_string(),
+        }
+    }
+
     /// Emit a string to the output.
     fn emit(&mut self, s: &str) {
         self.output.push_str(s);
@@ -2519,7 +2537,23 @@ impl CoreErlangEmitter {
                 self.emit("}#");
             }
 
-            Expr::MethodCall { receiver, method, args, resolved_module, inferred_type_args: _ } => {
+            Expr::MethodCall { receiver, method, type_args, args, resolved_module, inferred_type_args: _ } => {
+                // Check for trait method calls with type args: 42.into::<Wrapper>()
+                // For Into<T>, the type arg is the target type
+                if method == "into" && type_args.len() == 1 {
+                    // into::<TargetType>() on a value
+                    // We need to determine the source type and call Into_TargetType_SourceType_into
+                    let target_type = self.type_to_name(&type_args[0]);
+                    let source_type = self.infer_expr_type(receiver);
+
+                    let mangled_name = format!("Into_{}_{}_into", target_type, source_type);
+                    self.emit(&format!("apply '{}'", mangled_name));
+                    self.emit("/1(");
+                    self.emit_expr(receiver)?;
+                    self.emit(")");
+                    return Ok(());
+                }
+
                 // UFCS: Transform expr.method(args) into method(expr, args)
                 let mut all_args = vec![receiver.as_ref().clone()];
                 all_args.extend(args.iter().cloned());

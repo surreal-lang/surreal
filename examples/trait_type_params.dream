@@ -30,12 +30,16 @@ pub fn main() -> atom {
     let w2 = Wrapper::from::<string>("hello");
     :io::format("From<string>: w2.value = ~p~n", [w2.value]);
 
-    // Test blanket Into impl - int::into::<Wrapper>(value)
+    // Test blanket Into impl - static call syntax
     let w3 = int::into::<Wrapper>(100);
-    :io::format("Into<Wrapper>: w3.value = ~p~n", [w3.value]);
+    :io::format("Into (static): w3.value = ~p~n", [w3.value]);
 
-    let w4 = string::into::<Wrapper>("world!");
-    :io::format("Into<Wrapper>: w4.value = ~p~n", [w4.value]);
+    // Test blanket Into impl - method syntax!
+    let w4 = 200.into::<Wrapper>();
+    :io::format("Into (method): w4.value = ~p~n", [w4.value]);
+
+    let w5 = "hello world".into::<Wrapper>();
+    :io::format("Into (method): w5.value = ~p~n", [w5.value]);
 
     :ok
 }

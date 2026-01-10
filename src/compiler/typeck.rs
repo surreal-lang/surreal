@@ -2854,10 +2854,11 @@ impl TypeChecker {
                 }
             }
 
-            Expr::MethodCall { receiver, method, args, resolved_module, .. } => {
+            Expr::MethodCall { receiver, method, type_args, args, resolved_module, .. } => {
                 Expr::MethodCall {
                     receiver: Box::new(self.annotate_expr(receiver)),
                     method: method.clone(),
+                    type_args: type_args.clone(),
                     args: args.iter().map(|a| self.annotate_expr(a)).collect(),
                     resolved_module: resolved_module.clone(),
                     inferred_type_args: vec![], // TODO: implement method type inference

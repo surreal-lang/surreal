@@ -1060,6 +1060,19 @@ impl<'source> Parser<'source> {
                 self.advance();
                 let field = self.expect_ident()?;
 
+                // Check for turbofish: .method::<Type>() or just .method()
+                let type_args = if self.check(&Token::ColonColon) {
+                    // Look ahead to see if this is turbofish (::< ) or path (::ident)
+                    if self.peek_next() == Some(&Token::Lt) {
+                        self.advance(); // consume ::
+                        self.parse_type_args()?
+                    } else {
+                        vec![]
+                    }
+                } else {
+                    vec![]
+                };
+
                 if self.check(&Token::LParen) {
                     // Method call
                     self.advance();
@@ -1077,10 +1090,15 @@ impl<'source> Parser<'source> {
                     expr = Expr::MethodCall {
                         receiver: Box::new(expr),
                         method: field,
+                        type_args,
                         args,
                         resolved_module: None,
                         inferred_type_args: vec![],
                     };
+                } else if !type_args.is_empty() {
+                    // Turbofish without parens is an error
+                    let span = self.current_span();
+                    return Err(ParseError::new("expected '(' after turbofish type arguments", span));
                 } else {
                     expr = Expr::FieldAccess {
                         expr: Box::new(expr),
