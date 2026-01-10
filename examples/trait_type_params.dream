@@ -1,4 +1,4 @@
-// Test trait type parameters
+// Test trait type parameters and blanket Into implementation
 use convert::From;
 
 // A simple wrapper struct
@@ -7,6 +7,7 @@ pub struct Wrapper {
 }
 
 // Implement From<int> for Wrapper
+// This automatically provides: impl Into<Wrapper> for int
 impl From<int> for Wrapper {
     fn from(value: int) -> Wrapper {
         Wrapper { value: value }
@@ -14,6 +15,7 @@ impl From<int> for Wrapper {
 }
 
 // Another impl: From<string> for Wrapper (converts string length)
+// This automatically provides: impl Into<Wrapper> for string
 impl From<string> for Wrapper {
     fn from(value: string) -> Wrapper {
         Wrapper { value: :erlang::length(value) }
@@ -21,13 +23,19 @@ impl From<string> for Wrapper {
 }
 
 pub fn main() -> atom {
-    // Create Wrapper from int - use turbofish to specify trait type arg
+    // Test From trait - use turbofish to specify trait type arg
     let w1 = Wrapper::from::<int>(42);
-    :io::format("w1.value = ~p~n", [w1.value]);
+    :io::format("From<int>: w1.value = ~p~n", [w1.value]);
 
-    // Create Wrapper from string - use turbofish to specify trait type arg
     let w2 = Wrapper::from::<string>("hello");
-    :io::format("w2.value = ~p~n", [w2.value]);
+    :io::format("From<string>: w2.value = ~p~n", [w2.value]);
+
+    // Test blanket Into impl - int::into::<Wrapper>(value)
+    let w3 = int::into::<Wrapper>(100);
+    :io::format("Into<Wrapper>: w3.value = ~p~n", [w3.value]);
+
+    let w4 = string::into::<Wrapper>("world!");
+    :io::format("Into<Wrapper>: w4.value = ~p~n", [w4.value]);
 
     :ok
 }

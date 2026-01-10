@@ -951,6 +951,43 @@ impl CoreErlangEmitter {
             }
         }
 
+        // Blanket impl: impl From<T> for U automatically provides impl Into<U> for T
+        // When we have `impl From<int> for Wrapper`, generate `impl Into<Wrapper> for int`
+        if simple_trait == "From" && trait_impl.trait_type_args.len() == 1 {
+            self.emit_blanket_into_impl(trait_impl)?;
+        }
+
+        Ok(())
+    }
+
+    /// Emit the blanket Into implementation for a From impl.
+    /// `impl From<T> for U` provides `impl Into<U> for T`
+    fn emit_blanket_into_impl(&mut self, from_impl: &TraitImpl) -> CoreErlangResult<()> {
+        // from_impl is: impl From<SourceType> for TargetType
+        // We generate: impl Into<TargetType> for SourceType
+        // The into method: fn into(self) -> TargetType { TargetType::from::<SourceType>(self) }
+
+        let source_type = self.type_to_name(&from_impl.trait_type_args[0]);
+        let target_type = &from_impl.type_name;
+
+        // Mangled name: Into_TargetType_SourceType_into
+        let mangled_name = format!("Into_{}_{}_into", target_type, source_type);
+
+        // Emit the function directly in Core Erlang
+        // 'Into_Wrapper_int_into'/1 = fun (Value) -> apply 'From_int_Wrapper_from'/1(Value)
+        self.newline();
+        self.emit(&format!("'{}'", mangled_name));
+        self.emit("/1 = fun (Value) ->");
+        self.newline();
+        self.indent += 1;
+
+        // Call the From implementation: From_SourceType_TargetType_from(Value)
+        let from_mangled = format!("From_{}_{}_from", source_type, target_type);
+        self.emit(&format!("apply '{}'", from_mangled));
+        self.emit("/1(Value)");
+
+        self.indent -= 1;
+
         Ok(())
     }
 
@@ -1061,6 +1098,25 @@ impl CoreErlangEmitter {
                             }
                         }
                     }
+
+                    // Blanket impl: impl From<T> for U automatically provides impl Into<U> for T
+                    if simple_trait == "From" && trait_impl.trait_type_args.len() == 1 {
+                        let source_type = self.type_to_name(&trait_impl.trait_type_args[0]);
+                        let target_type = &trait_impl.type_name;
+
+                        // Register Into_TargetType_SourceType with method "into"
+                        self.impl_methods.insert((
+                            format!("Into_{}_{}", target_type, source_type),
+                            "into".to_string(),
+                        ));
+
+                        // Track for trait dispatch
+                        let key = (format!("Into_{}", target_type), "into".to_string());
+                        self.trait_impls
+                            .entry(key)
+                            .or_insert_with(Vec::new)
+                            .push(source_type.clone());
+                    }
                 }
                 _ => {}
             }
@@ -1146,6 +1202,14 @@ impl CoreErlangEmitter {
                                 ));
                             }
                         }
+                    }
+
+                    // Export blanket Into impl for From traits
+                    if simple_trait == "From" && trait_impl.trait_type_args.len() == 1 {
+                        let source_type = self.type_to_name(&trait_impl.trait_type_args[0]);
+                        let target_type = &trait_impl.type_name;
+                        let into_mangled = format!("Into_{}_{}_into", target_type, source_type);
+                        exports.push(format!("'{}'/{}", into_mangled, 1));
                     }
                 }
                 _ => {}
