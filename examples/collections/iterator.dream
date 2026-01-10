@@ -61,18 +61,18 @@ mod iterator_example {
         // Zip
         println("8. Zip:");
         let zipped = iterator::zip(
-            iterator::from_list([:a, :b, :c]),
+            iterator::from_list(["a", "b", "c"]),
             iterator::range(1, 10)
         ) |> iterator::collect();
-        format("   zip([:a,:b,:c], [1..]) = ~p~n", [zipped]);
+        format("   zip([\"a\",\"b\",\"c\"], [1..]) = ~p~n", [zipped]);
         println("");
 
         // Enumerate
         println("9. Enumerate:");
-        let enumerated = iterator::from_list([:x, :y, :z])
+        let enumerated = iterator::from_list(["x", "y", "z"])
             |> iterator::enumerate()
             |> iterator::collect();
-        format("   enumerate([:x,:y,:z]) = ~p~n", [enumerated]);
+        format("   enumerate([\"x\",\"y\",\"z\"]) = ~p~n", [enumerated]);
         println("");
 
         // Take while
@@ -101,10 +101,10 @@ mod iterator_example {
 
         // Cycle
         println("13. Cycle:");
-        let cycled = iterator::cycle([:a, :b])
+        let cycled = iterator::cycle(["a", "b"])
             |> iterator::take(5)
             |> iterator::collect();
-        format("   cycle([:a,:b]) |> take(5) = ~p~n", [cycled]);
+        format("   cycle([\"a\",\"b\"]) |> take(5) = ~p~n", [cycled]);
         println("");
 
         // Chain

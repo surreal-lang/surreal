@@ -131,7 +131,9 @@ impl Codegen {
         match &use_decl.tree {
             UseTree::Path { module, name, rename } => {
                 let local_name = rename.as_ref().unwrap_or(name).clone();
-                self.imports.insert(local_name, (module.clone(), name.clone()));
+                // Convert ModulePath to string for the imports map
+                let module_str = module.to_unresolved_string();
+                self.imports.insert(local_name, (module_str, name.clone()));
             }
             UseTree::Glob { module: _ } => {
                 // Glob imports require knowing what the module exports.
@@ -139,9 +141,10 @@ impl Codegen {
                 // TODO: Implement glob imports when module metadata is available.
             }
             UseTree::Group { module, items } => {
+                let module_str = module.to_unresolved_string();
                 for item in items {
                     let local_name = item.rename.as_ref().unwrap_or(&item.name).clone();
-                    self.imports.insert(local_name, (module.clone(), item.name.clone()));
+                    self.imports.insert(local_name, (module_str.clone(), item.name.clone()));
                 }
             }
         }

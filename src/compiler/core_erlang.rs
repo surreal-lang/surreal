@@ -46,8 +46,8 @@ pub type SharedGenericRegistry = Arc<RwLock<GenericFunctionRegistry>>;
 
 use crate::compiler::ast::{
     BinOp, BitEndianness, BitSegmentType, BitSignedness, BitStringSegment, Block, Expr, Function,
-    Item, MatchArm, Module, Pattern, Stmt, StringPart, TraitDef, TraitImpl, Type, UnaryOp, UseDecl,
-    UseTree,
+    Item, MatchArm, Module, ModuleContext, ModulePath, PathPrefix, Pattern, Stmt, StringPart,
+    TraitDef, TraitImpl, Type, UnaryOp, UseDecl, UseTree,
 };
 
 /// Core Erlang emitter error.
@@ -83,6 +83,8 @@ pub struct CoreErlangEmitter {
     /// Current module name (needed for local function calls)
     #[allow(dead_code)]
     module_name: String,
+    /// Module context for resolving crate::/super::/self:: paths
+    module_context: ModuleContext,
     /// Imported names: local_name → (module, original_name)
     imports: HashMap<String, (String, String)>,
     /// Impl block methods: (type_name, method_name) for resolving Type::method() calls
@@ -132,6 +134,7 @@ impl CoreErlangEmitter {
             indent: 0,
             var_counter: 0,
             module_name: String::new(),
+            module_context: ModuleContext::new(),
             imports: HashMap::new(),
             impl_methods: HashSet::new(),
             traits: HashMap::new(),
@@ -158,16 +161,88 @@ impl CoreErlangEmitter {
         }
     }
 
+    /// Create an emitter with a module context for path resolution.
+    pub fn with_context(context: ModuleContext) -> Self {
+        Self {
+            module_context: context,
+            ..Self::new()
+        }
+    }
+
+    /// Create an emitter with both a registry and module context.
+    pub fn with_registry_and_context(
+        registry: SharedGenericRegistry,
+        context: ModuleContext,
+    ) -> Self {
+        Self {
+            external_generics: Some(registry),
+            module_context: context,
+            ..Self::new()
+        }
+    }
+
     /// Register this module's generic functions in the shared registry.
     /// Call this after emit_module to make generics available to other modules.
     pub fn register_generics(&self, registry: &mut GenericFunctionRegistry) {
         for (_name, func) in &self.generic_functions {
             registry.register(&self.module_name, func);
-            // Also register without the dream:: prefix for easier lookup
+            // Also register without the dream:: prefix for easier lookup (stdlib modules)
             let short_name = self.module_name
-                .strip_prefix(Self::MODULE_PREFIX)
+                .strip_prefix(Self::STDLIB_PREFIX)
                 .unwrap_or(&self.module_name);
             registry.register(short_name, func);
+        }
+    }
+
+    /// Known stdlib modules that live under the dream:: namespace.
+    const STDLIB_MODULES: &'static [&'static str] = &[
+        "io", "list", "enumerable", "iterator", "option", "result",
+        "string", "map", "file", "timer", "display", "convert",
+        "process", "genserver", "supervisor", "application",
+    ];
+
+    /// Resolve a simple module name string, adding dream:: prefix for stdlib modules.
+    fn resolve_module_name(module: &str) -> String {
+        // If already has a prefix (contains ::), use as-is
+        if module.contains("::") {
+            module.to_string()
+        } else if Self::STDLIB_MODULES.contains(&module) {
+            // Stdlib module - add dream:: prefix
+            format!("dream::{}", module)
+        } else {
+            // User module - use as-is
+            module.to_string()
+        }
+    }
+
+    /// Resolve a module path, handling stdlib prefixing and relative paths.
+    /// Uses the module context to resolve crate::/super::/self:: prefixes.
+    fn resolve_module_path(&self, module: &ModulePath) -> String {
+        match &module.prefix {
+            PathPrefix::None => {
+                let path_str = module.segments_string();
+                // If already has multiple segments, use as-is
+                if module.segments.len() > 1 {
+                    path_str
+                } else if Self::STDLIB_MODULES.contains(&path_str.as_str()) {
+                    // Stdlib module - add dream:: prefix
+                    format!("dream::{}", path_str)
+                } else {
+                    // User module - use as-is
+                    path_str
+                }
+            }
+            // Use module context to resolve relative paths
+            PathPrefix::Crate | PathPrefix::Super | PathPrefix::SelfMod => {
+                // Try to resolve using the module context
+                if let Some(resolved) = self.module_context.resolve(module) {
+                    resolved
+                } else {
+                    // Fall back to unresolved string if context is not available
+                    // (e.g., standalone files without dream.toml)
+                    module.to_unresolved_string()
+                }
+            }
         }
     }
 
@@ -176,16 +251,18 @@ impl CoreErlangEmitter {
         match &use_decl.tree {
             UseTree::Path { module, name, rename } => {
                 let local_name = rename.as_ref().unwrap_or(name).clone();
-                self.imports.insert(local_name, (module.clone(), name.clone()));
+                let resolved_module = self.resolve_module_path(module);
+                self.imports.insert(local_name, (resolved_module, name.clone()));
             }
             UseTree::Glob { module: _ } => {
                 // Glob imports require knowing what the module exports.
                 // TODO: Implement glob imports when module metadata is available.
             }
             UseTree::Group { module, items } => {
+                let resolved_module = self.resolve_module_path(module);
                 for item in items {
                     let local_name = item.rename.as_ref().unwrap_or(&item.name).clone();
-                    self.imports.insert(local_name, (module.clone(), item.name.clone()));
+                    self.imports.insert(local_name, (resolved_module.clone(), item.name.clone()));
                 }
             }
         }
@@ -533,10 +610,10 @@ impl CoreErlangEmitter {
         let key = (trait_name.to_string(), method_name.to_string());
         let impl_types = self.trait_impls.get(&key).cloned().unwrap_or_default();
 
-        // Get current module name without dream:: prefix
+        // Get current module name without dream:: prefix (for stdlib)
         let current_module = self
             .module_name
-            .strip_prefix(Self::MODULE_PREFIX)
+            .strip_prefix(Self::STDLIB_PREFIX)
             .unwrap_or(&self.module_name)
             .to_string();
 
@@ -735,8 +812,8 @@ impl CoreErlangEmitter {
         // Total arity includes receiver
         let arity = args.len() + 1;
 
-        // Get current module name without dream:: prefix
-        let current_module = self.module_name.strip_prefix(Self::MODULE_PREFIX).unwrap_or(&self.module_name).to_string();
+        // Get current module name without dream:: prefix (for stdlib)
+        let current_module = self.module_name.strip_prefix(Self::STDLIB_PREFIX).unwrap_or(&self.module_name).to_string();
 
         // Bind the receiver to a variable for dispatch
         let receiver_var = self.fresh_var();
@@ -1009,12 +1086,13 @@ impl CoreErlangEmitter {
         Ok(())
     }
 
-    /// Prefix for Dream modules in the BEAM (like Elixir's "Elixir." prefix).
-    pub const MODULE_PREFIX: &'static str = "dream::";
+    /// Prefix for Dream stdlib modules in the BEAM.
+    pub const STDLIB_PREFIX: &'static str = "dream::";
 
-    /// Get the BEAM module name for a Dream module (with prefix).
+    /// Get the BEAM module name for a Dream module.
+    /// Resolves stdlib module names to their full dream:: prefixed names.
     pub fn beam_module_name(name: &str) -> String {
-        format!("{}{}", Self::MODULE_PREFIX, name)
+        Self::resolve_module_name(name)
     }
 
     /// Convert a Rust string to Core Erlang list format (e.g., "foo" -> "[102, 111, 111]")
@@ -1025,8 +1103,8 @@ impl CoreErlangEmitter {
 
     /// Emit a complete Core Erlang module.
     pub fn emit_module(&mut self, module: &Module) -> CoreErlangResult<String> {
-        // Prefix module name with "dream::" for BEAM namespace
-        self.module_name = format!("{}{}", Self::MODULE_PREFIX, module.name);
+        // Use module name directly - explicit fully qualified names in source
+        self.module_name = module.name.clone();
 
         // First pass: collect imports, traits, local functions, and register impl methods
         for item in &module.items {
@@ -2622,8 +2700,8 @@ impl CoreErlangEmitter {
                 let (module_name, type_name) = if let Some((module, original_name)) = self.imports.get(name) {
                     (module.to_lowercase(), original_name.clone())
                 } else {
-                    // Local struct - use current module name (strip dream:: prefix)
-                    let module_prefix = self.module_name.strip_prefix(Self::MODULE_PREFIX).unwrap_or(&self.module_name);
+                    // Local struct - use current module name (strip dream:: prefix for stdlib)
+                    let module_prefix = self.module_name.strip_prefix(Self::STDLIB_PREFIX).unwrap_or(&self.module_name);
                     (module_prefix.to_string(), name.clone())
                 };
 
@@ -3190,8 +3268,8 @@ impl CoreErlangEmitter {
                 let (module_name, type_name) = if let Some((module, original_name)) = self.imports.get(name) {
                     (module.to_lowercase(), original_name.clone())
                 } else {
-                    // Local struct - use current module name (strip dream:: prefix)
-                    let module_prefix = self.module_name.strip_prefix(Self::MODULE_PREFIX).unwrap_or(&self.module_name);
+                    // Local struct - use current module name (strip dream:: prefix for stdlib)
+                    let module_prefix = self.module_name.strip_prefix(Self::STDLIB_PREFIX).unwrap_or(&self.module_name);
                     (module_prefix.to_string(), name.clone())
                 };
 
@@ -3430,7 +3508,8 @@ mod tests {
         "#;
 
         let result = emit_core_erlang(source).unwrap();
-        assert!(result.contains("module 'dream::test'"));
+        // With explicit module names, 'mod test' compiles to 'test' (no auto prefix)
+        assert!(result.contains("module 'test'"));
         assert!(result.contains("'add'/2"));
         assert!(result.contains("call 'erlang':'+'"));
     }

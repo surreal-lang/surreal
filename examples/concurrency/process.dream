@@ -2,7 +2,11 @@
 
 mod process_demo {
     use io::{println, format};
-    use process::send;
+
+    // Use direct FFI for send to avoid generic function issues
+    fn send<T>(p: pid, msg: T) -> T {
+        :erlang::send(p, msg)
+    }
 
     // A simple echo server that waits for one message and sends it back
     pub fn echo_server(reply_to: pid) -> atom {

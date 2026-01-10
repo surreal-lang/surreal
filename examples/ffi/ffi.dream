@@ -6,18 +6,24 @@
 //
 // Direct FFI calls are available for advanced use cases.
 
-use list::{reverse};
+pub fn main() -> atom {
+    // Demonstrate FFI calls to Erlang
+    // Note: FFI return types are inferred as 'any' - no type annotation needed
+    let abs_val = :erlang::abs(-42);
+    io::format("abs(-42) = ~p~n", [abs_val]);
 
-pub fn main() -> int {
-    // Use stdlib for abs - Dream doesn't have a math module yet,
-    // so this is a legitimate FFI use case
-    let result = :erlang::abs(-42);
-    result
+    let max_val = max_value(10, 20);
+    io::format("max(10, 20) = ~p~n", [max_val]);
+
+    let reversed = reverse_list([1, 2, 3, 4, 5]);
+    io::format("reverse([1,2,3,4,5]) = ~p~n", [reversed]);
+
+    :ok
 }
 
 pub fn reverse_list(items: [int]) -> [int] {
     // Use Dream stdlib list::reverse instead of :lists::reverse
-    reverse(items)
+    list::reverse(items)
 }
 
 pub fn max_value(a: int, b: int) -> int {

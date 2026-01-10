@@ -2,6 +2,195 @@
 
 use crate::compiler::lexer::Span;
 
+// =============================================================================
+// Module Path Types (for Rust-style module resolution)
+// =============================================================================
+
+/// Represents a path prefix for relative module resolution.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PathPrefix {
+    /// `crate::` - resolve from package root
+    Crate,
+    /// `super::` - resolve from parent module
+    Super,
+    /// `self::` - resolve from current module
+    SelfMod,
+    /// No prefix - direct module name
+    None,
+}
+
+/// A module path that can include relative prefixes.
+/// Examples:
+/// - `crate::db` → Crate prefix + ["db"]
+/// - `super::sibling` → Super prefix + ["sibling"]
+/// - `io` → None prefix + ["io"]
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModulePath {
+    /// Optional prefix (crate, super, self)
+    pub prefix: PathPrefix,
+    /// Path segments after the prefix
+    pub segments: Vec<String>,
+}
+
+impl ModulePath {
+    /// Create a simple path with no prefix.
+    pub fn simple(name: &str) -> Self {
+        ModulePath {
+            prefix: PathPrefix::None,
+            segments: vec![name.to_string()],
+        }
+    }
+
+    /// Create a path from segments with no prefix.
+    pub fn from_segments(segments: Vec<String>) -> Self {
+        ModulePath {
+            prefix: PathPrefix::None,
+            segments,
+        }
+    }
+
+    /// Create a crate-prefixed path.
+    pub fn crate_path(segments: Vec<String>) -> Self {
+        ModulePath {
+            prefix: PathPrefix::Crate,
+            segments,
+        }
+    }
+
+    /// Create a super-prefixed path.
+    pub fn super_path(segments: Vec<String>) -> Self {
+        ModulePath {
+            prefix: PathPrefix::Super,
+            segments,
+        }
+    }
+
+    /// Check if this is a simple (non-prefixed) single-segment path.
+    pub fn is_simple(&self) -> bool {
+        self.prefix == PathPrefix::None && self.segments.len() == 1
+    }
+
+    /// Get the module name as a string (for simple paths).
+    pub fn as_simple(&self) -> Option<&str> {
+        if self.is_simple() {
+            self.segments.first().map(|s| s.as_str())
+        } else {
+            None
+        }
+    }
+
+    /// Convert to a string representation without resolving relative paths.
+    /// Used for error messages and when context isn't available.
+    pub fn to_unresolved_string(&self) -> String {
+        let prefix_str = match &self.prefix {
+            PathPrefix::Crate => "crate::",
+            PathPrefix::Super => "super::",
+            PathPrefix::SelfMod => "self::",
+            PathPrefix::None => "",
+        };
+        format!("{}{}", prefix_str, self.segments.join("::"))
+    }
+
+    /// Get the segments as a joined string (without prefix).
+    pub fn segments_string(&self) -> String {
+        self.segments.join("::")
+    }
+}
+
+/// Context for module resolution during compilation.
+#[derive(Debug, Clone, Default)]
+pub struct ModuleContext {
+    /// Package name from dream.toml (e.g., "my_app")
+    pub package_name: Option<String>,
+    /// Current module's path relative to src/ (e.g., ["users", "auth"] for src/users/auth.dream)
+    pub current_path: Vec<String>,
+}
+
+impl ModuleContext {
+    pub fn new() -> Self {
+        ModuleContext::default()
+    }
+
+    pub fn with_package(package_name: String) -> Self {
+        ModuleContext {
+            package_name: Some(package_name),
+            current_path: vec![],
+        }
+    }
+
+    /// Create a context for a specific module within a package.
+    /// The module_fqn is the full module name (e.g., "my_app::users::auth").
+    /// This extracts the path after the package name (e.g., ["users", "auth"]).
+    pub fn for_module(package_name: &str, module_fqn: &str) -> Self {
+        let current_path = if module_fqn == package_name {
+            // Root module - no path
+            vec![]
+        } else if let Some(suffix) = module_fqn.strip_prefix(&format!("{}::", package_name)) {
+            // Extract path segments after package name
+            suffix.split("::").map(|s| s.to_string()).collect()
+        } else {
+            // Module doesn't match package - use empty path
+            vec![]
+        };
+
+        ModuleContext {
+            package_name: Some(package_name.to_string()),
+            current_path,
+        }
+    }
+
+    /// Resolve a module path to its fully qualified name.
+    /// Returns None if resolution fails (e.g., super:: at root level).
+    pub fn resolve(&self, path: &ModulePath) -> Option<String> {
+        let resolved_segments = match &path.prefix {
+            PathPrefix::Crate => {
+                // crate:: resolves to package root
+                let pkg = self.package_name.as_ref()?;
+                let mut segments = vec![pkg.clone()];
+                segments.extend(path.segments.clone());
+                segments
+            }
+            PathPrefix::Super => {
+                // super:: resolves to parent module
+                let pkg = self.package_name.as_ref()?;
+                if self.current_path.is_empty() {
+                    return None; // Can't go above root
+                }
+                let mut segments = vec![pkg.clone()];
+                segments.extend(self.current_path[..self.current_path.len() - 1].to_vec());
+                segments.extend(path.segments.clone());
+                segments
+            }
+            PathPrefix::SelfMod => {
+                // self:: resolves to current module
+                let pkg = self.package_name.as_ref()?;
+                let mut segments = vec![pkg.clone()];
+                segments.extend(self.current_path.clone());
+                segments.extend(path.segments.clone());
+                segments
+            }
+            PathPrefix::None => {
+                // No prefix - just use segments as-is
+                path.segments.clone()
+            }
+        };
+
+        Some(resolved_segments.join("::"))
+    }
+
+    /// Get the fully qualified name of the current module.
+    pub fn current_module_fqn(&self) -> Option<String> {
+        let pkg = self.package_name.as_ref()?;
+        if self.current_path.is_empty() {
+            Some(pkg.clone())
+        } else {
+            let mut parts = vec![pkg.clone()];
+            parts.extend(self.current_path.clone());
+            Some(parts.join("::"))
+        }
+    }
+}
+
 /// A node with its span in the source.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Spanned<T> {
@@ -183,16 +372,17 @@ pub struct UseDecl {
 #[derive(Debug, Clone, PartialEq)]
 pub enum UseTree {
     /// Simple path: `use foo::bar;` or `use foo::bar as baz;`
+    /// Also: `use crate::db::query;` or `use super::helpers::format;`
     Path {
-        module: String,
+        module: ModulePath,
         name: String,
         rename: Option<String>,
     },
-    /// Glob import: `use foo::*;`
-    Glob { module: String },
-    /// Grouped imports: `use foo::{a, b as c};`
+    /// Glob import: `use foo::*;` or `use crate::*;`
+    Glob { module: ModulePath },
+    /// Grouped imports: `use foo::{a, b as c};` or `use crate::db::{query, insert};`
     Group {
-        module: String,
+        module: ModulePath,
         items: Vec<UseTreeItem>,
     },
 }

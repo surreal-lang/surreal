@@ -3,18 +3,19 @@
 // Uses Dream stdlib modules for idiomatic code.
 
 use io::{format};
-use list::{len};
 
 // Helper to assert equality - uses any type for flexibility
-fn assert_eq<T>(actual: T, expected: T, name: string) {
+fn assert_eq(actual: any, expected: any, name: string) -> atom {
     if actual == expected {
         format("✓ ~s~n", [name])
     } else {
-        format("✗ ~s - expected ~p, got ~p~n", [name, expected, actual])
+        // Use separate format calls to avoid mixed-type list
+        :io::format("✗ ~s - expected ", [name]);
+        :io::format("~p, got ~p~n", [expected, actual])
     }
 }
 
-fn assert_true(value: bool, name: string) {
+fn assert_true(value: bool, name: string) -> atom {
     if value {
         format("✓ ~s~n", [name])
     } else {
@@ -22,7 +23,7 @@ fn assert_true(value: bool, name: string) {
     }
 }
 
-fn assert_false(value: bool, name: string) {
+fn assert_false(value: bool, name: string) -> atom {
     if !value {
         format("✓ ~s~n", [name])
     } else {
@@ -234,7 +235,7 @@ impl Map {
     }
 
     pub fn count<K, V>(self, pred: fn((K, V)) -> bool) -> int {
-        len(:lists::filter(pred, :maps::to_list(self.data)))
+        :erlang::length(:lists::filter(pred, :maps::to_list(self.data)))
     }
 }
 
@@ -246,7 +247,7 @@ fn test_map_to_list() {
     let m = m.put("b", 2);
 
     let entries = m.to_list();
-    let len = len(entries);
+    let len = :erlang::length(entries);
     assert_eq(len, 2, "map has 2 entries");
 }
 
@@ -263,7 +264,7 @@ fn test_map_filter() {
         age >= 30
     });
 
-    let count = len(seniors);
+    let count = :erlang::length(seniors);
     assert_eq(count, 2, "filter age >= 30");
 }
 

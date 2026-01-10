@@ -28,9 +28,10 @@ impl<'source> Parser<'source> {
     }
 
     /// Parse a complete module.
+    /// Supports fully qualified module paths like `mod my_app::users::auth { }`.
     pub fn parse_module(&mut self) -> ParseResult<Module> {
         self.expect(&Token::Mod)?;
-        let name = self.expect_ident()?;
+        let name = self.parse_module_path()?;
         self.expect(&Token::LBrace)?;
 
         let mut items = Vec::new();
@@ -115,16 +116,41 @@ impl<'source> Parser<'source> {
         Ok(modules)
     }
 
-    /// Check if the next tokens are `mod <ident> {` (wrapped module).
+    /// Check if the next tokens are `mod <path> {` (wrapped module).
+    /// Supports both simple `mod name {` and qualified `mod a::b::c {`.
     fn peek_is_wrapped_module(&self) -> bool {
-        // Check: mod <ident> {
-        if self.pos + 2 < self.tokens.len() {
-            let is_mod = matches!(self.tokens[self.pos].token, Token::Mod);
-            let is_ident = matches!(self.tokens[self.pos + 1].token, Token::Ident(_));
-            let is_lbrace = matches!(self.tokens[self.pos + 2].token, Token::LBrace);
-            return is_mod && is_ident && is_lbrace;
+        // Check: mod <ident> (:: <ident>)* {
+        if self.pos >= self.tokens.len() {
+            return false;
         }
-        false
+
+        // First token must be `mod`
+        if !matches!(self.tokens[self.pos].token, Token::Mod) {
+            return false;
+        }
+
+        // Second token must be an identifier
+        let mut idx = self.pos + 1;
+        if idx >= self.tokens.len() || !matches!(self.tokens[idx].token, Token::Ident(_)) {
+            return false;
+        }
+        idx += 1;
+
+        // Skip over any `::ident` pairs
+        while idx + 1 < self.tokens.len() {
+            if matches!(self.tokens[idx].token, Token::ColonColon) {
+                if matches!(self.tokens[idx + 1].token, Token::Ident(_)) {
+                    idx += 2;
+                } else {
+                    return false;
+                }
+            } else {
+                break;
+            }
+        }
+
+        // After the path, we should find `{` for a wrapped module
+        idx < self.tokens.len() && matches!(self.tokens[idx].token, Token::LBrace)
     }
 
     /// Parse a top-level item.
@@ -521,11 +547,99 @@ impl<'source> Parser<'source> {
         })
     }
 
+    /// Parse a module path for use declarations.
+    /// Handles: `foo`, `foo::bar`, `crate::foo`, `super::foo`, `self::foo`
+    fn parse_use_module_path(&mut self) -> ParseResult<ModulePath> {
+        // Check for path prefix keywords
+        let prefix = if self.check(&Token::Crate) {
+            self.advance();
+            self.expect(&Token::ColonColon)?;
+            PathPrefix::Crate
+        } else if self.check(&Token::Super) {
+            self.advance();
+            self.expect(&Token::ColonColon)?;
+            PathPrefix::Super
+        } else if self.check(&Token::SelfKw) {
+            self.advance();
+            self.expect(&Token::ColonColon)?;
+            PathPrefix::SelfMod
+        } else {
+            PathPrefix::None
+        };
+
+        // For prefixed paths, segments can be empty (e.g., `use super::foo;` where foo is the item)
+        // For non-prefixed paths, we need at least one segment (the module name)
+        let mut segments = Vec::new();
+
+        // Check if we should parse the first segment
+        // We need lookahead to determine if the current ident is a module segment or the item name
+        // It's a module segment if followed by ::ident (another segment or item)
+        // It's an item name if followed by ; or as or {
+        let should_parse_first = if prefix == PathPrefix::None {
+            // Non-prefixed: always need at least one segment
+            true
+        } else {
+            // Prefixed: check if current ident is followed by :: and more
+            self.is_module_segment_ahead()
+        };
+
+        if should_parse_first {
+            segments.push(self.expect_ident()?);
+
+            // Continue parsing segments until we hit the item name
+            while self.check(&Token::ColonColon) && self.is_module_segment_ahead() {
+                self.advance(); // consume ::
+                segments.push(self.expect_ident()?);
+            }
+        }
+
+        Ok(ModulePath { prefix, segments })
+    }
+
+    /// Check if the current position has a module segment followed by more path.
+    /// Returns true if we see: ident :: (ident | * | {)
+    /// Returns false if we see: ident ; or ident as
+    fn is_module_segment_ahead(&self) -> bool {
+        // We need: ident :: something
+        // Current should be ident
+        if self.pos >= self.tokens.len() {
+            return false;
+        }
+        match &self.tokens[self.pos].token {
+            Token::Ident(_) | Token::TypeIdent(_) => {}
+            _ => return false,
+        }
+
+        // Next should be ::
+        if self.pos + 1 >= self.tokens.len() {
+            return false;
+        }
+        if self.tokens[self.pos + 1].token != Token::ColonColon {
+            return false;
+        }
+
+        // After :: should be another ident, *, or {
+        if self.pos + 2 >= self.tokens.len() {
+            return false;
+        }
+        match &self.tokens[self.pos + 2].token {
+            Token::Ident(_) | Token::TypeIdent(_) | Token::Star | Token::LBrace => true,
+            _ => false,
+        }
+    }
+
     /// Parse a use declaration: `use foo::bar;` or `use foo::{a, b};` or `use foo::*;`
+    /// Also handles: `use crate::db::query;`, `use super::helpers::{a, b};`
     fn parse_use_decl(&mut self) -> ParseResult<Item> {
         self.expect(&Token::Use)?;
-        let module = self.expect_ident()?;
-        self.expect(&Token::ColonColon)?;
+
+        let module = self.parse_use_module_path()?;
+
+        // Only expect :: if we have segments (or no prefix)
+        // When we have a prefix with no segments (e.g., `super::item`), the :: was already consumed
+        if !module.segments.is_empty() || module.prefix == PathPrefix::None {
+            self.expect(&Token::ColonColon)?;
+        }
 
         let tree = if self.check(&Token::Star) {
             // Glob import: use foo::*;
@@ -2428,6 +2542,19 @@ impl<'source> Parser<'source> {
         }
     }
 
+    /// Parse a module path like `my_app::users::auth`.
+    /// Returns the full path joined with `::`.
+    fn parse_module_path(&mut self) -> ParseResult<String> {
+        let mut parts = vec![self.expect_ident()?];
+
+        while self.check(&Token::ColonColon) {
+            self.advance(); // consume ::
+            parts.push(self.expect_ident()?);
+        }
+
+        Ok(parts.join("::"))
+    }
+
     fn expect_type_ident(&mut self) -> ParseResult<String> {
         if let Some(Token::TypeIdent(name)) = self.peek().cloned() {
             self.advance();
@@ -3331,11 +3458,12 @@ mod tests {
     fn test_parse_binary_example_file() {
         let source = include_str!("../../examples/binary_example.dream");
         let mut parser = Parser::new(source);
-        let module = parser.parse_module().expect("binary_example.dream should parse successfully");
+        let modules = parser.parse_file_modules("binary_example").expect("binary_example.dream should parse successfully");
 
-        // Should have 10 functions + 2 prelude items
-        assert_eq!(user_items(&module).len(), 10);
-        assert_eq!(module.name, "binary_example");
+        // Should have 1 module with 2 items (1 use import + 1 main function)
+        assert_eq!(modules.len(), 1);
+        assert_eq!(modules[0].name, "binary_example");
+        assert_eq!(user_items(&modules[0]).len(), 2);
     }
 
     #[test]
@@ -3808,6 +3936,135 @@ mod tests {
             }
         } else {
             panic!("expected type alias");
+        }
+    }
+
+    #[test]
+    fn test_parse_use_with_crate_path() {
+        use crate::compiler::ast::{PathPrefix, UseTree};
+
+        let source = r#"
+            mod test {
+                use crate::db::query;
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        if let Item::Use(use_decl) = first_user_item(&module) {
+            if let UseTree::Path { module, name, .. } = &use_decl.tree {
+                assert_eq!(module.prefix, PathPrefix::Crate);
+                assert_eq!(module.segments, vec!["db".to_string()]);
+                assert_eq!(name, "query");
+            } else {
+                panic!("expected path use tree");
+            }
+        } else {
+            panic!("expected use declaration");
+        }
+    }
+
+    #[test]
+    fn test_parse_use_with_super_path() {
+        use crate::compiler::ast::{PathPrefix, UseTree};
+
+        let source = r#"
+            mod test {
+                use super::helpers::{foo, bar};
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        if let Item::Use(use_decl) = first_user_item(&module) {
+            if let UseTree::Group { module, items } = &use_decl.tree {
+                assert_eq!(module.prefix, PathPrefix::Super);
+                assert_eq!(module.segments, vec!["helpers".to_string()]);
+                assert_eq!(items.len(), 2);
+                assert_eq!(items[0].name, "foo");
+                assert_eq!(items[1].name, "bar");
+            } else {
+                panic!("expected group use tree");
+            }
+        } else {
+            panic!("expected use declaration");
+        }
+    }
+
+    #[test]
+    fn test_parse_use_with_self_path() {
+        use crate::compiler::ast::{PathPrefix, UseTree};
+
+        let source = r#"
+            mod test {
+                use self::submod::Thing;
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        if let Item::Use(use_decl) = first_user_item(&module) {
+            if let UseTree::Path { module, name, .. } = &use_decl.tree {
+                assert_eq!(module.prefix, PathPrefix::SelfMod);
+                assert_eq!(module.segments, vec!["submod".to_string()]);
+                assert_eq!(name, "Thing");
+            } else {
+                panic!("expected path use tree");
+            }
+        } else {
+            panic!("expected use declaration");
+        }
+    }
+
+    #[test]
+    fn test_parse_use_with_super_direct_import() {
+        use crate::compiler::ast::{PathPrefix, UseTree};
+
+        // Test `use super::item;` where there are no module segments
+        let source = r#"
+            mod test {
+                use super::get_user_id;
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        if let Item::Use(use_decl) = first_user_item(&module) {
+            if let UseTree::Path { module, name, .. } = &use_decl.tree {
+                assert_eq!(module.prefix, PathPrefix::Super);
+                assert!(module.segments.is_empty(), "expected empty segments for direct super:: import");
+                assert_eq!(name, "get_user_id");
+            } else {
+                panic!("expected path use tree");
+            }
+        } else {
+            panic!("expected use declaration");
+        }
+    }
+
+    #[test]
+    fn test_parse_use_with_crate_direct_import() {
+        use crate::compiler::ast::{PathPrefix, UseTree};
+
+        // Test `use crate::item;` where there are no module segments
+        let source = r#"
+            mod test {
+                use crate::main_func;
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        if let Item::Use(use_decl) = first_user_item(&module) {
+            if let UseTree::Path { module, name, .. } = &use_decl.tree {
+                assert_eq!(module.prefix, PathPrefix::Crate);
+                assert!(module.segments.is_empty(), "expected empty segments for direct crate:: import");
+                assert_eq!(name, "main_func");
+            } else {
+                panic!("expected path use tree");
+            }
+        } else {
+            panic!("expected use declaration");
         }
     }
 }

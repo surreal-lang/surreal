@@ -1,23 +1,23 @@
 /// Demonstration of stdlib modules
 
-use string::{len, to_upper, to_lower, trim, split, join, reverse};
 use timer::{now, seconds, minutes};
 
 pub fn main() -> atom {
     io::println("=== String Module Demo ===");
 
     let s = "  Hello, World!  ";
+    let trimmed = string::trim(s);
     io::format("Original: '~s'~n", [s]);
-    io::format("Trimmed: '~s'~n", [trim(s)]);
-    io::format("Upper: '~s'~n", [s.trim().to_upper()]);
-    io::format("Lower: '~s'~n", [s.trim().to_lower()]);
-    io::format("Length: ~p~n", [s.trim().len()]);
-    io::format("Reversed: '~s'~n", [s.trim().reverse()]);
+    io::format("Trimmed: '~s'~n", [trimmed]);
+    io::format("Upper: '~s'~n", [string::to_upper(trimmed)]);
+    io::format("Lower: '~s'~n", [string::to_lower(trimmed)]);
+    io::format("Length: ~p~n", [string::len(trimmed)]);
+    io::format("Reversed: '~s'~n", [string::reverse(trimmed)]);
 
-    let parts = split("a,b,c,d", ",");
+    let parts = string::split("a,b,c,d", ",");
     io::format("Split 'a,b,c,d' by ',': ~p~n", [parts]);
 
-    let joined = join(["x", "y", "z"], "-");
+    let joined = string::join(["x", "y", "z"], "-");
     io::format("Join ['x','y','z'] with '-': '~s'~n", [joined]);
 
     io::println("");

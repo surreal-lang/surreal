@@ -1,0 +1,22 @@
+// Binary literal example
+// Tests binary syntax and operations
+
+mod binary_example {
+    use io::{println, format};
+
+    pub fn main() -> atom {
+        println("=== Binary Example ===");
+        println("");
+
+        // Binary literals
+        let empty = <<>>;
+        let hello = <<"hello">>;
+
+        format("Empty binary: ~p~n", [empty]);
+        format("String binary: ~p~n", [hello]);
+
+        println("");
+        println("Done!");
+        :ok
+    }
+}

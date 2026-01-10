@@ -2,12 +2,9 @@
 ///
 /// Method calls like `expr.method(args)` are transformed into
 /// `method(expr, args)` where `method` must be in scope.
-
-/// Option type for representing optional values
-enum Option<T> {
-    Some(T),
-    None,
-}
+///
+/// NOTE: UFCS currently works for structs but not enums (Option/Result).
+/// For enums, use explicit qualified function calls.
 
 /// Safe division that returns Option<int>
 pub fn safe_div(a: int, b: int) -> Option<int> {
@@ -18,42 +15,26 @@ pub fn safe_div(a: int, b: int) -> Option<int> {
     }
 }
 
-/// Unwrap with default value
-pub fn unwrap_or<T>(opt: Option<T>, default: T) -> T {
-    match opt {
-        Some(x) => x,
-        None => default,
-    }
-}
-
-/// Check if option has a value
-pub fn is_some<T>(opt: Option<T>) -> bool {
-    match opt {
-        Some(_) => true,
-        None => false,
-    }
-}
-
 pub fn main() -> atom {
     io::println("Method chaining example");
     io::println("========================");
 
-    // Method chaining: expr.method(args) becomes method(expr, args)
-    let result1 = safe_div(10, 2).unwrap_or(0);
+    // For Option types, use explicit module::function calls
+    let result1 = option::unwrap_or(safe_div(10, 2), 0);
     io::format("10 / 2 = ~p~n", [result1]);
 
-    let result2 = safe_div(10, 0).unwrap_or(-1);
+    let result2 = option::unwrap_or(safe_div(10, 0), -1);
     io::format("10 / 0 = ~p (default: -1)~n", [result2]);
 
-    // Check if option has value
-    let has_value = safe_div(20, 4).is_some();
+    // Check if option has value using stdlib
+    let has_value = option::is_some(safe_div(20, 4));
     io::format("20 / 4 is_some: ~p~n", [has_value]);
 
-    let no_value = safe_div(20, 0).is_some();
+    let no_value = option::is_some(safe_div(20, 0));
     io::format("20 / 0 is_some: ~p~n", [no_value]);
 
-    // Chained method calls
-    let chained = Some(42).unwrap_or(0);
+    // Direct Some/None
+    let chained = option::unwrap_or(Some(42), 0);
     io::format("Some(42).unwrap_or(0) = ~p~n", [chained]);
 
     :ok

@@ -74,6 +74,10 @@ pub struct ModuleLoader {
     processed_files: HashSet<PathBuf>,
     /// Paths currently being loaded (for cycle detection).
     loading: Vec<PathBuf>,
+    /// Package name for Rust-style module naming.
+    package_name: Option<String>,
+    /// Source directory root for relative path calculation.
+    src_root: Option<PathBuf>,
 }
 
 impl ModuleLoader {
@@ -83,7 +87,87 @@ impl ModuleLoader {
             loaded: HashMap::new(),
             processed_files: HashSet::new(),
             loading: Vec::new(),
+            package_name: None,
+            src_root: None,
         }
+    }
+
+    /// Create a module loader with package context for Rust-style module naming.
+    /// - `package_name`: The package name from dream.toml (e.g., "my_app")
+    /// - `src_root`: The source directory root (e.g., "/path/to/project/src")
+    pub fn with_package(package_name: String, src_root: PathBuf) -> Self {
+        Self {
+            loaded: HashMap::new(),
+            processed_files: HashSet::new(),
+            loading: Vec::new(),
+            package_name: Some(package_name),
+            src_root: Some(src_root),
+        }
+    }
+
+    /// Derive the full module name from a file path.
+    /// For Rust-style projects: `src/users/auth.dream` -> `my_app::users::auth`
+    /// For lib.dream at src root: `src/lib.dream` -> `my_app`
+    /// For standalone files (no package): uses just the filename stem
+    fn derive_module_name(&self, path: &Path) -> String {
+        // If no package context, fall back to filename-based naming
+        let (package, src_root) = match (&self.package_name, &self.src_root) {
+            (Some(pkg), Some(root)) => (pkg.clone(), root.clone()),
+            _ => {
+                // For standalone files, use filename or directory name for mod.dream
+                let stem = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("unknown");
+
+                // For mod.dream files, use the parent directory name
+                if stem == "mod" {
+                    if let Some(parent) = path.parent() {
+                        if let Some(dir_name) = parent.file_name().and_then(|s| s.to_str()) {
+                            return dir_name.to_string();
+                        }
+                    }
+                }
+
+                return stem.to_string();
+            }
+        };
+
+        // Try to get canonical paths for comparison
+        let canonical_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let canonical_root = src_root.canonicalize().unwrap_or(src_root);
+
+        // Get the path relative to src root
+        let relative = canonical_path
+            .strip_prefix(&canonical_root)
+            .unwrap_or(&canonical_path);
+
+        // Build module path from directory components + filename
+        let mut parts = Vec::new();
+        parts.push(package);
+
+        // Add directory components
+        if let Some(parent) = relative.parent() {
+            for component in parent.components() {
+                if let std::path::Component::Normal(name) = component {
+                    if let Some(s) = name.to_str() {
+                        parts.push(s.to_string());
+                    }
+                }
+            }
+        }
+
+        // Add filename (without extension), unless it's lib.dream or mod.dream
+        let stem = relative
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown");
+
+        if stem != "lib" && stem != "mod" {
+            parts.push(stem.to_string());
+        }
+
+        parts.join("::")
     }
 
     /// Resolve module path for a mod declaration.
@@ -107,14 +191,10 @@ impl ModuleLoader {
     }
 
     /// Load a module and all its dependencies.
-    /// The module name is derived from the filename.
+    /// The module name is derived from the file path and package context.
     pub fn load(&mut self, path: &Path) -> LoadResult<Module> {
-        // Derive module name from filename
-        let module_name = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("unknown")
-            .to_string();
+        // Derive module name from file path (uses package context if available)
+        let module_name = self.derive_module_name(path);
 
         self.load_with_name(path, &module_name)
     }
@@ -199,8 +279,9 @@ impl ModuleLoader {
 
             for decl in mod_decls {
                 let dep_path = self.resolve_module_path(&decl.name, &canonical)?;
-                // Use the declared name, not the filename
-                self.load_file_modules(&dep_path, &decl.name)?;
+                // Derive the full module name from the file path
+                let dep_module_name = self.derive_module_name(&dep_path);
+                self.load_file_modules(&dep_path, &dep_module_name)?;
             }
         }
 

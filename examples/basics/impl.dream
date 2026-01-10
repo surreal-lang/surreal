@@ -1,65 +1,67 @@
 // Test impl blocks and pipe operator
 
-struct Point {
-    x: int,
-    y: int,
-}
-
-impl Point {
-    pub fn new(x: int, y: int) -> Point {
-        Point { x: x, y: y }
+mod impl_example {
+    struct Point {
+        x: int,
+        y: int,
     }
 
-    pub fn origin() -> Point {
-        Point::new(0, 0)
+    impl Point {
+        pub fn new(x: int, y: int) -> Point {
+            Point { x: x, y: y }
+        }
+
+        pub fn origin() -> Point {
+            Point::new(0, 0)
+        }
+
+        pub fn add(self, dx: int, dy: int) -> Point {
+            Point { x: self.x + dx, y: self.y + dy }
+        }
+
+        pub fn sum(a: int, b: int) -> int {
+            a + b
+        }
     }
 
-    pub fn add(self, dx: int, dy: int) -> Point {
-        Point { x: self.x + dx, y: self.y + dy }
+    // Test static method calls
+    pub fn test_new() -> Point {
+        Point::new(1, 2)
     }
 
-    pub fn sum(a: int, b: int) -> int {
-        a + b
+    pub fn test_origin() -> Point {
+        Point::origin()
     }
-}
 
-// Test static method calls
-pub fn test_new() -> Point {
-    Point::new(1, 2)
-}
-
-pub fn test_origin() -> Point {
-    Point::origin()
-}
-
-pub fn test_sum() -> int {
-    Point::sum(10, 20)
-}
-
-// Test pipe operator
-pub fn test_pipe() -> Point {
-    Point::origin() |> Point::add(5, 10)
-}
-
-pub fn test_pipe_chain() -> Point {
-    Point::origin()
-        |> Point::add(1, 2)
-        |> Point::add(3, 4)
-}
-
-// Test struct pattern matching (with shorthand syntax)
-pub fn get_x(p: Point) -> int {
-    match p {
-        Point { x, .. } => x,
+    pub fn test_sum() -> int {
+        Point::sum(10, 20)
     }
-}
 
-pub fn test_pattern() -> int {
-    let p = Point::new(42, 100);
-    get_x(p)
-}
+    // Test pipe operator
+    pub fn test_pipe() -> Point {
+        Point::origin() |> Point::add(5, 10)
+    }
 
-// Simple main for VM testing
-pub fn main() -> int {
-    test_pattern()
+    pub fn test_pipe_chain() -> Point {
+        Point::origin()
+            |> Point::add(1, 2)
+            |> Point::add(3, 4)
+    }
+
+    // Test struct pattern matching (with shorthand syntax)
+    pub fn get_x(p: Point) -> int {
+        match p {
+            Point { x, .. } => x,
+        }
+    }
+
+    pub fn test_pattern() -> int {
+        let p = Point::new(42, 100);
+        get_x(p)
+    }
+
+    // Simple main for VM testing
+    pub fn main() -> int {
+        test_pattern()
+    }
 }

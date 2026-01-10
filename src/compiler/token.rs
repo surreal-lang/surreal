@@ -194,6 +194,10 @@ pub enum Token {
     Pub,
     #[token("self")]
     SelfKw,
+    #[token("crate")]
+    Crate,
+    #[token("super")]
+    Super,
     #[token("spawn")]
     Spawn,
     #[token("receive")]
@@ -431,6 +435,8 @@ impl std::fmt::Display for Token {
             Token::Dot => write!(f, "."),
             Token::Underscore => write!(f, "_"),
             Token::Question => write!(f, "?"),
+            Token::Crate => write!(f, "crate"),
+            Token::Super => write!(f, "super"),
         }
     }
 }
@@ -521,12 +527,18 @@ mod tests {
     #[test]
     fn test_rust_keywords_are_valid_idents() {
         // This isn't Rust - we can use most Rust keywords as identifiers
-        // (except `use`, `as`, `impl`, `trait`, `for`, `type`, `extern` which are now keywords in Dream)
-        let mut lex = Token::lexer("loop while crate super");
+        // (except `use`, `as`, `impl`, `trait`, `for`, `type`, `extern`, `crate`, `super` which are now keywords in Dream)
+        let mut lex = Token::lexer("loop while");
         assert_eq!(lex.next(), Some(Ok(Token::Ident("loop".to_string()))));
         assert_eq!(lex.next(), Some(Ok(Token::Ident("while".to_string()))));
-        assert_eq!(lex.next(), Some(Ok(Token::Ident("crate".to_string()))));
-        assert_eq!(lex.next(), Some(Ok(Token::Ident("super".to_string()))));
+    }
+
+    #[test]
+    fn test_crate_and_super_keywords() {
+        // crate and super are now keywords for Rust-style module paths
+        let mut lex = Token::lexer("crate super");
+        assert_eq!(lex.next(), Some(Ok(Token::Crate)));
+        assert_eq!(lex.next(), Some(Ok(Token::Super)));
     }
 
     #[test]

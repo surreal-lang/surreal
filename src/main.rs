@@ -9,7 +9,7 @@ use clap::{Parser, Subcommand};
 use dream::{
     compiler::{
         check_modules, resolve_stdlib_methods, CompilerError, CoreErlangEmitter,
-        GenericFunctionRegistry, Item, Module, ModuleLoader, Parser as DreamParser,
+        GenericFunctionRegistry, Item, Module, ModuleContext, ModuleLoader, Parser as DreamParser,
         SharedGenericRegistry,
     },
     config::{generate_dream_toml, generate_main_dream, ApplicationConfig, ProjectConfig},
@@ -186,15 +186,24 @@ fn cmd_build(file: Option<&Path>, target: &str, output: Option<&Path>) -> ExitCo
 
     println!("Compiling {}...", config.package.name);
 
-    // Load all .dream files in src/ directory
-    let mut loader = ModuleLoader::new();
+    // Load all .dream files in src/ directory with package context
+    // This enables Rust-style module naming (e.g., my_app::users::auth)
+    let mut loader = ModuleLoader::with_package(
+        config.package.name.clone(),
+        src_dir.clone(),
+    );
     if let Err(e) = loader.load_all_in_dir(&src_dir) {
         eprintln!("Error loading modules: {}", e);
         return ExitCode::from(1);
     }
 
-    // Compile all loaded modules
-    compile_modules(loader.into_modules(), &build_dir, target)
+    // Compile all loaded modules with package name for module resolution
+    compile_modules(
+        loader.into_modules(),
+        &build_dir,
+        target,
+        Some(&config.package.name),
+    )
 }
 
 /// Build a standalone .dream file.
@@ -229,7 +238,8 @@ fn compile_and_emit(entry_file: &Path, build_dir: &Path, target: &str) -> ExitCo
         return ExitCode::from(1);
     }
 
-    compile_modules(loader.into_modules(), build_dir, target)
+    // Standalone files don't have a package context
+    compile_modules(loader.into_modules(), build_dir, target, None)
 }
 
 /// Compile modules to Core Erlang and optionally BEAM.
@@ -237,10 +247,11 @@ fn compile_modules(
     modules: Vec<Module>,
     build_dir: &Path,
     target: &str,
+    package_name: Option<&str>,
 ) -> ExitCode {
     // Use stdlib generics registry if available
     let stdlib_registry = load_stdlib_generics();
-    compile_modules_with_registry(modules, build_dir, target, stdlib_registry)
+    compile_modules_with_registry(modules, build_dir, target, stdlib_registry, package_name)
 }
 
 /// Compile modules to Core Erlang and optionally BEAM, with a pre-populated registry.
@@ -249,6 +260,7 @@ fn compile_modules_with_registry(
     build_dir: &Path,
     target: &str,
     external_registry: Option<SharedGenericRegistry>,
+    package_name: Option<&str>,
 ) -> ExitCode {
     if modules.is_empty() {
         eprintln!("No modules to compile");
@@ -352,7 +364,16 @@ fn compile_modules_with_registry(
     // Compile each module to Core Erlang
     let mut core_files = Vec::new();
     for module in &modules {
-        let mut emitter = CoreErlangEmitter::with_registry(generic_registry.clone());
+        // Create module-specific context for path resolution (crate::/super::/self::)
+        let module_context = match package_name {
+            Some(pkg) => ModuleContext::for_module(pkg, &module.name),
+            None => ModuleContext::default(),
+        };
+
+        let mut emitter = CoreErlangEmitter::with_registry_and_context(
+            generic_registry.clone(),
+            module_context,
+        );
         let core_erlang = match emitter.emit_module(module) {
             Ok(c) => c,
             Err(e) => {
@@ -367,15 +388,14 @@ fn compile_modules_with_registry(
             emitter.register_generics(&mut registry);
         }
 
-        // Use prefixed module name for output files (e.g., dream::io.core)
-        let beam_name = CoreErlangEmitter::beam_module_name(&module.name);
-        let core_file = build_dir.join(format!("{}.core", beam_name));
+        // Use module name directly for output files (explicit module names)
+        let core_file = build_dir.join(format!("{}.core", &module.name));
         if let Err(e) = fs::write(&core_file, &core_erlang) {
             eprintln!("Error writing {}: {}", core_file.display(), e);
             return ExitCode::from(1);
         }
 
-        println!("  Compiled {}.core", beam_name);
+        println!("  Compiled {}.core", &module.name);
         core_files.push(core_file);
     }
 
@@ -566,27 +586,15 @@ fn load_stdlib_modules() -> Vec<Module> {
         None => return Vec::new(),
     };
 
-    let entries = match fs::read_dir(&stdlib_dir) {
-        Ok(entries) => entries,
-        Err(_) => return Vec::new(),
-    };
+    // Use package-aware loader with "dream" as the package name
+    // This enables implicit modules: stdlib/io.dream -> dream::io
+    let mut loader = ModuleLoader::with_package("dream".to_string(), stdlib_dir.clone());
 
-    let mut stdlib_modules = Vec::new();
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) != Some("dream") {
-            continue;
-        }
-
-        // Load and parse the module
-        let mut loader = ModuleLoader::new();
-        if loader.load(&path).is_ok() {
-            stdlib_modules.extend(loader.modules().cloned());
-        }
+    if let Err(_) = loader.load_all_in_dir(&stdlib_dir) {
+        return Vec::new();
     }
 
-    stdlib_modules
+    loader.into_modules()
 }
 
 /// Get the stdlib output directory.
@@ -601,29 +609,19 @@ fn load_stdlib_generics() -> Option<SharedGenericRegistry> {
     let stdlib_dir = find_stdlib_dir()?;
     let registry = Arc::new(RwLock::new(GenericFunctionRegistry::new()));
 
-    // Find all .dream files in stdlib
-    let entries = fs::read_dir(&stdlib_dir).ok()?;
+    // Use package-aware loader with "dream" as the package name
+    let mut loader = ModuleLoader::with_package("dream".to_string(), stdlib_dir.clone());
+    if loader.load_all_in_dir(&stdlib_dir).is_err() {
+        return Some(registry);
+    }
 
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) != Some("dream") {
-            continue;
-        }
-
-        // Load and parse the module
-        let mut loader = ModuleLoader::new();
-        if loader.load(&path).is_err() {
-            continue;
-        }
-
-        // Extract generic functions from each loaded module
-        for module in loader.modules() {
-            let mut reg = registry.write().unwrap();
-            for item in &module.items {
-                if let Item::Function(func) = item {
-                    if !func.type_params.is_empty() {
-                        reg.register(&module.name, func);
-                    }
+    // Extract generic functions from each loaded module
+    for module in loader.modules() {
+        let mut reg = registry.write().unwrap();
+        for item in &module.items {
+            if let Item::Function(func) = item {
+                if !func.type_params.is_empty() {
+                    reg.register(&module.name, func);
                 }
             }
         }
@@ -738,8 +736,8 @@ fn cmd_run(
             return build_result;
         }
 
-        // Module name from parsed AST (with dream:: prefix)
-        let module_name = CoreErlangEmitter::beam_module_name(&base_name);
+        // Module name from parsed AST (use directly - explicit names now)
+        let module_name = base_name;
 
         (build_dir, module_name, None)
     } else {
@@ -762,11 +760,11 @@ fn cmd_run(
         let app_config = config.application.clone();
 
         // Determine module name: use application module or default to "main"
+        // Module names should be explicit in source (e.g., "dream::io", "my_app::main")
         let module_name = if let Some(ref app) = app_config {
-            let mod_name = app.module.clone().unwrap_or_else(|| config.package.name.clone());
-            CoreErlangEmitter::beam_module_name(&mod_name)
+            app.module.clone().unwrap_or_else(|| config.package.name.clone())
         } else {
-            CoreErlangEmitter::beam_module_name("main")
+            "main".to_string()
         };
 
         (beam_dir, module_name, app_config)
