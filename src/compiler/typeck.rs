@@ -3118,9 +3118,18 @@ impl TypeChecker {
 
     /// Infer type arguments for a generic function call.
     fn infer_type_args_for_call(&mut self, func: &Expr, args: &[Expr]) -> Vec<ast::Type> {
-        // Get function info
+        // Get function info - prefer local module's qualified name first
         let fn_info = match func {
-            Expr::Ident(name) => self.env.get_function(name).cloned(),
+            Expr::Ident(name) => {
+                // First try local module's qualified name, then fall back to simple name
+                let local_qualified = self.current_module.as_ref()
+                    .map(|m| format!("{}::{}", m, name));
+
+                local_qualified
+                    .as_ref()
+                    .and_then(|qn| self.env.get_function(qn).cloned())
+                    .or_else(|| self.env.get_function(name).cloned())
+            }
             Expr::Path { segments } if segments.len() == 2 => {
                 let qualified_name = format!("{}::{}", segments[0], segments[1]);
                 self.env.get_function(&qualified_name).cloned()

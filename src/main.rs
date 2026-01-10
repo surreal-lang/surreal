@@ -814,12 +814,13 @@ fn cmd_run(
         let beam_dir = config.beam_dir_for_env(&project_root, env);
         let app_config = config.application.clone();
 
-        // Determine module name: use application module or default to "main"
+        // Determine module name: use application module or package name
         // Module names should be explicit in source (e.g., "dream::io", "my_app::main")
         let module_name = if let Some(ref app) = app_config {
             app.module.clone().unwrap_or_else(|| config.package.name.clone())
         } else {
-            "main".to_string()
+            // Use package name as the default module (corresponds to lib.dream)
+            config.package.name.clone()
         };
 
         (beam_dir, module_name, app_config)
