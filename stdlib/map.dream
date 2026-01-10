@@ -99,13 +99,6 @@ impl Map {
     }
 }
 
-/// Implement Iter trait for Map
-impl Iter for Map {
-    pub fn to_list(self) {
-        :maps::to_list(self.data)
-    }
-}
-
 /// Enumerable operations for Map - each entry is a (key, value) tuple.
 impl Map {
     pub fn map<K, V, U>(self, f: fn((K, V)) -> U) -> [U] {

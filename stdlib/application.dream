@@ -1,0 +1,161 @@
+// Dream Standard Library - Application Module
+//
+// Provides OTP Application behavior for managing supervision trees
+// and application lifecycle.
+
+/// The Application trait.
+/// Implement this to create an OTP application with lifecycle hooks.
+///
+/// Example:
+/// ```
+/// use application::Application;
+/// use supervisor;
+///
+/// impl Application {
+///     fn start(_start_type: atom, _args: any) -> (atom, pid) {
+///         let children = [
+///             (:worker, :my_worker, [], :permanent, :worker)
+///         ];
+///         let flags = (:one_for_one, 5, 10);
+///         supervisor::start_link(:my_app_sup, (flags, children))
+///     }
+/// }
+/// ```
+pub trait Application {
+    /// Called when the application starts.
+    /// Returns (:ok, supervisor_pid) on success or (:error, reason) on failure.
+    fn start(start_type: atom, args: any) -> (atom, pid);
+
+    /// Called before the application stops (optional).
+    /// The state argument is whatever was returned by start/2's second element.
+    fn prep_stop(state: any) -> any {
+        state
+    }
+
+    /// Called when the application stops (optional).
+    fn stop(state: any) -> atom {
+        :ok
+    }
+}
+
+// ============== Application Environment API ==============
+
+/// Get an environment value for the current application.
+/// Returns None if the key is not set.
+pub fn get_env(key: atom) -> Option<any> {
+    match :application::get_application() {
+        :undefined => None,
+        app => get_env_for(app, key)
+    }
+}
+
+/// Get an environment value for a specific application.
+pub fn get_env_for(app: atom, key: atom) -> Option<any> {
+    match :application::get_env(app, key) {
+        (:ok, value) => Some(value),
+        :undefined => None
+    }
+}
+
+/// Get an environment value with a default.
+pub fn get_env_default(key: atom, default: any) -> any {
+    match get_env(key) {
+        Some(value) => value,
+        None => default
+    }
+}
+
+/// Get an environment value for a specific application with a default.
+pub fn get_env_for_default(app: atom, key: atom, default: any) -> any {
+    match get_env_for(app, key) {
+        Some(value) => value,
+        None => default
+    }
+}
+
+/// Fetch environment value, crashes if not set.
+pub fn fetch_env(key: atom) -> any {
+    match get_env(key) {
+        Some(value) => value,
+        None => :erlang::error((:missing_env, key))
+    }
+}
+
+/// Fetch environment value for specific app, crashes if not set.
+pub fn fetch_env_for(app: atom, key: atom) -> any {
+    match get_env_for(app, key) {
+        Some(value) => value,
+        None => :erlang::error((:missing_env, app, key))
+    }
+}
+
+/// Set an environment value for the current application.
+pub fn put_env(key: atom, value: any) -> atom {
+    match :application::get_application() {
+        :undefined => :error,
+        app => put_env_for(app, key, value)
+    }
+}
+
+/// Set an environment value for a specific application.
+pub fn put_env_for(app: atom, key: atom, value: any) -> atom {
+    :application::set_env(app, key, value)
+}
+
+/// Get all environment for the current application.
+pub fn get_all_env() -> [(atom, any)] {
+    match :application::get_application() {
+        :undefined => [],
+        app => get_all_env_for(app)
+    }
+}
+
+/// Get all environment for a specific application.
+pub fn get_all_env_for(app: atom) -> [(atom, any)] {
+    :application::get_all_env(app)
+}
+
+// ============== Application Control API ==============
+
+/// Start an application.
+pub fn start(app: atom) -> (atom, any) {
+    :application::start(app)
+}
+
+/// Stop an application.
+pub fn stop(app: atom) -> atom {
+    :application::stop(app)
+}
+
+/// Ensure an application is started.
+/// Also starts any dependencies.
+pub fn ensure_started(app: atom) -> (atom, any) {
+    :application::ensure_all_started(app)
+}
+
+/// Ensure an application is started (simple version).
+/// Returns :ok on success.
+pub fn ensure_started_simple(app: atom) -> atom {
+    match ensure_started(app) {
+        (:ok, _) => :ok,
+        (:error, reason) => :erlang::error(reason)
+    }
+}
+
+/// Get information about a running application.
+pub fn info(app: atom) -> [(atom, any)] {
+    :application::get_application(app)
+}
+
+/// Get which applications are currently running.
+pub fn which_applications() -> [(atom, string, string)] {
+    :application::which_applications()
+}
+
+/// Get the application that owns the calling process.
+pub fn get_application() -> atom {
+    match :application::get_application() {
+        :undefined => :undefined,
+        (:ok, app) => app
+    }
+}

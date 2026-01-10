@@ -11,7 +11,7 @@ use dream::{
         check_modules, resolve_stdlib_methods, CompilerError, CoreErlangEmitter,
         GenericFunctionRegistry, Item, Module, ModuleLoader, SharedGenericRegistry,
     },
-    config::{generate_dream_toml, generate_main_dream, ProjectConfig},
+    config::{generate_dream_toml, generate_main_dream, ApplicationConfig, ProjectConfig},
 };
 use std::sync::{Arc, RwLock};
 
@@ -56,9 +56,18 @@ enum Commands {
     Run {
         /// Source file to run (optional, uses project if not specified)
         file: Option<PathBuf>,
-        /// Function to call (default: main)
-        #[arg(short, long, default_value = "main")]
-        function: String,
+        /// Function to call (default: main, or starts application if configured)
+        #[arg(short, long)]
+        function: Option<String>,
+        /// Just evaluate the function and exit (don't start application)
+        #[arg(long)]
+        eval: bool,
+        /// Keep the BEAM running after function returns (for non-application mode)
+        #[arg(long)]
+        no_halt: bool,
+        /// Environment: dev, test, prod (default: dev)
+        #[arg(short, long, default_value = "dev")]
+        env: String,
         /// Arguments to pass to the function
         args: Vec<String>,
     },
@@ -91,8 +100,11 @@ fn main() -> ExitCode {
         Commands::Run {
             file,
             function,
+            eval,
+            no_halt,
+            env,
             args,
-        } => cmd_run(file.as_deref(), &function, &args),
+        } => cmd_run(file.as_deref(), function.as_deref(), eval, no_halt, &env, &args),
         Commands::Bindgen {
             files,
             output,
@@ -424,7 +436,7 @@ fn find_stdlib_dir() -> Option<PathBuf> {
     // Try relative to executable first
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(exe_dir) = exe_path.parent() {
-            // Check ../stdlib (for target/debug/dream -> stdlib/)
+            // Check ../../stdlib (for target/debug/dream -> stdlib/)
             let stdlib = exe_dir.join("../../stdlib");
             if stdlib.exists() {
                 return Some(stdlib.canonicalize().unwrap_or(stdlib));
@@ -443,6 +455,19 @@ fn find_stdlib_dir() -> Option<PathBuf> {
         return Some(stdlib.canonicalize().unwrap_or(stdlib));
     }
 
+    // Search up from current directory (for running from subdirectories)
+    if let Ok(mut current) = std::env::current_dir() {
+        loop {
+            let stdlib = current.join("stdlib");
+            if stdlib.exists() {
+                return Some(stdlib.canonicalize().unwrap_or(stdlib));
+            }
+            if !current.pop() {
+                break;
+            }
+        }
+    }
+
     None
 }
 
@@ -451,7 +476,7 @@ fn find_stubs_dir() -> Option<PathBuf> {
     // Try relative to executable first
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(exe_dir) = exe_path.parent() {
-            // Check ../stubs (for target/debug/dream -> stubs/)
+            // Check ../../stubs (for target/debug/dream -> stubs/)
             let stubs = exe_dir.join("../../stubs");
             if stubs.exists() {
                 return Some(stubs.canonicalize().unwrap_or(stubs));
@@ -468,6 +493,19 @@ fn find_stubs_dir() -> Option<PathBuf> {
     let stubs = PathBuf::from("stubs");
     if stubs.exists() {
         return Some(stubs.canonicalize().unwrap_or(stubs));
+    }
+
+    // Search up from current directory (for running from subdirectories)
+    if let Ok(mut current) = std::env::current_dir() {
+        loop {
+            let stubs = current.join("stubs");
+            if stubs.exists() {
+                return Some(stubs.canonicalize().unwrap_or(stubs));
+            }
+            if !current.pop() {
+                break;
+            }
+        }
     }
 
     None
@@ -640,7 +678,14 @@ fn compile_stdlib() -> Result<PathBuf, String> {
 }
 
 /// Build and run the project or a standalone file.
-fn cmd_run(file: Option<&Path>, function: &str, args: &[String]) -> ExitCode {
+fn cmd_run(
+    file: Option<&Path>,
+    function: Option<&str>,
+    eval_mode: bool,
+    no_halt: bool,
+    env: &str,
+    args: &[String],
+) -> ExitCode {
     // Compile stdlib first
     let stdlib_dir = match compile_stdlib() {
         Ok(dir) => Some(dir),
@@ -650,9 +695,9 @@ fn cmd_run(file: Option<&Path>, function: &str, args: &[String]) -> ExitCode {
         }
     };
 
-    // Determine beam directory and module name based on mode
-    let (beam_dir, module_name) = if let Some(source_file) = file {
-        // Standalone file mode
+    // Determine beam directory, module name, and application config based on mode
+    let (beam_dir, module_name, app_config) = if let Some(source_file) = file {
+        // Standalone file mode - no application support
         let build_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
         // Build the standalone file
@@ -668,7 +713,7 @@ fn cmd_run(file: Option<&Path>, function: &str, args: &[String]) -> ExitCode {
             .unwrap_or("main");
         let module_name = CoreErlangEmitter::beam_module_name(base_name);
 
-        (build_dir, module_name)
+        (build_dir, module_name, None)
     } else {
         // Project mode
         let build_result = cmd_build(None, "beam", None);
@@ -685,7 +730,18 @@ fn cmd_run(file: Option<&Path>, function: &str, args: &[String]) -> ExitCode {
             }
         };
 
-        (config.beam_dir(&project_root), CoreErlangEmitter::beam_module_name("main"))
+        let beam_dir = config.beam_dir_for_env(&project_root, env);
+        let app_config = config.application.clone();
+
+        // Determine module name: use application module or default to "main"
+        let module_name = if let Some(ref app) = app_config {
+            let mod_name = app.module.clone().unwrap_or_else(|| config.package.name.clone());
+            CoreErlangEmitter::beam_module_name(&mod_name)
+        } else {
+            CoreErlangEmitter::beam_module_name("main")
+        };
+
+        (beam_dir, module_name, app_config)
     };
 
     // Check if erl is available
@@ -695,28 +751,72 @@ fn cmd_run(file: Option<&Path>, function: &str, args: &[String]) -> ExitCode {
         return ExitCode::from(1);
     }
 
-    // Format arguments for Erlang
-    let args_str = if args.is_empty() {
-        String::new()
+    // Determine run mode:
+    // 1. If --eval flag is set, always use eval mode (call function and exit)
+    // 2. If function is explicitly specified, use eval mode
+    // 3. If application is configured and no function specified, use application mode
+    // 4. Otherwise, use eval mode with main()
+    let use_app_mode = !eval_mode && function.is_none() && app_config.is_some();
+
+    if use_app_mode {
+        run_application(&beam_dir, &module_name, &app_config.unwrap(), stdlib_dir.as_ref())
     } else {
-        args.join(", ")
-    };
+        let func = function.unwrap_or("main");
+        run_function(&beam_dir, &module_name, func, args, no_halt, stdlib_dir.as_ref())
+    }
+}
 
+/// Run in application mode - start the supervision tree and keep running.
+fn run_application(
+    beam_dir: &Path,
+    module_name: &str,
+    app_config: &ApplicationConfig,
+    stdlib_dir: Option<&PathBuf>,
+) -> ExitCode {
     println!();
-    println!("Running '{}':{}({})...", module_name, function, args_str);
+    println!("Starting application '{}'...", module_name);
     println!();
 
-    // Run with erl (module name must be quoted for special chars like ::)
-    let eval_expr = format!(
-        "io:format(\"~p~n\", ['{}':{}({})]), halt().",
-        module_name, function, args_str
-    );
+    // Build the eval expression for application mode:
+    // 1. Set environment variables from config
+    // 2. Call the Application's start/2 function
+    // 3. Block forever (receive loop)
+    let mut eval_parts = Vec::new();
+
+    // Set application environment from config
+    for (key, value) in &app_config.env {
+        let erlang_value = toml_to_erlang(value);
+        eval_parts.push(format!(
+            "application:set_env('{}', '{}', {})",
+            module_name, key, erlang_value
+        ));
+    }
+
+    // Start the application
+    eval_parts.push(format!(
+        "case '{}':start(normal, []) of \
+            {{ok, _Pid}} -> ok; \
+            {{error, Reason}} -> io:format(\"Failed to start: ~p~n\", [Reason]), halt(1) \
+        end",
+        module_name
+    ));
+
+    // Print startup message
+    eval_parts.push(format!(
+        "io:format(\"Application '{}' started. Press Ctrl+C to stop.~n\", [])",
+        module_name
+    ));
+
+    // Block forever - the supervision tree handles everything
+    eval_parts.push("receive stop -> ok end".to_string());
+
+    let eval_expr = eval_parts.join(", ") + ".";
 
     let mut cmd = Command::new("erl");
-    cmd.arg("-pa").arg(&beam_dir);
+    cmd.arg("-pa").arg(beam_dir);
 
     // Add stdlib to code path if available
-    if let Some(ref stdlib) = stdlib_dir {
+    if let Some(stdlib) = stdlib_dir {
         cmd.arg("-pa").arg(stdlib);
     }
 
@@ -731,6 +831,85 @@ fn cmd_run(file: Option<&Path>, function: &str, args: &[String]) -> ExitCode {
             eprintln!("Error running erl: {}", e);
             ExitCode::from(1)
         }
+    }
+}
+
+/// Run in eval mode - call a function and optionally exit.
+fn run_function(
+    beam_dir: &Path,
+    module_name: &str,
+    function: &str,
+    args: &[String],
+    no_halt: bool,
+    stdlib_dir: Option<&PathBuf>,
+) -> ExitCode {
+    // Format arguments for Erlang
+    let args_str = if args.is_empty() {
+        String::new()
+    } else {
+        args.join(", ")
+    };
+
+    println!();
+    println!("Running '{}':{}({})...", module_name, function, args_str);
+    println!();
+
+    // Build eval expression
+    let eval_expr = if no_halt {
+        // Print result but don't halt - keep BEAM running
+        format!(
+            "io:format(\"~p~n\", ['{}':{}({})]).",
+            module_name, function, args_str
+        )
+    } else {
+        // Print result and halt
+        format!(
+            "io:format(\"~p~n\", ['{}':{}({})]), halt().",
+            module_name, function, args_str
+        )
+    };
+
+    let mut cmd = Command::new("erl");
+    cmd.arg("-pa").arg(beam_dir);
+
+    // Add stdlib to code path if available
+    if let Some(stdlib) = stdlib_dir {
+        cmd.arg("-pa").arg(stdlib);
+    }
+
+    cmd.arg("-noshell").arg("-eval").arg(&eval_expr);
+
+    let status = cmd.status();
+
+    match status {
+        Ok(s) if s.success() => ExitCode::SUCCESS,
+        Ok(s) => ExitCode::from(s.code().unwrap_or(1) as u8),
+        Err(e) => {
+            eprintln!("Error running erl: {}", e);
+            ExitCode::from(1)
+        }
+    }
+}
+
+/// Convert a TOML value to an Erlang term string.
+fn toml_to_erlang(value: &toml::Value) -> String {
+    match value {
+        toml::Value::String(s) => format!("<<\"{}\">>", s), // Binary string
+        toml::Value::Integer(i) => i.to_string(),
+        toml::Value::Float(f) => f.to_string(),
+        toml::Value::Boolean(b) => if *b { "true" } else { "false" }.to_string(),
+        toml::Value::Array(arr) => {
+            let items: Vec<String> = arr.iter().map(toml_to_erlang).collect();
+            format!("[{}]", items.join(", "))
+        }
+        toml::Value::Table(tbl) => {
+            let items: Vec<String> = tbl
+                .iter()
+                .map(|(k, v)| format!("{{'{}', {}}}", k, toml_to_erlang(v)))
+                .collect();
+            format!("[{}]", items.join(", "))
+        }
+        toml::Value::Datetime(dt) => format!("<<\"{}\">>", dt),
     }
 }
 

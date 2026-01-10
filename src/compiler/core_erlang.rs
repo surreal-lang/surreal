@@ -110,6 +110,9 @@ pub struct CoreErlangEmitter {
     type_param_subst: HashMap<String, String>,
     /// Trait bounds for current type params: type_param_name → Vec<trait_name>
     type_param_bounds: HashMap<String, Vec<String>>,
+    /// Type parameter names of the current function being emitted (for non-monomorphized generics)
+    /// When set, calls using these type params should use dynamic dispatch, not monomorphization
+    current_func_type_params: HashSet<String>,
 
     // Cross-module generic function support
     /// Registry of generic functions from other modules (shared across compilations)
@@ -140,6 +143,7 @@ impl CoreErlangEmitter {
             pending_monomorphizations: HashSet::new(),
             type_param_subst: HashMap::new(),
             type_param_bounds: HashMap::new(),
+            current_func_type_params: HashSet::new(),
             external_generics: None,
             cross_module_monomorphizations: HashSet::new(),
             cross_module_inlining_source: None,
@@ -550,6 +554,17 @@ impl CoreErlangEmitter {
             if bounds.contains(&trait_name.to_string()) {
                 // Found a type param with this bound - get its concrete type
                 if let Some(concrete_type) = self.type_param_subst.get(type_param) {
+                    // Skip 'any' type - it's not a real type with trait implementations,
+                    // so we need to fall through to dynamic dispatch
+                    if concrete_type == "any" {
+                        return None;
+                    }
+                    // Skip if the "concrete" type is actually a type parameter of the current function
+                    // This happens when we're emitting a generic function or when a bogus monomorphization
+                    // was created with a type param name like "T"
+                    if self.current_func_type_params.contains(concrete_type) {
+                        return None;
+                    }
                     return Some(concrete_type.clone());
                 }
             }
@@ -1272,6 +1287,14 @@ impl CoreErlangEmitter {
             matches!(&p.pattern, Pattern::Ident(name) if name == "self")
         });
 
+        // Track type parameters for this function (for generic functions without monomorphization)
+        // This enables us to detect when a call like func::<T>() is using the current function's
+        // type parameter, so we use dynamic dispatch instead of creating bogus monomorphizations
+        self.current_func_type_params.clear();
+        for tp in &func.type_params {
+            self.current_func_type_params.insert(tp.name.clone());
+        }
+
         // Clear variables from previous function and add this function's parameters
         self.variables.clear();
         for p in &func.params {
@@ -1918,20 +1941,42 @@ impl CoreErlangEmitter {
                         if !effective_type_args.is_empty()
                             && self.generic_functions.contains_key(name)
                         {
-                            // Record the monomorphization and call the specialized version
-                            let type_names: Vec<String> = effective_type_args
-                                .iter()
-                                .map(|t| self.type_to_name(t))
-                                .collect();
-                            self.pending_monomorphizations
-                                .insert((name.clone(), type_names.clone()));
+                            // Check if any type args are the current function's type parameters
+                            // If so, we're in a generic function calling another generic with our type param
+                            // We should call the generic function directly, not create a bogus monomorphization
+                            let uses_current_type_params = effective_type_args.iter().any(|t| {
+                                match t {
+                                    Type::Named { name: n, .. } | Type::TypeVar(n) => {
+                                        self.current_func_type_params.contains(n)
+                                    }
+                                    _ => false,
+                                }
+                            });
 
-                            // Call the monomorphized function: name_Type1_Type2
-                            let mono_name = format!("{}_{}", name, type_names.join("_"));
-                            self.emit(&format!("apply '{}'/{}", mono_name, args.len()));
-                            self.emit("(");
-                            self.emit_args(args)?;
-                            self.emit(")");
+                            if uses_current_type_params {
+                                // Call the generic function directly (not monomorphized)
+                                // This handles recursive calls like server_loop_typed::<T>(state)
+                                // within the generic function server_loop_typed<T>
+                                self.emit(&format!("apply '{}'/{}", name, args.len()));
+                                self.emit("(");
+                                self.emit_args(args)?;
+                                self.emit(")");
+                            } else {
+                                // Record the monomorphization and call the specialized version
+                                let type_names: Vec<String> = effective_type_args
+                                    .iter()
+                                    .map(|t| self.type_to_name(t))
+                                    .collect();
+                                self.pending_monomorphizations
+                                    .insert((name.clone(), type_names.clone()));
+
+                                // Call the monomorphized function: name_Type1_Type2
+                                let mono_name = format!("{}_{}", name, type_names.join("_"));
+                                self.emit(&format!("apply '{}'/{}", mono_name, args.len()));
+                                self.emit("(");
+                                self.emit_args(args)?;
+                                self.emit(")");
+                            }
                         } else if !effective_type_args.is_empty() {
                             // Check if we're inlining from another module and this is
                             // a call to another generic from that same source module

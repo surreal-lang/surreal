@@ -9,7 +9,8 @@ pub fn len(s: string) -> int {
 
 /// Concatenate two strings.
 pub fn concat(a: string, b: string) -> string {
-    :lists::append(a, b)
+    // Use iolist_to_binary for efficient binary concatenation
+    :erlang::iolist_to_binary([a, b])
 }
 
 /// Check if a string contains a substring.
@@ -65,7 +66,7 @@ pub fn split(s: string, delim: string) -> [string] {
 
 /// Join a list of strings with a separator.
 pub fn join(parts: [string], sep: string) -> string {
-    :lists::join(sep, parts)
+    :erlang::iolist_to_binary(:lists::join(sep, parts))
 }
 
 /// Replace all occurrences of a pattern with a replacement.
@@ -90,7 +91,7 @@ pub fn is_empty(s: string) -> bool {
 
 /// Repeat a string n times.
 pub fn repeat(s: string, n: int) -> string {
-    :lists::flatten(:lists::duplicate(n, s))
+    :erlang::iolist_to_binary(:lists::duplicate(n, s))
 }
 
 /// Pad string on the left to reach target length.
@@ -105,20 +106,20 @@ pub fn pad_right(s: string, target_len: int, pad_char: string) -> string {
 
 /// Convert an integer to a string.
 pub fn from_int(n: int) -> string {
-    :erlang::integer_to_list(n)
+    :erlang::integer_to_binary(n)
 }
 
 /// Parse a string as an integer.
 pub fn to_int(s: string) -> int {
-    :erlang::list_to_integer(s)
+    :erlang::binary_to_integer(s)
 }
 
 /// Convert an atom to a string.
 pub fn from_atom(a: atom) -> string {
-    :erlang::atom_to_list(a)
+    :erlang::atom_to_binary(a)
 }
 
 /// Convert a string to an atom.
 pub fn to_atom(s: string) -> atom {
-    :erlang::list_to_atom(s)
+    :erlang::binary_to_atom(s)
 }

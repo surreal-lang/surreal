@@ -329,7 +329,7 @@ impl<'source> Parser<'source> {
             let mut methods = Vec::new();
             while !self.check(&Token::RBrace) && !self.is_at_end() {
                 // Check for type binding: `type Name = ConcreteType;`
-                if self.check_ident("type") {
+                if self.check(&Token::Type) {
                     type_bindings.push(self.parse_type_binding()?);
                     continue;
                 }
@@ -364,11 +364,11 @@ impl<'source> Parser<'source> {
 
             // Peek to see if first item is a type binding (module-level trait declaration)
             // or a function (regular impl block)
-            if self.check_ident("type") {
+            if self.check(&Token::Type) {
                 // Module-level trait declaration with type bindings
                 let mut type_bindings = Vec::new();
                 while !self.check(&Token::RBrace) && !self.is_at_end() {
-                    if self.check_ident("type") {
+                    if self.check(&Token::Type) {
                         type_bindings.push(self.parse_type_binding()?);
                     } else {
                         let span = self.current_span();
@@ -438,7 +438,7 @@ impl<'source> Parser<'source> {
         let mut methods = Vec::new();
         while !self.check(&Token::RBrace) && !self.is_at_end() {
             // Check for associated type declaration: `type Name;`
-            if self.check_ident("type") {
+            if self.check(&Token::Type) {
                 associated_types.push(self.parse_associated_type_decl()?);
             } else {
                 methods.push(self.parse_trait_method()?);
@@ -452,7 +452,7 @@ impl<'source> Parser<'source> {
 
     /// Parse an associated type declaration in a trait: `type Name;`
     fn parse_associated_type_decl(&mut self) -> ParseResult<String> {
-        self.expect_ident_value("type")?;
+        self.expect(&Token::Type)?;
         let name = self.expect_type_ident()?;
         self.expect(&Token::Semi)?;
         Ok(name)
@@ -460,7 +460,7 @@ impl<'source> Parser<'source> {
 
     /// Parse a type binding in a trait impl: `type State = int;`
     fn parse_type_binding(&mut self) -> ParseResult<(String, Type)> {
-        self.expect_ident_value("type")?;
+        self.expect(&Token::Type)?;
         let name = self.expect_type_ident()?;
         self.expect(&Token::Eq)?;
         let ty = self.parse_type()?;

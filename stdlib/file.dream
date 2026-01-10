@@ -7,20 +7,20 @@
 // ============== Read Operations ==============
 
 /// Read entire file contents as binary.
-/// Returns (:ok, binary) or (:error, reason).
-pub fn read(path: any) -> (atom, any) {
+/// Returns Ok(binary) or Err(reason).
+pub fn read(path: any) -> Result<any, any> {
     :file::read_file(path)
 }
 
 /// Read file and split into lines.
-/// Returns (:ok, [lines]) or (:error, reason).
-pub fn read_lines(path: any) -> (atom, any) {
+/// Returns Ok([lines]) or Err(reason).
+pub fn read_lines(path: any) -> Result<any, any> {
     match :file::read_file(path) {
-        (:ok, content) => {
+        Ok(content) => {
             let lines = :binary::split(content, <<"\n">>, [:global]);
-            (:ok, lines)
+            Ok(lines)
         },
-        error => error
+        Err(e) => Err(e)
     }
 }
 
@@ -47,38 +47,39 @@ pub fn append(path: any, content: any) -> any {
 // ============== File Information ==============
 
 /// Check if path exists.
-pub fn exists(path: any) -> atom {
-    match :filelib::is_file(path) {
-        :true => :true,
-        :false => :filelib::is_dir(path)
+pub fn exists(path: any) -> bool {
+    if :filelib::is_file(path) {
+        true
+    } else {
+        :filelib::is_dir(path)
     }
 }
 
 /// Check if path is a regular file.
-pub fn regular(path: any) -> atom {
+pub fn regular(path: any) -> bool {
     :filelib::is_regular(path)
 }
 
 /// Check if path is a directory.
-pub fn dir(path: any) -> atom {
+pub fn dir(path: any) -> bool {
     :filelib::is_dir(path)
 }
 
 /// Get file statistics.
-/// Returns (:ok, stat_info) or (:error, reason).
-pub fn stat(path: any) -> (atom, any) {
+/// Returns Ok(stat_info) or Err(reason).
+pub fn stat(path: any) -> Result<any, any> {
     :file::read_file_info(path)
 }
 
 /// Get file size in bytes.
-/// Returns (:ok, size) or (:error, reason).
-pub fn size(path: any) -> (atom, any) {
+/// Returns Ok(size) or Err(reason).
+pub fn size(path: any) -> Result<any, any> {
     match :file::read_file_info(path) {
-        (:ok, info) => {
+        Ok(info) => {
             let file_size = :erlang::element(2, info);
-            (:ok, file_size)
+            Ok(file_size)
         },
-        error => error
+        Err(e) => Err(e)
     }
 }
 
@@ -103,23 +104,23 @@ pub fn rmdir(path: any) -> any {
 }
 
 /// List directory contents.
-/// Returns (:ok, [filenames]) or (:error, reason).
-pub fn ls(path: any) -> (atom, any) {
+/// Returns Ok([filenames]) or Err(reason).
+pub fn ls(path: any) -> Result<any, any> {
     match :file::list_dir(path) {
-        (:ok, files) => {
+        Ok(files) => {
             // Convert charlists to binaries
             let binaries = :lists::map(|f| { :erlang::list_to_binary(f) }, files);
-            (:ok, binaries)
+            Ok(binaries)
         },
-        error => error
+        Err(e) => Err(e)
     }
 }
 
 // ============== File Management ==============
 
 /// Copy a file.
-/// Returns (:ok, bytes_copied) or (:error, reason).
-pub fn cp(source: any, destination: any) -> (atom, any) {
+/// Returns Ok(bytes_copied) or Err(reason).
+pub fn cp(source: any, destination: any) -> Result<any, any> {
     :file::copy(source, destination)
 }
 
@@ -136,39 +137,36 @@ pub fn rm(path: any) -> any {
 }
 
 /// Recursively delete files and directories.
-/// Returns (:ok, deleted_paths) or (:error, reason, path).
+/// Returns :ok or Err(reason).
 pub fn rm_rf(path: any) -> any {
     // Check if it's a directory
-    match dir(path) {
-        :true => {
-            // List and delete contents first
-            match ls(path) {
-                (:ok, files) => {
-                    let results = :lists::map(|f| {
-                        let full_path = :filename::join(path, f);
-                        rm_rf(full_path)
-                    }, files);
-                    // Then delete the directory itself
-                    rmdir(path)
-                },
-                error => error
-            }
-        },
-        :false => {
-            // It's a file, just delete it
-            rm(path)
+    if dir(path) {
+        // List and delete contents first
+        match ls(path) {
+            Ok(files) => {
+                let results = :lists::map(|f| {
+                    let full_path = :filename::join(path, f);
+                    rm_rf(full_path)
+                }, files);
+                // Then delete the directory itself
+                rmdir(path)
+            },
+            Err(e) => Err(e)
         }
+    } else {
+        // It's a file, just delete it
+        rm(path)
     }
 }
 
 // ============== Working Directory ==============
 
 /// Get current working directory.
-/// Returns (:ok, path) or (:error, reason).
-pub fn cwd() -> (atom, any) {
+/// Returns Ok(path) or Err(reason).
+pub fn cwd() -> Result<any, any> {
     match :file::get_cwd() {
-        (:ok, dir) => (:ok, :erlang::list_to_binary(dir)),
-        error => error
+        Ok(dir) => Ok(:erlang::list_to_binary(dir)),
+        Err(e) => Err(e)
     }
 }
 
@@ -202,11 +200,11 @@ pub fn ln(existing: any, new: any) -> any {
 }
 
 /// Read the target of a symbolic link.
-/// Returns (:ok, target) or (:error, reason).
-pub fn read_link(path: any) -> (atom, any) {
+/// Returns Ok(target) or Err(reason).
+pub fn read_link(path: any) -> Result<any, any> {
     match :file::read_link(path) {
-        (:ok, target) => (:ok, :erlang::list_to_binary(target)),
-        error => error
+        Ok(target) => Ok(:erlang::list_to_binary(target)),
+        Err(e) => Err(e)
     }
 }
 
@@ -216,16 +214,13 @@ pub fn read_link(path: any) -> (atom, any) {
 /// Creates the file if it doesn't exist.
 /// Returns :ok or (:error, reason).
 pub fn touch(path: any) -> any {
-    match exists(path) {
-        :true => {
-            // Update times to now
-            let now = :erlang::localtime();
-            :file::change_time(path, now)
-        },
-        :false => {
-            // Create empty file
-            write(path, <<>>)
-        }
+    if exists(path) {
+        // Update times to now
+        let now = :erlang::localtime();
+        :file::change_time(path, now)
+    } else {
+        // Create empty file
+        write(path, <<>>)
     }
 }
 
@@ -233,8 +228,8 @@ pub fn touch(path: any) -> any {
 
 /// Open a file with specified modes.
 /// Modes: [:read, :write, :append, :binary, :raw, etc.]
-/// Returns (:ok, io_device) or (:error, reason).
-pub fn open(path: any, modes: [any]) -> (atom, any) {
+/// Returns Ok(io_device) or Err(reason).
+pub fn open(path: any, modes: [any]) -> Result<any, any> {
     :file::open(path, modes)
 }
 

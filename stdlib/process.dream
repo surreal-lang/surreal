@@ -3,9 +3,9 @@
 // Provides process management and communication functions.
 
 /// Get the current process's PID.
-/// Note: You can also use the built-in `self` expression directly.
+/// Note: You can also use the built-in `self()` expression directly.
 pub fn current() -> pid {
-    self
+    self()
 }
 
 /// Sleep for the given number of milliseconds.

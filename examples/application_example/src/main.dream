@@ -1,0 +1,65 @@
+// Example Dream Application
+//
+// Demonstrates an OTP-style application lifecycle.
+// Run with: dream run (starts the application)
+// Run with: dream run --eval (just calls main() and exits)
+
+// ============== Application Entry Point ==============
+
+/// Application callback - starts the application
+pub fn start(_start_type: atom, _args: any) -> (atom, pid) {
+    :erlang::display("Starting my_app application...");
+
+    // Start a simple worker process
+    let worker = spawn || { worker_loop(0) };
+
+    // Register it so we can find it
+    :erlang::register(:my_worker, worker);
+
+    :erlang::display("Application started!");
+    :erlang::display(worker);
+
+    (:ok, worker)
+}
+
+/// Application stop callback
+pub fn stop(_state: any) -> atom {
+    :erlang::display("Stopping my_app application...");
+    :ok
+}
+
+// ============== Simple Worker ==============
+
+/// Worker main loop - counts messages received
+fn worker_loop(count: int) -> atom {
+    receive {
+        :ping => {
+            :erlang::display("Pong!");
+            worker_loop(count + 1)
+        },
+        :count => {
+            :erlang::display(count);
+            worker_loop(count)
+        },
+        :stop => {
+            :erlang::display("Worker stopping...");
+            :ok
+        },
+        msg => {
+            :erlang::display(msg);
+            worker_loop(count + 1)
+        }
+    }
+}
+
+// ============== Main (for --eval mode) ==============
+
+/// For testing without the full application
+pub fn main() -> atom {
+    :erlang::display("=== Dream Application Example ===");
+    :erlang::display("This project is configured as an application.");
+    :erlang::display("Usage:");
+    :erlang::display("  dream run         - Start the application");
+    :erlang::display("  dream run --eval  - Just call main() and exit");
+    :ok
+}

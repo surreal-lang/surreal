@@ -3,6 +3,7 @@
 //! Handles parsing of `dream.toml` manifest files and project discovery.
 
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -35,6 +36,20 @@ pub type ConfigResult<T> = Result<T, ConfigError>;
 #[derive(Debug, Clone, Deserialize)]
 pub struct ProjectConfig {
     pub package: Package,
+    #[serde(default)]
+    pub application: Option<ApplicationConfig>,
+}
+
+/// Application configuration from dream.toml's [application] section.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ApplicationConfig {
+    /// The module containing the Application trait implementation.
+    /// Defaults to package name if not specified.
+    #[serde(rename = "mod")]
+    pub module: Option<String>,
+    /// Static environment variables for the application.
+    #[serde(default)]
+    pub env: HashMap<String, toml::Value>,
 }
 
 /// Package metadata from dream.toml.
@@ -114,6 +129,29 @@ impl ProjectConfig {
             .join(&self.package.name)
             .join("ebin")
     }
+
+    /// Check if this project is configured as an application.
+    pub fn is_application(&self) -> bool {
+        self.application.is_some()
+    }
+
+    /// Get the application module name.
+    /// Returns the configured module or defaults to package name.
+    pub fn application_module(&self) -> Option<String> {
+        self.application.as_ref().map(|app| {
+            app.module
+                .clone()
+                .unwrap_or_else(|| self.package.name.clone())
+        })
+    }
+
+    /// Get the application environment configuration.
+    pub fn application_env(&self) -> HashMap<String, toml::Value> {
+        self.application
+            .as_ref()
+            .map(|app| app.env.clone())
+            .unwrap_or_default()
+    }
 }
 
 /// Generate a default dream.toml content for a new project.
@@ -174,5 +212,52 @@ src = "lib"
         let content = generate_dream_toml("my_app");
         assert!(content.contains("name = \"my_app\""));
         assert!(content.contains("version = \"0.1.0\""));
+    }
+
+    #[test]
+    fn test_parse_application_config() {
+        let content = r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[application]
+mod = "my_app_server"
+env = { port = 8080, debug = true }
+"#;
+        let config: ProjectConfig = toml::from_str(content).unwrap();
+        assert!(config.is_application());
+        assert_eq!(config.application_module(), Some("my_app_server".to_string()));
+
+        let env = config.application_env();
+        assert_eq!(env.get("port"), Some(&toml::Value::Integer(8080)));
+        assert_eq!(env.get("debug"), Some(&toml::Value::Boolean(true)));
+    }
+
+    #[test]
+    fn test_application_module_defaults_to_package_name() {
+        let content = r#"
+[package]
+name = "my_app"
+version = "0.1.0"
+
+[application]
+env = { port = 3000 }
+"#;
+        let config: ProjectConfig = toml::from_str(content).unwrap();
+        assert!(config.is_application());
+        assert_eq!(config.application_module(), Some("my_app".to_string()));
+    }
+
+    #[test]
+    fn test_no_application_section() {
+        let content = r#"
+[package]
+name = "my_lib"
+version = "0.1.0"
+"#;
+        let config: ProjectConfig = toml::from_str(content).unwrap();
+        assert!(!config.is_application());
+        assert_eq!(config.application_module(), None);
     }
 }
