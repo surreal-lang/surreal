@@ -1,0 +1,73 @@
+// Dream Standard Library - Conversion Traits
+//
+// Provides type conversion traits similar to Rust's From and Into.
+
+/// Trait for converting from type T to Self.
+///
+/// # Example
+/// ```dream
+/// struct UserId {
+///     id: int
+/// }
+///
+/// impl From<int> for UserId {
+///     fn from(value: int) -> UserId {
+///         UserId { id: value }
+///     }
+/// }
+///
+/// let user = UserId::from::<int>(42);
+/// ```
+pub trait From<T> {
+    fn from(value: T) -> Self;
+}
+
+/// Trait for converting from Self to type T.
+///
+/// # Example
+/// ```dream
+/// struct UserId {
+///     id: int
+/// }
+///
+/// impl Into<int> for UserId {
+///     fn into(self) -> int {
+///         self.id
+///     }
+/// }
+///
+/// let user = UserId { id: 42 };
+/// let id = user.into::<int>();
+/// ```
+pub trait Into<T> {
+    fn into(self) -> T;
+}
+
+/// Trait for fallible conversions from type T to Self.
+///
+/// # Example
+/// ```dream
+/// struct PositiveInt {
+///     value: int
+/// }
+///
+/// impl TryFrom<int> for PositiveInt {
+///     fn try_from(value: int) -> Result<PositiveInt, string> {
+///         if value > 0 {
+///             Ok(PositiveInt { value: value })
+///         } else {
+///             Err("Value must be positive")
+///         }
+///     }
+/// }
+/// ```
+pub trait TryFrom<T> {
+    type Error;
+    fn try_from(value: T) -> Result<Self, Self::Error>;
+}
+
+/// Trait for fallible conversions from Self to type T.
+pub trait TryInto<T> {
+    type Error;
+    fn try_into(self) -> Result<T, Self::Error>;
+}

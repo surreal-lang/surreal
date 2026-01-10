@@ -293,6 +293,62 @@ impl CoreErlangEmitter {
         name.rsplit("::").next().unwrap_or(name)
     }
 
+    /// Find a trait impl method for a type.
+    /// Searches impl_methods for entries matching pattern `*_TypeName` with the given method.
+    /// Returns the full mangled name if found.
+    fn find_trait_impl_method(
+        &self,
+        type_name: &str,
+        method_name: &str,
+        trait_type_args: &[Type],
+    ) -> Option<String> {
+        // Build the suffix we're looking for: "_TypeName"
+        let type_suffix = format!("_{}", type_name);
+
+        // If we have explicit trait type args (turbofish), look for an exact match
+        if !trait_type_args.is_empty() {
+            let trait_type_suffix = self.format_trait_type_args(trait_type_args);
+            // Look for patterns like "From_int_Wrapper" when calling Wrapper::from::<int>()
+            for (prefix, method) in &self.impl_methods {
+                if method == method_name && prefix.ends_with(&type_suffix) {
+                    // Check if this matches our trait type args
+                    // E.g., "From_int_Wrapper" should match trait_type_suffix "_int"
+                    let without_type = prefix.strip_suffix(&type_suffix).unwrap_or(prefix);
+                    if without_type.ends_with(&trait_type_suffix) {
+                        return Some(format!("{}_{}", prefix, method_name));
+                    }
+                }
+            }
+        }
+
+        // Without explicit type args, look for any trait impl for this type
+        // If multiple impls have the method, we can't disambiguate (return None)
+        let mut matches = Vec::new();
+        for (prefix, method) in &self.impl_methods {
+            if method == method_name && prefix.ends_with(&type_suffix) {
+                matches.push(format!("{}_{}", prefix, method_name));
+            }
+        }
+
+        if matches.len() == 1 {
+            Some(matches.into_iter().next().unwrap())
+        } else {
+            // Zero or multiple matches - can't disambiguate
+            None
+        }
+    }
+
+    /// Format trait type arguments for name mangling.
+    /// e.g., [int, string] -> "_int_string", [] -> ""
+    fn format_trait_type_args(&self, type_args: &[Type]) -> String {
+        if type_args.is_empty() {
+            String::new()
+        } else {
+            let names: Vec<String> = type_args.iter().map(|t| self.type_to_name(t)).collect();
+            format!("_{}", names.join("_"))
+        }
+    }
+
     /// Check if a function name is a built-in function (BIF).
     fn is_bif(name: &str) -> bool {
         matches!(
@@ -843,12 +899,17 @@ impl CoreErlangEmitter {
         let impl_method_names: HashSet<String> =
             trait_impl.methods.iter().map(|m| m.name.clone()).collect();
 
+        let simple_trait = Self::simple_trait_name(&trait_impl.trait_name);
+        // Format trait type args for mangling: From<int> -> "From_int"
+        let trait_type_args_suffix = self.format_trait_type_args(&trait_impl.trait_type_args);
+
         // Emit explicitly implemented methods
         for method in &trait_impl.methods {
-            let simple_trait = Self::simple_trait_name(&trait_impl.trait_name);
+            // Mangled name: Trait_TypeArg_ImplType_method
+            // e.g., From_int_MyType_from
             let mangled_name = format!(
-                "{}_{}_{}",
-                simple_trait, trait_impl.type_name, method.name
+                "{}{}_{}_{}",
+                simple_trait, trait_type_args_suffix, trait_impl.type_name, method.name
             );
             let mangled_method = Function {
                 name: mangled_name,
@@ -866,13 +927,12 @@ impl CoreErlangEmitter {
 
         // Emit default methods not overridden in this impl
         if let Some(trait_def) = self.traits.get(&trait_impl.trait_name).cloned() {
-            let simple_trait = Self::simple_trait_name(&trait_impl.trait_name);
             for trait_method in &trait_def.methods {
                 if let Some(ref body) = trait_method.body {
                     if !impl_method_names.contains(&trait_method.name) {
                         let mangled_name = format!(
-                            "{}_{}_{}",
-                            simple_trait, trait_impl.type_name, trait_method.name
+                            "{}{}_{}_{}",
+                            simple_trait, trait_type_args_suffix, trait_impl.type_name, trait_method.name
                         );
                         let default_method = Function {
                             name: mangled_name,
@@ -948,17 +1008,27 @@ impl CoreErlangEmitter {
                         trait_impl.methods.iter().map(|m| m.name.clone()).collect();
                     let simple_trait =
                         Self::simple_trait_name(&trait_impl.trait_name).to_string();
+                    // Format trait type args for registration: From<int> -> "_int"
+                    let trait_type_args_suffix =
+                        self.format_trait_type_args(&trait_impl.trait_type_args);
 
                     // Register trait impl methods for dispatch
                     for method in &trait_impl.methods {
-                        // Use simple trait name: Trait_Type_method
+                        // Use simple trait name with type args: From_int_MyType
                         self.impl_methods.insert((
-                            format!("{}_{}", simple_trait, trait_impl.type_name),
+                            format!(
+                                "{}{}_{}",
+                                simple_trait, trait_type_args_suffix, trait_impl.type_name
+                            ),
                             method.name.clone(),
                         ));
 
                         // Track which types implement each trait method
-                        let key = (simple_trait.clone(), method.name.clone());
+                        // Include type args in key for parameterized traits
+                        let key = (
+                            format!("{}{}", simple_trait, trait_type_args_suffix),
+                            method.name.clone(),
+                        );
                         self.trait_impls
                             .entry(key)
                             .or_insert_with(Vec::new)
@@ -973,11 +1043,17 @@ impl CoreErlangEmitter {
                             {
                                 // Register default method for dispatch
                                 self.impl_methods.insert((
-                                    format!("{}_{}", simple_trait, trait_impl.type_name),
+                                    format!(
+                                        "{}{}_{}",
+                                        simple_trait, trait_type_args_suffix, trait_impl.type_name
+                                    ),
                                     trait_method.name.clone(),
                                 ));
 
-                                let key = (simple_trait.clone(), trait_method.name.clone());
+                                let key = (
+                                    format!("{}{}", simple_trait, trait_type_args_suffix),
+                                    trait_method.name.clone(),
+                                );
                                 self.trait_impls
                                     .entry(key)
                                     .or_insert_with(Vec::new)
@@ -1037,13 +1113,16 @@ impl CoreErlangEmitter {
                         trait_impl.methods.iter().map(|m| m.name.clone()).collect();
                     let simple_trait =
                         Self::simple_trait_name(&trait_impl.trait_name);
+                    // Format trait type args for mangling: From<int> -> "_int"
+                    let trait_type_args_suffix =
+                        self.format_trait_type_args(&trait_impl.trait_type_args);
 
                     // Export explicitly implemented methods
                     for method in &trait_impl.methods {
                         if method.is_pub {
                             let mangled_name = format!(
-                                "{}_{}_{}",
-                                simple_trait, trait_impl.type_name, method.name
+                                "{}{}_{}_{}",
+                                simple_trait, trait_type_args_suffix, trait_impl.type_name, method.name
                             );
                             exports.push(format!("'{}'/{}", mangled_name, method.params.len()));
                         }
@@ -1056,8 +1135,9 @@ impl CoreErlangEmitter {
                                 && !impl_method_names.contains(&trait_method.name)
                             {
                                 let mangled_name = format!(
-                                    "{}_{}_{}",
+                                    "{}{}_{}_{}",
                                     simple_trait,
+                                    trait_type_args_suffix,
                                     trait_impl.type_name,
                                     trait_method.name
                                 );
@@ -2104,6 +2184,15 @@ impl CoreErlangEmitter {
                         {
                             // Call the mangled impl method: Type::method()
                             let mangled_name = format!("{}_{}", first, second);
+                            self.emit(&format!("apply '{}'/{}", mangled_name, args.len()));
+                            self.emit("(");
+                            self.emit_args(args)?;
+                            self.emit(")");
+                        } else if let Some(mangled_name) =
+                            self.find_trait_impl_method(first, second, effective_type_args)
+                        {
+                            // Call a trait impl method: Type::trait_method() or Type::method::<TraitArg>()
+                            // E.g., Wrapper::from::<int>() -> From_int_Wrapper_from
                             self.emit(&format!("apply '{}'/{}", mangled_name, args.len()));
                             self.emit("(");
                             self.emit_args(args)?;

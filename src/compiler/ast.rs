@@ -113,6 +113,8 @@ pub struct ImplBlock {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TraitDef {
     pub name: String,
+    /// Type parameters for the trait (e.g., `<T>` in `trait From<T>`)
+    pub type_params: Vec<TypeParam>,
     /// Associated types declared in the trait (e.g., `type State;`)
     pub associated_types: Vec<String>,
     pub methods: Vec<TraitMethod>,
@@ -143,6 +145,8 @@ pub struct TypeParam {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TraitImpl {
     pub trait_name: String,
+    /// Type arguments for parameterized traits (e.g., `int` in `impl From<int> for MyType`)
+    pub trait_type_args: Vec<Type>,
     pub type_name: String,
     /// Associated type bindings (e.g., `type State = int;`)
     pub type_bindings: Vec<(String, Type)>,

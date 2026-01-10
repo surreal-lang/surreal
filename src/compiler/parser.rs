@@ -309,6 +309,9 @@ impl<'source> Parser<'source> {
         // Parse the first type name (could be module-qualified like genserver::GenServer)
         let first_name = self.parse_possibly_qualified_type_name()?;
 
+        // Parse optional type arguments for parameterized traits: impl From<int> for ...
+        let trait_type_args = self.parse_type_args()?;
+
         // Check for module-level trait declaration: `impl Trait;` or `impl Trait { type X = T; }`
         if self.check(&Token::Semi) {
             self.advance();
@@ -318,7 +321,7 @@ impl<'source> Parser<'source> {
             }));
         }
 
-        // Check if this is a trait impl: `impl Trait for Type { ... }`
+        // Check if this is a trait impl: `impl Trait for Type { ... }` or `impl Trait<T> for Type { ... }`
         if self.check(&Token::For) {
             self.advance();
             let type_name = self.expect_type_ident()?;
@@ -352,6 +355,7 @@ impl<'source> Parser<'source> {
 
             Ok(Item::TraitImpl(TraitImpl {
                 trait_name: first_name,
+                trait_type_args,
                 type_name,
                 type_bindings,
                 methods,
@@ -428,10 +432,14 @@ impl<'source> Parser<'source> {
         self.expect_type_ident()
     }
 
-    /// Parse a trait definition: `trait Display { fn display(self) -> String; }`
+    /// Parse a trait definition: `trait Display { ... }` or `trait From<T> { ... }`
     fn parse_trait_def(&mut self) -> ParseResult<Item> {
         self.expect(&Token::Trait)?;
         let name = self.expect_type_ident()?;
+
+        // Parse optional type parameters: trait From<T> { ... }
+        let type_params = self.parse_type_params()?;
+
         self.expect(&Token::LBrace)?;
 
         let mut associated_types = Vec::new();
@@ -447,7 +455,7 @@ impl<'source> Parser<'source> {
 
         self.expect(&Token::RBrace)?;
 
-        Ok(Item::Trait(TraitDef { name, associated_types, methods }))
+        Ok(Item::Trait(TraitDef { name, type_params, associated_types, methods }))
     }
 
     /// Parse an associated type declaration in a trait: `type Name;`
@@ -525,16 +533,17 @@ impl<'source> Parser<'source> {
             self.expect(&Token::Semi)?;
             UseTree::Glob { module }
         } else if self.check(&Token::LBrace) {
-            // Group import: use foo::{a, b as c};
+            // Group import: use foo::{a, b as c, SomeType};
             self.advance();
             let mut items = Vec::new();
 
             if !self.check(&Token::RBrace) {
                 loop {
-                    let name = self.expect_ident()?;
+                    // Accept both lowercase idents and TypeIdents (for types/traits)
+                    let name = self.expect_ident_or_type_ident()?;
                     let rename = if self.check(&Token::As) {
                         self.advance();
-                        Some(self.expect_ident()?)
+                        Some(self.expect_ident_or_type_ident()?)
                     } else {
                         None
                     };
@@ -551,11 +560,11 @@ impl<'source> Parser<'source> {
             self.expect(&Token::Semi)?;
             UseTree::Group { module, items }
         } else {
-            // Single import: use foo::bar; or use foo::bar as baz;
-            let name = self.expect_ident()?;
+            // Single import: use foo::bar; or use foo::Bar; (types/traits)
+            let name = self.expect_ident_or_type_ident()?;
             let rename = if self.check(&Token::As) {
                 self.advance();
-                Some(self.expect_ident()?)
+                Some(self.expect_ident_or_type_ident()?)
             } else {
                 None
             };
