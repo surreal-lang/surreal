@@ -36,6 +36,7 @@ Source → Lexer → Parser → AST → Dream Bytecode → Dream VM (Rust/WASM)
 - Strings
 - PIDs (process identifiers)
 - Binaries/Bitstrings
+- Result<T, E> and Option<T>
 
 ### Pattern Matching
 - Wildcards (`_`)
@@ -45,18 +46,41 @@ Source → Lexer → Parser → AST → Dream Bytecode → Dream VM (Rust/WASM)
 - Struct patterns
 - Guard clauses
 
+### Error Handling
+- **Result<T, E>**: Explicit success/failure (`Ok(value)` / `Err(error)`)
+- **Option<T>**: Optional values (`Some(value)` / `None`)
+- **? Operator**: Propagate errors with `expr?` - returns early on `Err` or `None`
+
+```rust
+fn might_fail(x: int) -> Result<int, string> {
+    if x < 0 {
+        Err("negative number")
+    } else {
+        Ok(x * 2)
+    }
+}
+
+fn chain_operations(x: int) -> Result<int, string> {
+    let a = might_fail(x)?;    // Returns Err early if x < 0
+    let b = might_fail(a)?;    // Propagates error if a < 0
+    Ok(b)
+}
+```
+
 ## Example
 
 ```rust
 mod ping_pong {
-    pub fn start() {
-        let pong = spawn || { pong_loop() };
-        let ping = spawn || { ping_loop(pong, 3) };
+    use process::send;
+
+    pub fn main() {
+        let pong = spawn(pong_loop());
+        ping_loop(pong, 3)
     }
 
-    fn ping_loop(pong: Pid, count: int) {
+    fn ping_loop(pong: pid, count: int) {
         if count > 0 {
-            pong ! (:ping, self());
+            send(pong, (:ping, self()));
             receive {
                 :pong => ping_loop(pong, count - 1)
             }
@@ -66,7 +90,7 @@ mod ping_pong {
     fn pong_loop() {
         receive {
             (:ping, sender) => {
-                sender ! :pong;
+                send(sender, :pong);
                 pong_loop()
             }
         }
