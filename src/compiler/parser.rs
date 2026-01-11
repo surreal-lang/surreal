@@ -2649,12 +2649,15 @@ impl<'source> Parser<'source> {
         self.peek() == Some(expected)
     }
 
+    // TODO: Use these for parsing contextual keywords like `type` in type aliases
     /// Check if current token is an identifier with specific value (for contextual keywords like `type`)
+    #[allow(dead_code)]
     fn check_ident(&self, value: &str) -> bool {
         matches!(self.peek(), Some(Token::Ident(s)) if s == value)
     }
 
     /// Expect a specific identifier value (for contextual keywords)
+    #[allow(dead_code)]
     fn expect_ident_value(&mut self, value: &str) -> ParseResult<()> {
         if self.check_ident(value) {
             self.advance();

@@ -18,7 +18,11 @@ use rustyline::hint::Hinter;
 use rustyline::validate::Validator;
 use rustyline::{Context, Editor, Helper};
 
-use dream::compiler::{BinOp, Expr, Parser, StringPart};
+use dream::compiler::{
+    check_modules, BinOp, CoreErlangEmitter, Expr, GenericFunctionRegistry, Item, ModuleContext,
+    Parser, StringPart,
+};
+use std::sync::{Arc, RwLock};
 
 /// Counter for generating unique module names
 static EVAL_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -28,9 +32,12 @@ const RESULT_MARKER: &str = "\x00DREAM_RESULT\x00";
 
 /// Erlang eval server with introspection support
 /// Protocol:
-///   eval:<filename> - evaluate a Core Erlang file
+///   eval:<filename> - evaluate a Core Erlang file (temp module, purged after)
+///   load:<filename> - load a Core Erlang file persistently
+///   call:<module>:<function> - call a function in a loaded module
+///   exports:<module> - get exports for a loaded module (in-memory)
 ///   introspect:list_modules - list all dream:: modules
-///   introspect:exports:<module> - get exports for a module
+///   introspect:exports:<module> - get exports for a module (from .beam file)
 const EVAL_SERVER: &str = r#"
 Loop = fun Loop() ->
     case io:get_line("") of
@@ -51,62 +58,132 @@ Loop = fun Loop() ->
                     io:format("~s~nok:~w~n", [<<0, "DREAM_RESULT", 0>>, Mods]),
                     Loop();
                 _ ->
-                    case string:prefix(Cmd, "introspect:exports:") of
+                    case string:prefix(Cmd, "exports:") of
                         nomatch ->
-                            case string:prefix(Cmd, "eval:") of
+                            case string:prefix(Cmd, "introspect:exports:") of
                                 nomatch ->
-                                    io:format("~s~nerr:unknown_command~n", [<<0, "DREAM_RESULT", 0>>]),
-                                    Loop();
-                                Filename ->
-                                    Result = try
-                                        ModName = list_to_atom(filename:basename(Filename, ".core")),
-                                        case compile:file(Filename, [from_core, binary, return_errors]) of
-                                            {ok, ModName, Binary} ->
-                                                code:purge(ModName),
-                                                case code:load_binary(ModName, Filename, Binary) of
-                                                    {module, ModName} ->
-                                                        Val = ModName:'__eval__'(),
-                                                        code:purge(ModName),
-                                                        code:delete(ModName),
-                                                        {ok, Val};
-                                                    {error, What} ->
-                                                        {error, {load_failed, What}}
-                                                end;
-                                            {error, Errors, _Warnings} ->
-                                                {error, {compile_failed, Errors}}
-                                        end
-                                    catch
-                                        Class:Reason:Stack ->
-                                            {error, {Class, Reason, Stack}}
-                                    end,
-                                    io:format("~s~n", [<<0, "DREAM_RESULT", 0>>]),
-                                    case Result of
-                                        {ok, Value} -> io:format("ok:~p~n", [Value]);
-                                        {error, Err} -> io:format("err:~p~n", [Err])
+                                    case string:prefix(Cmd, "load:") of
+                                        nomatch ->
+                                            case string:prefix(Cmd, "call:") of
+                                                nomatch ->
+                                                    case string:prefix(Cmd, "eval:") of
+                                                        nomatch ->
+                                                            io:format("~s~nerr:unknown_command~n", [<<0, "DREAM_RESULT", 0>>]),
+                                                            Loop();
+                                                        Filename ->
+                                                            Result = try
+                                                                ModName = list_to_atom(filename:basename(Filename, ".core")),
+                                                                case compile:file(Filename, [from_core, binary, return_errors]) of
+                                                                    {ok, ModName, Binary} ->
+                                                                        code:purge(ModName),
+                                                                        case code:load_binary(ModName, Filename, Binary) of
+                                                                            {module, ModName} ->
+                                                                                Val = ModName:'__eval__'(),
+                                                                                code:purge(ModName),
+                                                                                code:delete(ModName),
+                                                                                {ok, Val};
+                                                                            {error, What} ->
+                                                                                {error, {load_failed, What}}
+                                                                        end;
+                                                                    {error, Errors, _Warnings} ->
+                                                                        {error, {compile_failed, Errors}}
+                                                                end
+                                                            catch
+                                                                Class:Reason:Stack ->
+                                                                    {error, {Class, Reason, Stack}}
+                                                            end,
+                                                            io:format("~s~n", [<<0, "DREAM_RESULT", 0>>]),
+                                                            case Result of
+                                                                {ok, Value} -> io:format("ok:~p~n", [Value]);
+                                                                {error, Err} -> io:format("err:~p~n", [Err])
+                                                            end,
+                                                            Loop()
+                                                    end;
+                                                CallSpec ->
+                                                    Result = try
+                                                        [ModStr, FuncStr] = string:split(CallSpec, ":"),
+                                                        ModName = list_to_atom(ModStr),
+                                                        FuncName = list_to_atom(FuncStr),
+                                                        Val = erlang:apply(ModName, FuncName, []),
+                                                        {ok, Val}
+                                                    catch
+                                                        Class:Reason:Stack ->
+                                                            {error, {Class, Reason, Stack}}
+                                                    end,
+                                                    io:format("~s~n", [<<0, "DREAM_RESULT", 0>>]),
+                                                    case Result of
+                                                        {ok, Value} -> io:format("ok:~p~n", [Value]);
+                                                        {error, Err} -> io:format("err:~p~n", [Err])
+                                                    end,
+                                                    Loop()
+                                            end;
+                                        Filename ->
+                                            Result = try
+                                                case compile:file(Filename, [from_core, binary, return_errors]) of
+                                                    {ok, CompiledMod, Binary} ->
+                                                        code:purge(CompiledMod),
+                                                        case code:load_binary(CompiledMod, Filename, Binary) of
+                                                            {module, CompiledMod} ->
+                                                                {ok, CompiledMod};
+                                                            {error, What} ->
+                                                                {error, {load_failed, What}}
+                                                        end;
+                                                    {error, Errors, _Warnings} ->
+                                                        {error, {compile_failed, Errors}}
+                                                end
+                                            catch
+                                                Class:Reason:Stack ->
+                                                    {error, {Class, Reason, Stack}}
+                                            end,
+                                            io:format("~s~n", [<<0, "DREAM_RESULT", 0>>]),
+                                            case Result of
+                                                {ok, Value} -> io:format("ok:~p~n", [Value]);
+                                                {error, Err} -> io:format("err:~p~n", [Err])
+                                            end,
+                                            Loop()
+                                    end;
+                                ModStr ->
+                                    Paths = code:get_path(),
+                                    BeamFile = ModStr ++ ".beam",
+                                    FindFile = fun FindFile([]) -> not_found;
+                                                   FindFile([Dir|Rest]) ->
+                                                       Path = filename:join(Dir, BeamFile),
+                                                       case filelib:is_file(Path) of
+                                                           true -> {ok, Path};
+                                                           false -> FindFile(Rest)
+                                                       end
+                                               end,
+                                    case FindFile(Paths) of
+                                        not_found ->
+                                            io:format("~s~nerr:module_not_found~n", [<<0, "DREAM_RESULT", 0>>]);
+                                        {ok, FullPath} ->
+                                            case beam_lib:chunks(FullPath, [exports]) of
+                                                {ok, {_, [{exports, Exports}]}} ->
+                                                    io:format("~s~nok:~w~n", [<<0, "DREAM_RESULT", 0>>, Exports]);
+                                                {error, _, _} ->
+                                                    io:format("~s~nerr:beam_read_failed~n", [<<0, "DREAM_RESULT", 0>>])
+                                            end
                                     end,
                                     Loop()
                             end;
                         ModStr ->
-                            Paths = code:get_path(),
-                            BeamFile = ModStr ++ ".beam",
-                            FindFile = fun FindFile([]) -> not_found;
-                                           FindFile([Dir|Rest]) ->
-                                               Path = filename:join(Dir, BeamFile),
-                                               case filelib:is_file(Path) of
-                                                   true -> {ok, Path};
-                                                   false -> FindFile(Rest)
-                                               end
-                                       end,
-                            case FindFile(Paths) of
-                                not_found ->
-                                    io:format("~s~nerr:module_not_found~n", [<<0, "DREAM_RESULT", 0>>]);
-                                {ok, FullPath} ->
-                                    case beam_lib:chunks(FullPath, [exports]) of
-                                        {ok, {_, [{exports, Exports}]}} ->
-                                            io:format("~s~nok:~w~n", [<<0, "DREAM_RESULT", 0>>, Exports]);
-                                        {error, _, _} ->
-                                            io:format("~s~nerr:beam_read_failed~n", [<<0, "DREAM_RESULT", 0>>])
-                                    end
+                            Result = try
+                                ModName = list_to_atom(ModStr),
+                                IsLoaded = code:is_loaded(ModName),
+                                case IsLoaded of
+                                    {file, _} ->
+                                        Exports = ModName:module_info(exports),
+                                        {ok, Exports};
+                                    false ->
+                                        {error, {not_loaded, ModName, IsLoaded}}
+                                end
+                            catch
+                                Class:Reason:Stack -> {error, {Class, Reason, Stack}}
+                            end,
+                            io:format("~s~n", [<<0, "DREAM_RESULT", 0>>]),
+                            case Result of
+                                {ok, Value} -> io:format("ok:~w~n", [Value]);
+                                {error, Err} -> io:format("err:~p~n", [Err])
                             end,
                             Loop()
                     end
@@ -124,7 +201,7 @@ const KEYWORDS: &[&str] = &[
 ];
 
 /// REPL commands for completion
-const COMMANDS: &[&str] = &[":help", ":quit", ":q", ":clear", ":bindings", ":b", ":h", ":reload"];
+const COMMANDS: &[&str] = &[":help", ":quit", ":q", ":clear", ":bindings", ":b", ":h", ":reload", ":edit", ":e", ":load"];
 
 /// Information about a module's exports
 #[derive(Clone, Debug, Default)]
@@ -938,11 +1015,13 @@ fn print_banner() {
 
 fn print_help() {
     println!("Commands:");
-    println!("  :help          Show this help message");
-    println!("  :quit, :q      Exit the shell");
-    println!("  :clear         Clear all bindings");
-    println!("  :bindings      Show current bindings");
-    println!("  :reload        Reload module registry");
+    println!("  :help           Show this help message");
+    println!("  :quit, :q       Exit the shell");
+    println!("  :clear          Clear all bindings");
+    println!("  :bindings       Show current bindings");
+    println!("  :reload         Reload module registry");
+    println!("  :edit, :e       Open $EDITOR to write Dream code");
+    println!("  :load <file>    Compile and load a .dream file");
     println!();
     println!("Enter Dream expressions to evaluate them.");
     println!("Use 'let x = expr' to create bindings.");
@@ -1026,7 +1105,31 @@ pub fn run_shell() -> ExitCode {
                             }
                             continue;
                         }
-                        _ => {}
+                        ":edit" | ":e" => {
+                            match edit_and_eval(&mut state) {
+                                Ok(Some(result)) => println!("{}", result),
+                                Ok(None) => {} // Empty file or cancelled
+                                Err(e) => eprintln!("Error: {}", e),
+                            }
+                            continue;
+                        }
+                        cmd if cmd.starts_with(":load ") => {
+                            let file = cmd.strip_prefix(":load ").unwrap().trim();
+                            if file.is_empty() {
+                                eprintln!("Usage: :load <file.dream>");
+                            } else {
+                                match load_and_compile(&mut state, file) {
+                                    Ok(msg) => println!("{}", msg),
+                                    Err(e) => eprintln!("Error: {}", e),
+                                }
+                            }
+                            continue;
+                        }
+                        _ => {
+                            eprintln!("Unknown command: {}", line);
+                            eprintln!("Type :help for available commands.");
+                            continue;
+                        }
                     }
                 }
 
@@ -1051,6 +1154,152 @@ pub fn run_shell() -> ExitCode {
     }
 
     ExitCode::SUCCESS
+}
+
+/// Open a temp file in the user's editor and compile/run it
+fn edit_and_eval(state: &mut ReplState) -> Result<Option<String>, String> {
+    // Create a temporary file with .dream extension
+    let temp_file = state.temp_dir.join("dream_repl_edit.dream");
+
+    // Pre-populate with a template
+    let template = r#"// Define modules here. All code must be inside mod blocks.
+// After saving, call functions from the REPL prompt.
+
+mod repl_edit {
+    pub fn add(a: int, b: int) -> int {
+        a + b
+    }
+}
+"#;
+    std::fs::write(&temp_file, template).map_err(|e| format!("Failed to create temp file: {}", e))?;
+
+    // Get editor from EDITOR env var, default to vim
+    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string());
+
+    // Open the editor
+    let status = Command::new(&editor)
+        .arg(&temp_file)
+        .status()
+        .map_err(|e| format!("Failed to open editor '{}': {}", editor, e))?;
+
+    if !status.success() {
+        return Err(format!("Editor '{}' exited with error", editor));
+    }
+
+    // Read the file contents
+    let content = std::fs::read_to_string(&temp_file)
+        .map_err(|e| format!("Failed to read temp file: {}", e))?;
+
+    let content = content.trim();
+    if content.is_empty() {
+        let _ = std::fs::remove_file(&temp_file);
+        return Ok(None);
+    }
+
+    // Compile and run
+    let result = compile_and_run_source(state, &content, "repl_edit");
+
+    // Clean up temp file
+    let _ = std::fs::remove_file(&temp_file);
+
+    result
+}
+
+/// Load and compile a .dream file
+fn load_and_compile(state: &mut ReplState, path: &str) -> Result<String, String> {
+    let path = std::path::Path::new(path);
+    if !path.exists() {
+        return Err(format!("File not found: {}", path.display()));
+    }
+
+    let content = std::fs::read_to_string(path)
+        .map_err(|e| format!("Failed to read file: {}", e))?;
+
+    let module_name = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("loaded");
+
+    compile_and_run_source(state, &content, module_name)?;
+    Ok(format!("Loaded {}", path.display()))
+}
+
+/// Compile Dream source code and load modules into BEAM
+fn compile_and_run_source(
+    state: &mut ReplState,
+    source: &str,
+    fallback_name: &str,
+) -> Result<Option<String>, String> {
+    // Parse the source
+    let mut parser = Parser::new(source);
+    let modules = parser
+        .parse_file_modules(fallback_name)
+        .map_err(|e| format!("Parse error: {:?}", e))?;
+
+    if modules.is_empty() {
+        return Ok(None);
+    }
+
+    // Type check
+    let type_results = check_modules(&modules);
+    let mut annotated_modules = Vec::new();
+    for (module_name, result) in type_results {
+        match result {
+            Ok(annotated) => annotated_modules.push(annotated),
+            Err(e) => {
+                return Err(format!("Type error in {}: {:?}", module_name, e));
+            }
+        }
+    }
+
+    // Compile each module to Core Erlang and load into BEAM
+    let registry = Arc::new(RwLock::new(GenericFunctionRegistry::new()));
+    let mut loaded_modules = Vec::new();
+
+    for module in &annotated_modules {
+        // Prefix module name with dream:: (like Elixir's Elixir. prefix)
+        let mut prefixed_module = module.clone();
+        prefixed_module.name = format!("dream::{}", module.name);
+
+        let module_context = ModuleContext::default();
+        let mut emitter = CoreErlangEmitter::with_registry_and_context(registry.clone(), module_context);
+
+        let core_erlang = emitter
+            .emit_module(&prefixed_module)
+            .map_err(|e| format!("Codegen error: {}", e))?;
+
+        // Write Core Erlang to temp file
+        let core_file = state.temp_dir.join(format!("{}.core", prefixed_module.name));
+        std::fs::write(&core_file, &core_erlang)
+            .map_err(|e| format!("Failed to write Core Erlang: {}", e))?;
+
+        // Load into BEAM (persistent load)
+        let cmd = format!("load:{}", core_file.display());
+        match state.send_command(&cmd) {
+            Ok(_) => {
+                loaded_modules.push(module.name.clone());
+
+                // Extract exports from AST for tab completion (pub functions)
+                let mut exports: Vec<(String, u8)> = Vec::new();
+                for item in &module.items {
+                    if let Item::Function(func) = item {
+                        if func.is_pub {
+                            exports.push((func.name.clone(), func.params.len() as u8));
+                        }
+                    }
+                }
+                state.registry.borrow_mut().add_module(&prefixed_module.name, &exports);
+            }
+            Err(e) => {
+                let _ = std::fs::remove_file(&core_file);
+                return Err(format!("BEAM compile error: {}", e));
+            }
+        }
+
+        let _ = std::fs::remove_file(&core_file);
+    }
+
+    Ok(Some(format!("Loaded: {}", loaded_modules.join(", "))))
 }
 
 fn parse_and_eval(state: &mut ReplState, input: &str) -> Result<String, String> {
@@ -1079,4 +1328,160 @@ fn parse_and_eval_let(state: &mut ReplState, input: &str) -> Result<String, Stri
 
     state.add_binding(name, &expr)?;
     Ok(":ok".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_exports() {
+        // Test parsing Erlang export list format
+        let exports = parse_exports("[{add,2},{subtract,2},{main,0}]");
+        assert_eq!(exports.len(), 3);
+        assert!(exports.contains(&("add".to_string(), 2)));
+        assert!(exports.contains(&("subtract".to_string(), 2)));
+        assert!(exports.contains(&("main".to_string(), 0)));
+    }
+
+    #[test]
+    fn test_parse_exports_empty() {
+        let exports = parse_exports("[]");
+        assert!(exports.is_empty());
+    }
+
+    #[test]
+    fn test_parse_exports_includes_module_info() {
+        // parse_exports doesn't filter - that happens in add_module
+        let exports = parse_exports("[{add,2},{module_info,0},{module_info,1}]");
+        assert_eq!(exports.len(), 3);
+    }
+
+    #[test]
+    fn test_module_registry_filters_module_info() {
+        // add_module filters out module_info
+        let mut registry = ModuleRegistry::new();
+        let exports = vec![
+            ("add".to_string(), 2),
+            ("module_info".to_string(), 0),
+            ("module_info".to_string(), 1),
+        ];
+        registry.add_module("dream::math", &exports);
+
+        let info = registry.modules.get("math").unwrap();
+        assert!(info.functions.contains_key("add"));
+        assert!(!info.functions.contains_key("module_info"));
+    }
+
+    #[test]
+    fn test_module_registry_add_module() {
+        let mut registry = ModuleRegistry::new();
+        let exports = vec![
+            ("add".to_string(), 2),
+            ("multiply".to_string(), 2),
+        ];
+        registry.add_module("dream::math", &exports);
+
+        // Should be stored under short name "math"
+        assert!(registry.modules.contains_key("math"));
+        let info = registry.modules.get("math").unwrap();
+        assert!(info.functions.contains_key("add"));
+        assert!(info.functions.contains_key("multiply"));
+    }
+
+    #[test]
+    fn test_module_registry_get_completions() {
+        let mut registry = ModuleRegistry::new();
+        let exports = vec![
+            ("add".to_string(), 2),
+            ("add_all".to_string(), 1),
+            ("multiply".to_string(), 2),
+        ];
+        registry.add_module("dream::math", &exports);
+
+        let completions = registry.get_completions("math");
+        assert_eq!(completions.len(), 3);
+        assert!(completions.contains(&"add".to_string()));
+        assert!(completions.contains(&"add_all".to_string()));
+        assert!(completions.contains(&"multiply".to_string()));
+    }
+
+    #[test]
+    fn test_module_registry_get_module_names() {
+        let mut registry = ModuleRegistry::new();
+        registry.add_module("dream::string", &[("reverse".to_string(), 1)]);
+        registry.add_module("dream::io", &[("println".to_string(), 1)]);
+
+        let names = registry.get_module_names();
+        assert!(names.contains(&"string".to_string()));
+        assert!(names.contains(&"io".to_string()));
+    }
+
+    #[test]
+    fn test_module_registry_resolve_method() {
+        let mut registry = ModuleRegistry::new();
+        // Struct methods are prefixed with StructName_
+        let exports = vec![
+            ("Map_get".to_string(), 2),
+            ("Map_put".to_string(), 3),
+            ("new".to_string(), 0),
+        ];
+        registry.add_module("dream::map", &exports);
+
+        // Should resolve struct methods
+        let result = registry.resolve_method("get");
+        assert!(result.is_some());
+        let (module, func) = result.unwrap();
+        assert_eq!(module, "map");
+        assert_eq!(func, "Map_get");
+    }
+
+    #[test]
+    fn test_capitalize_first() {
+        assert_eq!(capitalize_first("hello"), "Hello");
+        assert_eq!(capitalize_first("WORLD"), "WORLD");
+        assert_eq!(capitalize_first("a"), "A");
+        assert_eq!(capitalize_first(""), "");
+    }
+
+    #[test]
+    fn test_format_dream_value_quoted_atoms() {
+        // Atoms come from Erlang with single quotes
+        assert_eq!(format_dream_value("'ok'"), "ok");
+        assert_eq!(format_dream_value("'error'"), "error");
+        assert_eq!(format_dream_value("'true'"), "true");
+        assert_eq!(format_dream_value("'false'"), "false");
+        assert_eq!(format_dream_value("'my_atom'"), ":my_atom");
+    }
+
+    #[test]
+    fn test_format_dream_value_numbers() {
+        assert_eq!(format_dream_value("42"), "42");
+        assert_eq!(format_dream_value("-123"), "-123");
+    }
+
+    #[test]
+    fn test_format_dream_value_strings() {
+        assert_eq!(format_dream_value("<<\"hello\">>"), "\"hello\"");
+    }
+
+    #[test]
+    fn test_format_dream_value_result_types() {
+        // {ok, value} and {error, value} are formatted as Ok/Err
+        assert_eq!(format_dream_value("{ok,42}"), "Ok(42)");
+        assert_eq!(format_dream_value("{error,42}"), "Err(42)");
+    }
+
+    #[test]
+    fn test_format_dream_value_option_types() {
+        assert_eq!(format_dream_value("none"), "None");
+        assert_eq!(format_dream_value("{some,42}"), "Some(42)");
+    }
+
+    #[test]
+    fn test_format_dream_value_lists() {
+        // Lists pass through as-is
+        assert_eq!(format_dream_value("[1,2,3]"), "[1,2,3]");
+        assert_eq!(format_dream_value("[]"), "[]");
+    }
 }
