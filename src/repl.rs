@@ -10,16 +10,19 @@ use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, ExitCode, Stdio};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{self, Receiver};
+use std::thread;
 
 use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
 use rustyline::highlight::Highlighter;
 use rustyline::hint::Hinter;
 use rustyline::validate::Validator;
-use rustyline::{Context, Editor, Helper};
+use rustyline::{Context, Editor, ExternalPrinter, Helper};
 
 use dream::compiler::{
-    check_modules, CoreErlangEmitter, GenericFunctionRegistry, Item, ModuleContext, Parser,
+    check_modules, CompilerError, CoreErlangEmitter, GenericFunctionRegistry, Item, ModuleContext,
+    Parser,
 };
 use std::sync::{Arc, RwLock};
 
@@ -32,6 +35,7 @@ const RESULT_MARKER: &str = "\x00DREAM_RESULT\x00";
 /// Erlang eval server with introspection support
 /// Protocol:
 ///   eval:<filename> - evaluate a Core Erlang file (temp module, purged after)
+///   bind:<name>:<filename> - evaluate and store result in process dictionary
 ///   load:<filename> - load a Core Erlang file persistently
 ///   call:<module>:<function> - call a function in a loaded module
 ///   exports:<module> - get exports for a loaded module (in-memory)
@@ -65,11 +69,44 @@ Loop = fun Loop() ->
                                         nomatch ->
                                             case string:prefix(Cmd, "call:") of
                                                 nomatch ->
-                                                    case string:prefix(Cmd, "eval:") of
+                                                    case string:prefix(Cmd, "bind:") of
                                                         nomatch ->
-                                                            io:format("~s~nerr:unknown_command~n", [<<0, "DREAM_RESULT", 0>>]),
-                                                            Loop();
-                                                        Filename ->
+                                                            case string:prefix(Cmd, "eval:") of
+                                                                nomatch ->
+                                                                    io:format("~s~nerr:unknown_command~n", [<<0, "DREAM_RESULT", 0>>]),
+                                                                    Loop();
+                                                                Filename ->
+                                                                    Result = try
+                                                                        ModName = list_to_atom(filename:basename(Filename, ".core")),
+                                                                        case compile:file(Filename, [from_core, binary, return_errors]) of
+                                                                            {ok, ModName, Binary} ->
+                                                                                code:purge(ModName),
+                                                                                case code:load_binary(ModName, Filename, Binary) of
+                                                                                    {module, ModName} ->
+                                                                                        Val = ModName:'__eval__'(),
+                                                                                        code:purge(ModName),
+                                                                                        code:delete(ModName),
+                                                                                        {ok, Val};
+                                                                                    {error, What} ->
+                                                                                        {error, {load_failed, What}}
+                                                                                end;
+                                                                            {error, Errors, _Warnings} ->
+                                                                                {error, {compile_failed, Errors}}
+                                                                        end
+                                                                    catch
+                                                                        Class:Reason:Stack ->
+                                                                            {error, {Class, Reason, Stack}}
+                                                                    end,
+                                                                    io:format("~s~n", [<<0, "DREAM_RESULT", 0>>]),
+                                                                    case Result of
+                                                                        {ok, Value} -> io:format("ok:~p~n", [Value]);
+                                                                        {error, Err} -> io:format("err:~p~n", [Err])
+                                                                    end,
+                                                                    Loop()
+                                                            end;
+                                                        BindRest ->
+                                                            [NameStr, Filename] = string:split(BindRest, ":", leading),
+                                                            BindKey = list_to_atom("repl_" ++ NameStr),
                                                             Result = try
                                                                 ModName = list_to_atom(filename:basename(Filename, ".core")),
                                                                 case compile:file(Filename, [from_core, binary, return_errors]) of
@@ -80,6 +117,7 @@ Loop = fun Loop() ->
                                                                                 Val = ModName:'__eval__'(),
                                                                                 code:purge(ModName),
                                                                                 code:delete(ModName),
+                                                                                erlang:put(BindKey, Val),
                                                                                 {ok, Val};
                                                                             {error, What} ->
                                                                                 {error, {load_failed, What}}
@@ -282,11 +320,10 @@ type SharedBindings = Rc<RefCell<Vec<Binding>>>;
 type SharedRegistry = Rc<RefCell<ModuleRegistry>>;
 
 /// Binding stored from a let statement
+/// Values are stored in the BEAM process dictionary under key `repl_<name>`
 #[derive(Clone, Debug)]
 struct Binding {
     name: String,
-    /// The Dream source code for this binding's value
-    source: String,
 }
 
 /// REPL helper for rustyline
@@ -409,15 +446,35 @@ fn find_word_start(line: &str, pos: usize) -> (usize, &str) {
     (start, &line[start..])
 }
 
+/// Result from the BEAM eval server (ok: or err: line)
+type BeamResult = Result<String, String>;
+
+/// A simple printer that writes directly to stdout
+/// Used as fallback when ExternalPrinter is not available (e.g., non-TTY)
+struct StdoutPrinter;
+
+impl ExternalPrinter for StdoutPrinter {
+    fn print(&mut self, msg: String) -> rustyline::Result<()> {
+        // In non-TTY mode, just print directly
+        // This may interleave with prompts but works for testing
+        print!("{}", msg);
+        std::io::stdout().flush().ok();
+        Ok(())
+    }
+}
+
 /// REPL state
 struct ReplState {
     bindings: SharedBindings,
     registry: SharedRegistry,
     beam_process: Option<Child>,
     beam_stdin: Option<std::process::ChildStdin>,
-    beam_stdout: Option<BufReader<std::process::ChildStdout>>,
+    /// Channel receiver for command results only
+    result_rx: Option<Receiver<BeamResult>>,
     stdlib_path: Option<String>,
     temp_dir: std::path::PathBuf,
+    /// Last edited content from :edit command (for iterating)
+    last_edit: Option<String>,
 }
 
 impl ReplState {
@@ -430,14 +487,19 @@ impl ReplState {
             registry: Rc::new(RefCell::new(ModuleRegistry::new())),
             beam_process: None,
             beam_stdin: None,
-            beam_stdout: None,
+            result_rx: None,
             stdlib_path,
             temp_dir,
+            last_edit: None,
         }
     }
 
     /// Start the BEAM process if not already running
-    fn ensure_beam_running(&mut self) -> Result<(), String> {
+    /// The printer is used by the reader thread to print output while readline is blocking
+    fn ensure_beam_running<P: ExternalPrinter + Send + 'static>(
+        &mut self,
+        mut printer: P,
+    ) -> Result<(), String> {
         if self.beam_process.is_some() {
             return Ok(());
         }
@@ -470,57 +532,68 @@ impl ReplState {
         let stdin = child.stdin.take().ok_or("Failed to get stdin")?;
         let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
 
+        // Create channel for results only
+        let (tx, rx) = mpsc::channel::<BeamResult>();
+
+        // Spawn background thread to read stdout
+        // - Output lines are printed immediately via ExternalPrinter
+        // - Result lines (after RESULT_MARKER) are sent through channel
+        thread::spawn(move || {
+            let mut reader = BufReader::new(stdout);
+            let mut waiting_for_result = false;
+
+            loop {
+                let mut line = String::new();
+                match reader.read_line(&mut line) {
+                    Ok(0) => break, // EOF
+                    Ok(_) => {
+                        let trimmed = line.trim();
+
+                        if trimmed == RESULT_MARKER {
+                            // Next line(s) will contain result
+                            waiting_for_result = true;
+                            continue;
+                        }
+
+                        if waiting_for_result {
+                            // Check for result lines
+                            if let Some(value) = trimmed.strip_prefix("ok:") {
+                                let _ = tx.send(Ok(value.to_string()));
+                                waiting_for_result = false;
+                            } else if let Some(err) = trimmed.strip_prefix("err:") {
+                                let _ = tx.send(Err(err.to_string()));
+                                waiting_for_result = false;
+                            } else if !trimmed.is_empty() {
+                                // Output during result waiting (from spawned process)
+                                let _ = printer.print(line);
+                            }
+                        } else if !trimmed.is_empty() {
+                            // Regular output (from io::println, logger, etc.)
+                            let _ = printer.print(line);
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
         self.beam_process = Some(child);
         self.beam_stdin = Some(stdin);
-        self.beam_stdout = Some(BufReader::new(stdout));
+        self.result_rx = Some(rx);
 
         Ok(())
     }
 
     /// Send a command to the BEAM server and get the response
+    /// BEAM must be running (call ensure_beam_running first)
     fn send_command(&mut self, cmd: &str) -> Result<String, String> {
-        self.ensure_beam_running()?;
-
-        let stdin = self.beam_stdin.as_mut().ok_or("BEAM stdin not available")?;
+        let stdin = self.beam_stdin.as_mut().ok_or("BEAM not running")?;
         writeln!(stdin, "{}", cmd).map_err(|e| format!("Failed to send: {}", e))?;
         stdin.flush().map_err(|e| format!("Failed to flush: {}", e))?;
 
-        let stdout = self.beam_stdout.as_mut().ok_or("BEAM stdout not available")?;
-
-        // Read until we see the result marker
-        loop {
-            let mut line = String::new();
-            stdout
-                .read_line(&mut line)
-                .map_err(|e| format!("Failed to read: {}", e))?;
-
-            if line.is_empty() {
-                return Err("No response from BEAM".to_string());
-            }
-
-            let trimmed = line.trim();
-            if trimmed == RESULT_MARKER {
-                break;
-            }
-
-            // Print any output (from io::println etc)
-            print!("{}", line);
-        }
-
-        // Read the result line
-        let mut result_line = String::new();
-        stdout
-            .read_line(&mut result_line)
-            .map_err(|e| format!("Failed to read result: {}", e))?;
-
-        let result_line = result_line.trim();
-        if let Some(value) = result_line.strip_prefix("ok:") {
-            Ok(value.to_string())
-        } else if let Some(err) = result_line.strip_prefix("err:") {
-            Err(err.to_string())
-        } else {
-            Err(format!("Invalid result: {}", result_line))
-        }
+        // Wait for result from channel (output is printed by reader thread)
+        let rx = self.result_rx.as_ref().ok_or("BEAM not running")?;
+        rx.recv().map_err(|_| "BEAM process terminated".to_string())?
     }
 
     /// Load module registry by introspecting the BEAM
@@ -543,19 +616,20 @@ impl ReplState {
         Ok(())
     }
 
-    /// Evaluate an expression using the full compiler
-    fn eval_expr(&mut self, expr_source: &str) -> Result<String, String> {
+    /// Compile an expression to Core Erlang, injecting binding fetches
+    fn compile_expr(&mut self, expr_source: &str) -> Result<(String, String), String> {
         let counter = EVAL_COUNTER.fetch_add(1, Ordering::SeqCst);
         let module_name = format!("__repl_{}", counter);
 
-        // Generate Dream source with bindings
+        // Generate Dream source (bindings will be injected into Core Erlang)
         let dream_source = self.generate_dream_source(&module_name, expr_source);
 
         // Parse
         let mut parser = Parser::new(&dream_source);
-        let modules = parser
-            .parse_file_modules(&module_name)
-            .map_err(|e| format!("Parse error: {:?}", e))?;
+        let modules = parser.parse_file_modules(&module_name).map_err(|e| {
+            let err = CompilerError::parse("<repl>", &dream_source, e);
+            format!("{:?}", miette::Report::new(err))
+        })?;
 
         if modules.is_empty() {
             return Err("No module parsed".to_string());
@@ -564,11 +638,12 @@ impl ReplState {
         // Type check
         let type_results = check_modules(&modules);
         let mut annotated_modules = Vec::new();
-        for (mod_name, result) in type_results {
+        for (_mod_name, result) in type_results {
             match result {
                 Ok(annotated) => annotated_modules.push(annotated),
                 Err(e) => {
-                    return Err(format!("Type error in {}: {:?}", mod_name, e));
+                    let err = CompilerError::type_error("<repl>", &dream_source, e);
+                    return Err(format!("{:?}", miette::Report::new(err)));
                 }
             }
         }
@@ -588,8 +663,18 @@ impl ReplState {
             .emit_module(&prefixed_module)
             .map_err(|e| format!("Codegen error: {}", e))?;
 
+        // Inject binding fetches into Core Erlang
+        let core_erlang = self.inject_bindings_into_core_erlang(&core_erlang);
+
+        Ok((prefixed_module.name, core_erlang))
+    }
+
+    /// Evaluate an expression using the full compiler
+    fn eval_expr(&mut self, expr_source: &str) -> Result<String, String> {
+        let (module_name, core_erlang) = self.compile_expr(expr_source)?;
+
         // Write and evaluate
-        let core_file = self.temp_dir.join(format!("{}.core", prefixed_module.name));
+        let core_file = self.temp_dir.join(format!("{}.core", module_name));
         std::fs::write(&core_file, &core_erlang)
             .map_err(|e| format!("Failed to write Core Erlang: {}", e))?;
 
@@ -601,30 +686,89 @@ impl ReplState {
         result.map(|v| format_dream_value(&v))
     }
 
-    /// Generate Dream source code wrapping an expression with bindings
+    /// Evaluate an expression and bind the result to a name
+    fn eval_and_bind(&mut self, name: &str, expr_source: &str) -> Result<String, String> {
+        let (module_name, core_erlang) = self.compile_expr(expr_source)?;
+
+        // Write Core Erlang file
+        let core_file = self.temp_dir.join(format!("{}.core", module_name));
+        std::fs::write(&core_file, &core_erlang)
+            .map_err(|e| format!("Failed to write Core Erlang: {}", e))?;
+
+        // Use bind: command to evaluate and store in process dictionary
+        let cmd = format!("bind:{}:{}", name, core_file.display());
+        let result = self.send_command(&cmd);
+
+        let _ = std::fs::remove_file(&core_file);
+
+        // If successful, record the binding
+        if result.is_ok() {
+            self.add_binding(name.to_string());
+        }
+
+        result.map(|v| format_dream_value(&v))
+    }
+
+    /// Generate Dream source code wrapping an expression
+    /// Uses an extern declaration for binding retrieval to get proper `any` type
     fn generate_dream_source(&self, module_name: &str, expr_source: &str) -> String {
         let bindings = self.bindings.borrow();
 
         let mut source = format!("mod {} {{\n", module_name);
-        source.push_str("    pub fn __eval__() -> any {\n");
 
-        // Add all bindings as let statements
-        for binding in bindings.iter() {
-            source.push_str(&format!("        let {} = {};\n", binding.name, binding.source));
+        // Declare extern function for binding retrieval if we have bindings
+        // This gives us proper `any` return type that the type checker respects
+        if !bindings.is_empty() {
+            source.push_str("    extern mod __repl_bindings {\n");
+            for binding in bindings.iter() {
+                source.push_str(&format!(
+                    "        fn __get_{}__() -> any;\n",
+                    binding.name
+                ));
+            }
+            source.push_str("    }\n\n");
         }
 
-        // Add the expression
+        source.push_str("    pub fn __eval__() -> any {\n");
+
+        // Bind each variable by calling the extern function
+        for binding in bindings.iter() {
+            source.push_str(&format!(
+                "        let {} = __repl_bindings::__get_{}__();\n",
+                binding.name, binding.name
+            ));
+        }
+
         source.push_str(&format!("        {}\n", expr_source));
         source.push_str("    }\n");
         source.push_str("}\n");
-
         source
     }
 
-    fn add_binding(&mut self, name: String, source: String) {
+    /// Replace extern binding calls with erlang:get in Core Erlang
+    /// Transforms: call '__repl_bindings':'__get_x__'() -> call 'erlang':'get'('repl_x')
+    fn inject_bindings_into_core_erlang(&self, core_erlang: &str) -> String {
+        let bindings = self.bindings.borrow();
+        if bindings.is_empty() {
+            return core_erlang.to_string();
+        }
+
+        let mut result = core_erlang.to_string();
+
+        // Replace each extern call with an erlang:get call
+        for binding in bindings.iter() {
+            let extern_call = format!("call '__repl_bindings':'__get_{}__'()", binding.name);
+            let replacement = format!("call 'erlang':'get'('repl_{}')", binding.name);
+            result = result.replace(&extern_call, &replacement);
+        }
+
+        result
+    }
+
+    fn add_binding(&mut self, name: String) {
         let mut bindings = self.bindings.borrow_mut();
         bindings.retain(|b| b.name != name);
-        bindings.push(Binding { name, source });
+        bindings.push(Binding { name });
     }
 
     fn clear_bindings(&mut self) {
@@ -851,18 +995,7 @@ pub fn run_shell() -> ExitCode {
 
     let mut state = ReplState::new();
 
-    // Initialize BEAM and load module registry
-    print!("Loading modules...");
-    std::io::stdout().flush().ok();
-
-    if let Err(e) = state.load_registry() {
-        println!(" failed: {}", e);
-    } else {
-        let count = state.registry.borrow().modules.len();
-        println!(" {} modules loaded.", count);
-    }
-    println!();
-
+    // Create Editor first so we can get an ExternalPrinter for BEAM output
     let helper = ReplHelper::new(Rc::clone(&state.bindings), Rc::clone(&state.registry));
     let mut rl = match Editor::new() {
         Ok(editor) => editor,
@@ -872,6 +1005,31 @@ pub fn run_shell() -> ExitCode {
         }
     };
     rl.set_helper(Some(helper));
+
+    // Start BEAM with a printer for real-time output from spawned processes
+    // Try ExternalPrinter first (works with TTY), fall back to StdoutPrinter
+    print!("Loading modules...");
+    std::io::stdout().flush().ok();
+
+    let start_result = if let Ok(printer) = rl.create_external_printer() {
+        state.ensure_beam_running(printer)
+    } else {
+        // Fallback for non-TTY mode (e.g., piped input for testing)
+        state.ensure_beam_running(StdoutPrinter)
+    };
+
+    if let Err(e) = start_result {
+        eprintln!(" failed to start BEAM: {}", e);
+        return ExitCode::from(1);
+    }
+
+    if let Err(e) = state.load_registry() {
+        println!(" failed: {}", e);
+    } else {
+        let count = state.registry.borrow().modules.len();
+        println!(" {} modules loaded.", count);
+    }
+    println!();
 
     loop {
         let readline = rl.readline("dream> ");
@@ -973,13 +1131,8 @@ pub fn run_shell() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// Open a temp file in the user's editor and compile/run it
-fn edit_and_eval(state: &mut ReplState) -> Result<Option<String>, String> {
-    // Create a temporary file with .dream extension
-    let temp_file = state.temp_dir.join("dream_repl_edit.dream");
-
-    // Pre-populate with a template
-    let template = r#"// Define modules here. All code must be inside mod blocks.
+/// Default template for :edit when no previous edit exists
+const EDIT_TEMPLATE: &str = r#"// Define modules here. All code must be inside mod blocks.
 // After saving, call functions from the REPL prompt.
 
 mod repl_edit {
@@ -988,7 +1141,16 @@ mod repl_edit {
     }
 }
 "#;
-    std::fs::write(&temp_file, template).map_err(|e| format!("Failed to create temp file: {}", e))?;
+
+/// Open a temp file in the user's editor and compile/run it
+fn edit_and_eval(state: &mut ReplState) -> Result<Option<String>, String> {
+    // Create a temporary file with .dream extension
+    let temp_file = state.temp_dir.join("dream_repl_edit.dream");
+
+    // Use last edit if available, otherwise use template
+    let initial_content = state.last_edit.as_deref().unwrap_or(EDIT_TEMPLATE);
+    std::fs::write(&temp_file, initial_content)
+        .map_err(|e| format!("Failed to create temp file: {}", e))?;
 
     // Get editor from EDITOR env var, default to vim
     let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string());
@@ -1000,6 +1162,7 @@ mod repl_edit {
         .map_err(|e| format!("Failed to open editor '{}': {}", editor, e))?;
 
     if !status.success() {
+        let _ = std::fs::remove_file(&temp_file);
         return Err(format!("Editor '{}' exited with error", editor));
     }
 
@@ -1007,19 +1170,19 @@ mod repl_edit {
     let content = std::fs::read_to_string(&temp_file)
         .map_err(|e| format!("Failed to read temp file: {}", e))?;
 
-    let content = content.trim();
-    if content.is_empty() {
-        let _ = std::fs::remove_file(&temp_file);
-        return Ok(None);
-    }
-
-    // Compile and run
-    let result = compile_and_run_source(state, &content, "repl_edit");
-
     // Clean up temp file
     let _ = std::fs::remove_file(&temp_file);
 
-    result
+    let content = content.trim();
+    if content.is_empty() {
+        return Ok(None);
+    }
+
+    // Store the content for next edit (even if compilation fails, so user can fix errors)
+    state.last_edit = Some(content.to_string());
+
+    // Compile and run
+    compile_and_run_source(state, content, "repl_edit")
 }
 
 /// Load and compile a .dream file
@@ -1049,9 +1212,10 @@ fn compile_and_run_source(
 ) -> Result<Option<String>, String> {
     // Parse the source
     let mut parser = Parser::new(source);
-    let modules = parser
-        .parse_file_modules(fallback_name)
-        .map_err(|e| format!("Parse error: {:?}", e))?;
+    let modules = parser.parse_file_modules(fallback_name).map_err(|e| {
+        let err = CompilerError::parse(fallback_name, source, e);
+        format!("{:?}", miette::Report::new(err))
+    })?;
 
     if modules.is_empty() {
         return Ok(None);
@@ -1060,11 +1224,12 @@ fn compile_and_run_source(
     // Type check
     let type_results = check_modules(&modules);
     let mut annotated_modules = Vec::new();
-    for (module_name, result) in type_results {
+    for (_module_name, result) in type_results {
         match result {
             Ok(annotated) => annotated_modules.push(annotated),
             Err(e) => {
-                return Err(format!("Type error in {}: {:?}", module_name, e));
+                let err = CompilerError::type_error(fallback_name, source, e);
+                return Err(format!("{:?}", miette::Report::new(err)));
             }
         }
     }
@@ -1141,9 +1306,8 @@ fn parse_and_eval_let(state: &mut ReplState, input: &str) -> Result<String, Stri
         return Err("Invalid variable name".to_string());
     }
 
-    // Just store the source - it will be compiled when used
-    state.add_binding(name, expr_source);
-    Ok(":ok".to_string())
+    // Evaluate and store the value in BEAM process dictionary
+    state.eval_and_bind(&name, &expr_source)
 }
 
 #[cfg(test)]
