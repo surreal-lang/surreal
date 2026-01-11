@@ -56,3 +56,129 @@ pub fn to_list<T>(opt: Option<T>) -> [T] {
         None => [],
     }
 }
+
+/// Unwrap the option with a custom error message.
+/// Panics with the given message if the option is None.
+pub fn expect<T>(opt: Option<T>, msg: string) -> T {
+    match opt {
+        Some(x) => x,
+        None => :erlang::error(msg),
+    }
+}
+
+/// Unwrap the option, returning the result of calling `f` if None.
+pub fn unwrap_or_else<T>(opt: Option<T>, f: fn() -> T) -> T {
+    match opt {
+        Some(x) => x,
+        None => f(),
+    }
+}
+
+/// Apply a function to the contained value (if Some), or return None.
+pub fn map<T, U>(opt: Option<T>, f: fn(T) -> U) -> Option<U> {
+    match opt {
+        Some(x) => Some(f(x)),
+        None => None,
+    }
+}
+
+/// Apply a function to the contained value (if Some), or return a default.
+pub fn map_or<T, U>(opt: Option<T>, default: U, f: fn(T) -> U) -> U {
+    match opt {
+        Some(x) => f(x),
+        None => default,
+    }
+}
+
+/// Apply a function to the contained value (if Some), or compute a default.
+pub fn map_or_else<T, U>(opt: Option<T>, default_f: fn() -> U, f: fn(T) -> U) -> U {
+    match opt {
+        Some(x) => f(x),
+        None => default_f(),
+    }
+}
+
+/// Return None if the option is None, otherwise call `f` with the value and return the result.
+/// This is sometimes called "flatmap" or "bind".
+pub fn and_then<T, U>(opt: Option<T>, f: fn(T) -> Option<U>) -> Option<U> {
+    match opt {
+        Some(x) => f(x),
+        None => None,
+    }
+}
+
+/// Return None if the option is None, otherwise return `other`.
+pub fn and<T, U>(opt: Option<T>, other: Option<U>) -> Option<U> {
+    match opt {
+        Some(_) => other,
+        None => None,
+    }
+}
+
+/// Return the option if it contains a value that satisfies the predicate.
+pub fn filter<T>(opt: Option<T>, predicate: fn(T) -> bool) -> Option<T> {
+    match opt {
+        Some(x) => if predicate(x) { Some(x) } else { None },
+        None => None,
+    }
+}
+
+/// Return the option if it contains a value, otherwise call `f` and return its result.
+pub fn or_else<T>(opt: Option<T>, f: fn() -> Option<T>) -> Option<T> {
+    match opt {
+        Some(x) => Some(x),
+        None => f(),
+    }
+}
+
+/// Return Some if exactly one of the options is Some, otherwise return None.
+pub fn xor<T>(opt: Option<T>, other: Option<T>) -> Option<T> {
+    match (opt, other) {
+        (Some(x), None) => Some(x),
+        (None, Some(y)) => Some(y),
+        _ => None,
+    }
+}
+
+// TODO: flatten requires nested generics (Option<Option<T>>) which needs parser work
+// /// Convert Option<Option<T>> to Option<T>.
+// pub fn flatten<T>(opt: Option<Option<T>>) -> Option<T> {
+//     match opt {
+//         Some(inner) => inner,
+//         None => None,
+//     }
+// }
+
+/// Zip two options together into an option of a tuple.
+/// Returns Some((a, b)) only if both options are Some.
+pub fn zip<T, U>(opt: Option<T>, other: Option<U>) -> Option<(T, U)> {
+    match (opt, other) {
+        (Some(a), Some(b)) => Some((a, b)),
+        _ => None,
+    }
+}
+
+/// Zip two options with a function.
+/// Returns Some(f(a, b)) only if both options are Some.
+pub fn zip_with<T, U, R>(opt: Option<T>, other: Option<U>, f: fn(T, U) -> R) -> Option<R> {
+    match (opt, other) {
+        (Some(a), Some(b)) => Some(f(a, b)),
+        _ => None,
+    }
+}
+
+/// Convert Some(v) to Ok(v), or None to Err(err).
+pub fn ok_or<T, E>(opt: Option<T>, err: E) -> Result<T, E> {
+    match opt {
+        Some(x) => Ok(x),
+        None => Err(err),
+    }
+}
+
+/// Convert Some(v) to Ok(v), or None to Err(f()).
+pub fn ok_or_else<T, E>(opt: Option<T>, f: fn() -> E) -> Result<T, E> {
+    match opt {
+        Some(x) => Ok(x),
+        None => Err(f()),
+    }
+}
