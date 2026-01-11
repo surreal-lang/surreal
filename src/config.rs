@@ -38,6 +38,75 @@ pub struct ProjectConfig {
     pub package: Package,
     #[serde(default)]
     pub application: Option<ApplicationConfig>,
+    #[serde(default)]
+    pub dependencies: HashMap<String, Dependency>,
+}
+
+/// A dependency specification.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum Dependency {
+    /// Simple version string: `jason = "1.4"`
+    Version(String),
+    /// Detailed specification
+    Detailed(DependencySpec),
+}
+
+/// Detailed dependency specification.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DependencySpec {
+    /// Version requirement (for hex deps)
+    pub version: Option<String>,
+    /// Git repository URL
+    pub git: Option<String>,
+    /// Git branch
+    pub branch: Option<String>,
+    /// Git tag
+    pub tag: Option<String>,
+    /// Git commit ref
+    #[serde(rename = "ref")]
+    pub git_ref: Option<String>,
+    /// Local path
+    pub path: Option<String>,
+    /// Whether this is a hex.pm package (default: true if version specified)
+    #[serde(default)]
+    pub hex: bool,
+}
+
+impl Dependency {
+    /// Get the version requirement if this is a hex dependency.
+    pub fn version(&self) -> Option<&str> {
+        match self {
+            Dependency::Version(v) => Some(v),
+            Dependency::Detailed(spec) => spec.version.as_deref(),
+        }
+    }
+
+    /// Check if this is a git dependency.
+    pub fn is_git(&self) -> bool {
+        matches!(self, Dependency::Detailed(spec) if spec.git.is_some())
+    }
+
+    /// Check if this is a path dependency.
+    pub fn is_path(&self) -> bool {
+        matches!(self, Dependency::Detailed(spec) if spec.path.is_some())
+    }
+
+    /// Get the git URL if this is a git dependency.
+    pub fn git_url(&self) -> Option<&str> {
+        match self {
+            Dependency::Detailed(spec) => spec.git.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// Get the path if this is a path dependency.
+    pub fn path(&self) -> Option<&str> {
+        match self {
+            Dependency::Detailed(spec) => spec.path.as_deref(),
+            _ => None,
+        }
+    }
 }
 
 /// Application configuration from dream.toml's [application] section.

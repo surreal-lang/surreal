@@ -13,6 +13,7 @@ use dream::{
         SharedGenericRegistry,
     },
     config::{generate_dream_toml, generate_main_dream, ApplicationConfig, ProjectConfig},
+    deps::DepsManager,
 };
 use std::sync::{Arc, RwLock};
 
@@ -88,6 +89,19 @@ enum Commands {
     Version,
     /// Start an interactive Dream shell (REPL)
     Shell,
+    /// Manage dependencies
+    Deps {
+        #[command(subcommand)]
+        action: DepsAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum DepsAction {
+    /// Fetch all dependencies
+    Get,
+    /// Compile all dependencies
+    Compile,
 }
 
 mod bindgen;
@@ -119,6 +133,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Commands::Shell => repl::run_shell(),
+        Commands::Deps { action } => cmd_deps(action),
     }
 }
 
@@ -159,6 +174,48 @@ fn cmd_new(name: &str) -> ExitCode {
     println!("  dream run");
 
     ExitCode::SUCCESS
+}
+
+/// Handle dependency management commands.
+fn cmd_deps(action: DepsAction) -> ExitCode {
+    // Find project root and load config
+    let (project_root, config) = match ProjectConfig::from_project_root() {
+        Ok(result) => result,
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            return ExitCode::from(1);
+        }
+    };
+
+    let deps_manager = DepsManager::new(project_root, config);
+
+    match action {
+        DepsAction::Get => {
+            // Use tokio runtime for async deps fetching
+            let rt = match tokio::runtime::Runtime::new() {
+                Ok(rt) => rt,
+                Err(e) => {
+                    eprintln!("Error creating runtime: {}", e);
+                    return ExitCode::from(1);
+                }
+            };
+
+            if let Err(e) = rt.block_on(deps_manager.fetch_all()) {
+                eprintln!("Error fetching dependencies: {}", e);
+                return ExitCode::from(1);
+            }
+
+            ExitCode::SUCCESS
+        }
+        DepsAction::Compile => {
+            if let Err(e) = deps_manager.compile_deps() {
+                eprintln!("Error compiling dependencies: {}", e);
+                return ExitCode::from(1);
+            }
+
+            ExitCode::SUCCESS
+        }
+    }
 }
 
 /// Build the project or a standalone file.
@@ -858,8 +915,21 @@ fn cmd_run(
     let script_beam = beam_dir.join("__script__.beam");
     let has_script_module = script_beam.exists();
 
+    // Get deps ebin paths if in project mode
+    let deps_dirs: Vec<PathBuf> = if file.is_none() {
+        // Re-load config to get project root for DepsManager
+        if let Ok((project_root, config)) = ProjectConfig::from_project_root() {
+            let deps_manager = DepsManager::new(project_root, config);
+            deps_manager.dep_ebin_paths()
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
+
     if use_app_mode {
-        run_application(&beam_dir, &module_name, &app_config.unwrap(), stdlib_dir.as_ref())
+        run_application(&beam_dir, &module_name, &app_config.unwrap(), stdlib_dir.as_ref(), &deps_dirs)
     } else if has_script_module && function.is_none() && !eval_mode {
         // Run script mode: execute __script__:__main__()
         run_function(
@@ -869,10 +939,11 @@ fn cmd_run(
             args,
             no_halt,
             stdlib_dir.as_ref(),
+            &deps_dirs,
         )
     } else {
         let func = function.unwrap_or("main");
-        run_function(&beam_dir, &module_name, func, args, no_halt, stdlib_dir.as_ref())
+        run_function(&beam_dir, &module_name, func, args, no_halt, stdlib_dir.as_ref(), &deps_dirs)
     }
 }
 
@@ -882,6 +953,7 @@ fn run_application(
     module_name: &str,
     app_config: &ApplicationConfig,
     stdlib_dir: Option<&PathBuf>,
+    deps_dirs: &[PathBuf],
 ) -> ExitCode {
     println!();
     println!("Starting application '{}'...", module_name);
@@ -930,6 +1002,11 @@ fn run_application(
         cmd.arg("-pa").arg(stdlib);
     }
 
+    // Add deps ebin directories to code path
+    for dep_dir in deps_dirs {
+        cmd.arg("-pa").arg(dep_dir);
+    }
+
     cmd.arg("-noshell").arg("-eval").arg(&eval_expr);
 
     let status = cmd.status();
@@ -952,6 +1029,7 @@ fn run_function(
     args: &[String],
     no_halt: bool,
     stdlib_dir: Option<&PathBuf>,
+    deps_dirs: &[PathBuf],
 ) -> ExitCode {
     // Format arguments for Erlang
     let args_str = if args.is_empty() {
@@ -986,6 +1064,11 @@ fn run_function(
     // Add stdlib to code path if available
     if let Some(stdlib) = stdlib_dir {
         cmd.arg("-pa").arg(stdlib);
+    }
+
+    // Add deps ebin directories to code path
+    for dep_dir in deps_dirs {
+        cmd.arg("-pa").arg(dep_dir);
     }
 
     cmd.arg("-noshell").arg("-eval").arg(&eval_expr);

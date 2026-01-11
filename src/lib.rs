@@ -13,6 +13,7 @@
 
 pub mod compiler;
 pub mod config;
+pub mod deps;
 mod instruction;
 mod message;
 mod module;
