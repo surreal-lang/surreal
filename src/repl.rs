@@ -24,10 +24,75 @@ use dream::compiler::{
     check_modules, resolve_stdlib_methods, CompilerError, CoreErlangEmitter,
     GenericFunctionRegistry, Item, ModuleContext, Parser,
 };
+use miette::{NamedSource, SourceSpan};
 use std::sync::{Arc, RwLock};
 
 /// Counter for generating unique module names
 static EVAL_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Format a REPL error showing only the user's input, not the internal wrapper.
+/// Adjusts the error span to be relative to the user's expression.
+fn format_repl_error(
+    user_expr: &str,
+    expr_offset: usize,
+    message: &str,
+    span: SourceSpan,
+    help: Option<&str>,
+) -> String {
+    // Adjust span to be relative to user expression
+    let span_start = span.offset();
+    let span_len = span.len();
+
+    // Check if span is within the user expression
+    let adjusted_span = if span_start >= expr_offset {
+        let relative_start = span_start - expr_offset;
+        let expr_len = user_expr.len();
+
+        // Clamp to user expression bounds
+        if relative_start < expr_len {
+            let adjusted_len = span_len.min(expr_len - relative_start);
+            Some(SourceSpan::new(relative_start.into(), adjusted_len))
+        } else {
+            // Span is after the expression (in the closing braces)
+            // Point to the end of the expression
+            Some(SourceSpan::new(expr_len.saturating_sub(1).into(), 1))
+        }
+    } else {
+        // Span is before the user expression (in the wrapper header)
+        // This shouldn't normally happen for user input errors
+        None
+    };
+
+    // Build the error message
+    if let Some(span) = adjusted_span {
+        // Show the user's input with the error location
+        let src = NamedSource::new("<repl>", user_expr.to_string());
+        let diag = if let Some(h) = help {
+            miette::miette!(
+                labels = vec![miette::LabeledSpan::at(span, "here")],
+                help = h,
+                "{}",
+                message
+            )
+            .with_source_code(src)
+        } else {
+            miette::miette!(
+                labels = vec![miette::LabeledSpan::at(span, "here")],
+                "{}",
+                message
+            )
+            .with_source_code(src)
+        };
+        format!("{:?}", diag)
+    } else {
+        // No span to display, just show the message
+        let mut error = message.to_string();
+        if let Some(h) = help {
+            error.push_str(&format!("\nhelp: {}", h));
+        }
+        error
+    }
+}
 
 /// Result marker for protocol
 const RESULT_MARKER: &str = "\x00DREAM_RESULT\x00";
@@ -622,13 +687,12 @@ impl ReplState {
         let module_name = format!("__repl_{}", counter);
 
         // Generate Dream source (bindings will be injected into Core Erlang)
-        let dream_source = self.generate_dream_source(&module_name, expr_source);
+        let (dream_source, expr_offset) = self.generate_dream_source(&module_name, expr_source);
 
         // Parse
         let mut parser = Parser::new(&dream_source);
         let modules = parser.parse_file_modules(&module_name).map_err(|e| {
-            let err = CompilerError::parse("<repl>", &dream_source, e);
-            format!("{:?}", miette::Report::new(err))
+            format_repl_error(expr_source, expr_offset, &e.message, e.span, e.help.as_deref())
         })?;
 
         if modules.is_empty() {
@@ -642,8 +706,13 @@ impl ReplState {
             match result {
                 Ok(annotated) => annotated_modules.push(annotated),
                 Err(e) => {
-                    let err = CompilerError::type_error("<repl>", &dream_source, e);
-                    return Err(format!("{:?}", miette::Report::new(err)));
+                    return Err(format_repl_error(
+                        expr_source,
+                        expr_offset,
+                        &e.message,
+                        e.span.unwrap_or_else(|| SourceSpan::new(0.into(), 0)),
+                        e.help.as_deref(),
+                    ));
                 }
             }
         }
@@ -714,7 +783,8 @@ impl ReplState {
 
     /// Generate Dream source code wrapping an expression
     /// Uses an extern declaration for binding retrieval to get proper `any` type
-    fn generate_dream_source(&self, module_name: &str, expr_source: &str) -> String {
+    /// Returns (source, expr_offset) where expr_offset is the byte offset of the user expression
+    fn generate_dream_source(&self, module_name: &str, expr_source: &str) -> (String, usize) {
         let bindings = self.bindings.borrow();
 
         let mut source = format!("mod {} {{\n", module_name);
@@ -742,10 +812,13 @@ impl ReplState {
             ));
         }
 
+        // Track where the user expression starts (after 8 spaces of indentation)
+        let expr_offset = source.len() + 8; // 8 spaces of indentation
+
         source.push_str(&format!("        {}\n", expr_source));
         source.push_str("    }\n");
         source.push_str("}\n");
-        source
+        (source, expr_offset)
     }
 
     /// Replace extern binding calls with erlang:get in Core Erlang
