@@ -1,6 +1,12 @@
-/// Struct variants in enums - Rust-style enum variants with named fields
+/// Struct variants in enums and field shorthand syntax
 
 mod struct_variants {
+    // Regular struct with field shorthand support
+    struct Point {
+        x: int,
+        y: int,
+    }
+
     // An enum with all three variant kinds
     enum Message {
         Quit,
@@ -61,11 +67,27 @@ mod struct_variants {
         io::println(describe_event(resize));
         io::println(describe_event(close));
 
-        // Field shorthand: when variable name matches field name
+        // Field shorthand for enum struct variants
         let x = 50;
         let y = 75;
         let shorthand_move = Message::Move { x, y };  // same as { x: x, y: y }
         io::println(describe_message(shorthand_move));
+
+        // Field shorthand for regular structs
+        let px = 100;
+        let py = 200;
+        let point = Point { x: px, y: py };  // explicit syntax
+        io::println("Point (explicit): x={point.x}, y={point.y}");
+
+        let x = 300;
+        let y = 400;
+        let point2 = Point { x, y };  // shorthand syntax
+        io::println("Point (shorthand): x={point2.x}, y={point2.y}");
+
+        // Mix shorthand and explicit
+        let x = 500;
+        let point3 = Point { x, y: 600 };  // mixed syntax
+        io::println("Point (mixed): x={point3.x}, y={point3.y}");
 
         io::println("Struct variant construction and matching work!");
         :ok
