@@ -3,20 +3,43 @@
 //! Provides an interactive environment for evaluating Dream expressions
 //! using the BEAM runtime with a persistent process for fast evaluation.
 
+use std::cell::RefCell;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, ExitCode, Stdio};
+use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
-use rustyline::DefaultEditor;
+use rustyline::highlight::Highlighter;
+use rustyline::hint::Hinter;
+use rustyline::validate::Validator;
+use rustyline::{Context, Editor, Helper};
 
-use dream::compiler::{BinOp, Expr, Parser};
+use dream::compiler::{BinOp, Expr, Parser, StringPart};
 
 /// Counter for generating unique module names
 static EVAL_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Erlang eval server code - runs in a loop reading filenames and evaluating them
-const EVAL_SERVER: &str = r#"Loop = fun Loop() -> case io:get_line("") of eof -> ok; {error, _} -> ok; Line -> Filename = string:trim(Line), case Filename of "" -> Loop(); _ -> Result = try ModName = list_to_atom(filename:basename(Filename, ".core")), case compile:file(Filename, [from_core, binary, return_errors]) of {ok, ModName, Binary} -> code:purge(ModName), case code:load_binary(ModName, Filename, Binary) of {module, ModName} -> Val = ModName:'__eval__'(), code:purge(ModName), code:delete(ModName), {ok, Val}; {error, What} -> {error, {load_failed, What}} end; {error, Errors, _Warnings} -> {error, {compile_failed, Errors}} end catch Class:Reason:Stack -> {error, {Class, Reason, Stack}} end, case Result of {ok, Value} -> io:format("~s~p~n", [<<1>>, Value]); {error, Err} -> io:format("~s~p~n", [<<2>>, Err]) end, Loop() end end end, Loop()"#;
+/// Protocol: after evaluation, prints "\x00DREAM_RESULT\x00" marker, then "ok:value" or "err:reason"
+const RESULT_MARKER: &str = "\x00DREAM_RESULT\x00";
+const EVAL_SERVER: &str = r#"Loop = fun Loop() -> case io:get_line("") of eof -> ok; {error, _} -> ok; Line -> Filename = string:trim(Line), case Filename of "" -> Loop(); _ -> Result = try ModName = list_to_atom(filename:basename(Filename, ".core")), case compile:file(Filename, [from_core, binary, return_errors]) of {ok, ModName, Binary} -> code:purge(ModName), case code:load_binary(ModName, Filename, Binary) of {module, ModName} -> Val = ModName:'__eval__'(), code:purge(ModName), code:delete(ModName), {ok, Val}; {error, What} -> {error, {load_failed, What}} end; {error, Errors, _Warnings} -> {error, {compile_failed, Errors}} end catch Class:Reason:Stack -> {error, {Class, Reason, Stack}} end, io:format("~s~n", [<<0, "DREAM_RESULT", 0>>]), case Result of {ok, Value} -> io:format("ok:~p~n", [Value]); {error, Err} -> io:format("err:~p~n", [Err]) end, Loop() end end end, Loop()"#;
+
+/// Keywords for completion
+const KEYWORDS: &[&str] = &[
+    "let", "if", "else", "match", "fn", "pub", "mod", "use", "struct", "enum", "trait", "impl",
+    "type", "extern", "spawn", "send", "receive", "self", "true", "false",
+];
+
+/// REPL commands for completion
+const COMMANDS: &[&str] = &[":help", ":quit", ":q", ":clear", ":bindings", ":b", ":h"];
+
+/// Standard library modules for completion
+const STDLIB_MODULES: &[&str] = &[
+    "string", "list", "io", "map", "file", "process", "timer", "math", "binary", "tuple",
+    "genserver", "supervisor", "application", "ets", "agent", "task",
+];
 
 /// Binding stored from a let statement
 #[derive(Clone, Debug)]
@@ -26,10 +49,209 @@ struct Binding {
     core_expr: String,
 }
 
+/// Shared state for completion
+type SharedBindings = Rc<RefCell<Vec<Binding>>>;
+
+/// REPL helper for rustyline (completion, hints, etc.)
+struct ReplHelper {
+    bindings: SharedBindings,
+}
+
+impl ReplHelper {
+    fn new(bindings: SharedBindings) -> Self {
+        Self { bindings }
+    }
+}
+
+impl Completer for ReplHelper {
+    type Candidate = Pair;
+
+    fn complete(
+        &self,
+        line: &str,
+        pos: usize,
+        _ctx: &Context<'_>,
+    ) -> rustyline::Result<(usize, Vec<Pair>)> {
+        let mut completions = Vec::new();
+
+        // Find the word being typed
+        let (start, word) = find_word_start(line, pos);
+
+        // Complete REPL commands
+        if word.starts_with(':') {
+            for cmd in COMMANDS {
+                if cmd.starts_with(word) {
+                    completions.push(Pair {
+                        display: cmd.to_string(),
+                        replacement: cmd.to_string(),
+                    });
+                }
+            }
+            return Ok((start, completions));
+        }
+
+        // Complete module paths (e.g., "string::" -> "string::reverse")
+        if let Some(colon_pos) = word.find("::") {
+            let module = &word[..colon_pos];
+            let func_prefix = &word[colon_pos + 2..];
+
+            // Get functions for the module
+            if let Some(funcs) = get_module_functions(module) {
+                for func in funcs {
+                    if func.starts_with(func_prefix) {
+                        let full = format!("{}::{}", module, func);
+                        completions.push(Pair {
+                            display: full.clone(),
+                            replacement: full,
+                        });
+                    }
+                }
+            }
+            return Ok((start, completions));
+        }
+
+        // Complete keywords
+        for kw in KEYWORDS {
+            if kw.starts_with(word) && !word.is_empty() {
+                completions.push(Pair {
+                    display: kw.to_string(),
+                    replacement: kw.to_string(),
+                });
+            }
+        }
+
+        // Complete binding names
+        let bindings = self.bindings.borrow();
+        for binding in bindings.iter() {
+            if binding.name.starts_with(word) && !word.is_empty() {
+                completions.push(Pair {
+                    display: binding.name.clone(),
+                    replacement: binding.name.clone(),
+                });
+            }
+        }
+
+        // Complete module names (with :: suffix hint)
+        for module in STDLIB_MODULES {
+            if module.starts_with(word) && !word.is_empty() {
+                completions.push(Pair {
+                    display: format!("{}::", module),
+                    replacement: format!("{}::", module),
+                });
+            }
+        }
+
+        Ok((start, completions))
+    }
+}
+
+impl Hinter for ReplHelper {
+    type Hint = String;
+}
+
+impl Highlighter for ReplHelper {}
+
+impl Validator for ReplHelper {}
+
+impl Helper for ReplHelper {}
+
+/// Find the start of the word at position
+fn find_word_start(line: &str, pos: usize) -> (usize, &str) {
+    let line = &line[..pos];
+    let start = line
+        .rfind(|c: char| c.is_whitespace() || c == '(' || c == '[' || c == '{' || c == ',')
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    (start, &line[start..])
+}
+
+/// Get known functions for a module
+fn get_module_functions(module: &str) -> Option<&'static [&'static str]> {
+    match module {
+        "string" => Some(&[
+            "len",
+            "concat",
+            "contains",
+            "starts_with",
+            "ends_with",
+            "to_upper",
+            "to_lower",
+            "trim",
+            "trim_left",
+            "trim_right",
+            "split",
+            "join",
+            "replace",
+            "slice",
+            "reverse",
+            "is_empty",
+            "repeat",
+            "pad_left",
+            "pad_right",
+            "from_int",
+            "to_int",
+            "from_atom",
+            "to_atom",
+        ]),
+        "list" => Some(&[
+            "reverse",
+            "length",
+            "append",
+            "head",
+            "tail",
+            "map",
+            "filter",
+            "foldl",
+            "foldr",
+            "member",
+            "nth",
+            "take",
+            "drop",
+            "zip",
+            "flatten",
+            "sort",
+        ]),
+        "io" => Some(&["println", "print", "read_line", "format"]),
+        "map" => Some(&[
+            "new", "get", "put", "remove", "keys", "values", "size", "has_key", "merge", "to_list",
+        ]),
+        "file" => Some(&[
+            "read",
+            "write",
+            "exists",
+            "delete",
+            "rename",
+            "list_dir",
+            "is_dir",
+            "is_file",
+        ]),
+        "process" => Some(&[
+            "spawn",
+            "spawn_link",
+            "send",
+            "self",
+            "exit",
+            "link",
+            "unlink",
+            "monitor",
+            "demonitor",
+            "register",
+            "whereis",
+            "registered",
+        ]),
+        "timer" => Some(&["sleep", "send_after", "apply_after", "cancel"]),
+        "math" => Some(&[
+            "abs", "floor", "ceil", "round", "sqrt", "pow", "sin", "cos", "tan", "log", "exp",
+            "min", "max",
+        ]),
+        _ => None,
+    }
+}
+
 /// REPL state
 struct ReplState {
-    /// Accumulated bindings from let statements
-    bindings: Vec<Binding>,
+    /// Accumulated bindings from let statements (shared with completer)
+    bindings: SharedBindings,
     /// The running BEAM process
     beam_process: Option<Child>,
     /// Stdin handle for the BEAM process
@@ -48,7 +270,7 @@ impl ReplState {
         let temp_dir = std::env::temp_dir();
 
         Self {
-            bindings: Vec::new(),
+            bindings: Rc::new(RefCell::new(Vec::new())),
             beam_process: None,
             beam_stdin: None,
             beam_stdout: None,
@@ -124,30 +346,51 @@ impl ReplState {
             .map_err(|e| format!("Failed to flush: {}", e))?;
 
         // Read result from BEAM process
+        // First, read until we see the result marker (printing any output along the way)
         let stdout = self
             .beam_stdout
             .as_mut()
             .ok_or("BEAM stdout not available")?;
-        let mut line = String::new();
+
+        loop {
+            let mut line = String::new();
+            stdout
+                .read_line(&mut line)
+                .map_err(|e| format!("Failed to read from BEAM: {}", e))?;
+
+            if line.is_empty() {
+                // Clean up temp file
+                let _ = std::fs::remove_file(&core_file);
+                return Err("No response from BEAM".to_string());
+            }
+
+            let trimmed = line.trim();
+            if trimmed == RESULT_MARKER {
+                // Found marker, next line is the result
+                break;
+            }
+
+            // This is output from io::println or similar - print it
+            print!("{}", line);
+        }
+
+        // Read the actual result line
+        let mut result_line = String::new();
         stdout
-            .read_line(&mut line)
-            .map_err(|e| format!("Failed to read from BEAM: {}", e))?;
+            .read_line(&mut result_line)
+            .map_err(|e| format!("Failed to read result from BEAM: {}", e))?;
 
         // Clean up temp file
         let _ = std::fs::remove_file(&core_file);
 
-        // Parse result - first byte is status (1 = ok, 2 = error)
-        if line.is_empty() {
-            return Err("No response from BEAM".to_string());
-        }
-
-        let first_byte = line.as_bytes().first().copied().unwrap_or(0);
-        let result = line[1..].trim().to_string();
-
-        if first_byte == 1 {
-            Ok(result)
+        // Parse result - format is "ok:value" or "err:reason"
+        let result_line = result_line.trim();
+        if let Some(value) = result_line.strip_prefix("ok:") {
+            Ok(format_dream_value(value))
+        } else if let Some(err) = result_line.strip_prefix("err:") {
+            Err(format!("Evaluation error: {}", err))
         } else {
-            Err(format!("Evaluation error: {}", result))
+            Err(format!("Invalid result format: {}", result_line))
         }
     }
 
@@ -165,7 +408,8 @@ impl ReplState {
         output.push_str("'__eval__'/0 =\nfun () ->\n");
 
         // Add bindings as let expressions
-        for binding in &self.bindings {
+        let bindings = self.bindings.borrow();
+        for binding in bindings.iter() {
             output.push_str(&format!(
                 "    let <{}> =\n    {}\n    in ",
                 capitalize_first(&binding.name),
@@ -183,100 +427,297 @@ impl ReplState {
 
     /// Convert an expression to Core Erlang
     fn expr_to_core(&self, expr: &Expr) -> Result<String, String> {
-        match expr {
-            Expr::Int(n) => Ok(n.to_string()),
-            Expr::Bool(b) => Ok(if *b { "'true'" } else { "'false'" }.to_string()),
-            Expr::String(s) => {
-                // Convert string to list of integers (Erlang string representation)
-                let chars: Vec<String> = s.bytes().map(|b| b.to_string()).collect();
-                Ok(format!("[{}]", chars.join(", ")))
-            }
-            Expr::Atom(a) => Ok(format!("'{}'", a)),
-            Expr::Ident(name) => {
-                // Check if it's a binding
-                if self.bindings.iter().any(|b| &b.name == name) {
-                    Ok(capitalize_first(name))
-                } else {
-                    Err(format!("Undefined variable: {}", name))
-                }
-            }
-            Expr::Binary { op, left, right } => {
-                let left_core = self.expr_to_core(left)?;
-                let right_core = self.expr_to_core(right)?;
-                let op_str = match op {
-                    BinOp::Add => "call 'erlang':'+'",
-                    BinOp::Sub => "call 'erlang':'-'",
-                    BinOp::Mul => "call 'erlang':'*'",
-                    BinOp::Div => "call 'erlang':'div'",
-                    BinOp::Mod => "call 'erlang':'rem'",
-                    BinOp::Eq => "call 'erlang':'=:='",
-                    BinOp::Ne => "call 'erlang':'=/='",
-                    BinOp::Lt => "call 'erlang':'<'",
-                    BinOp::Le => "call 'erlang':'=<'",
-                    BinOp::Gt => "call 'erlang':'>'",
-                    BinOp::Ge => "call 'erlang':'>='",
-                    BinOp::And => "call 'erlang':'and'",
-                    BinOp::Or => "call 'erlang':'or'",
-                };
-                Ok(format!("{}({}, {})", op_str, left_core, right_core))
-            }
-            Expr::Tuple(elems) => {
-                let elem_strs: Result<Vec<_>, _> =
-                    elems.iter().map(|e| self.expr_to_core(e)).collect();
-                Ok(format!("{{{}}}", elem_strs?.join(", ")))
-            }
-            Expr::List(elems) => {
-                let elem_strs: Result<Vec<_>, _> =
-                    elems.iter().map(|e| self.expr_to_core(e)).collect();
-                Ok(format!("[{}]", elem_strs?.join(", ")))
-            }
-            Expr::Call {
-                func,
-                args,
-                type_args: _,
-                inferred_type_args: _,
-            } => {
-                // Handle qualified calls like module::func
-                if let Expr::Path { segments } = func.as_ref() {
-                    if segments.len() == 2 {
-                        let module = &segments[0];
-                        let func_name = &segments[1];
-                        let arg_strs: Result<Vec<_>, _> =
-                            args.iter().map(|a| self.expr_to_core(a)).collect();
-                        return Ok(format!(
-                            "call 'dream::{}'  :'{}'({})",
-                            module,
-                            func_name,
-                            arg_strs?.join(", ")
-                        ));
-                    }
-                }
-
-                // Simple function call
-                if let Expr::Ident(name) = func.as_ref() {
-                    let arg_strs: Result<Vec<_>, _> =
-                        args.iter().map(|a| self.expr_to_core(a)).collect();
-                    return Ok(format!("apply '{}'({})", name, arg_strs?.join(", ")));
-                }
-
-                Err(format!("Unsupported call expression: {:?}", func))
-            }
-            _ => Err(format!("Unsupported expression type in REPL: {:?}", expr)),
-        }
+        let bindings = self.bindings.borrow();
+        expr_to_core_inner(expr, &bindings)
     }
 
     /// Add a binding
     fn add_binding(&mut self, name: String, expr: &Expr) -> Result<(), String> {
         let core_expr = self.expr_to_core(expr)?;
+        let mut bindings = self.bindings.borrow_mut();
         // Remove existing binding with same name (shadowing)
-        self.bindings.retain(|b| b.name != name);
-        self.bindings.push(Binding { name, core_expr });
+        bindings.retain(|b| b.name != name);
+        bindings.push(Binding { name, core_expr });
         Ok(())
     }
 
     /// Clear all bindings
     fn clear_bindings(&mut self) {
-        self.bindings.clear();
+        self.bindings.borrow_mut().clear();
+    }
+}
+
+/// Convert an expression to Core Erlang (standalone function for borrowing)
+fn expr_to_core_inner(expr: &Expr, bindings: &[Binding]) -> Result<String, String> {
+    match expr {
+        Expr::Int(n) => Ok(n.to_string()),
+        Expr::Bool(b) => Ok(if *b { "'true'" } else { "'false'" }.to_string()),
+        Expr::String(s) => {
+            // Convert string to list of integers (Erlang string representation)
+            let chars: Vec<String> = s.bytes().map(|b| b.to_string()).collect();
+            Ok(format!("[{}]", chars.join(", ")))
+        }
+        Expr::Atom(a) => Ok(format!("'{}'", a)),
+        Expr::Ident(name) => {
+            // Check if it's a binding
+            if bindings.iter().any(|b| &b.name == name) {
+                Ok(capitalize_first(name))
+            } else {
+                Err(format!("Undefined variable: {}", name))
+            }
+        }
+        Expr::Binary { op, left, right } => {
+            let left_core = expr_to_core_inner(left, bindings)?;
+            let right_core = expr_to_core_inner(right, bindings)?;
+            let op_str = match op {
+                BinOp::Add => "call 'erlang':'+'",
+                BinOp::Sub => "call 'erlang':'-'",
+                BinOp::Mul => "call 'erlang':'*'",
+                BinOp::Div => "call 'erlang':'div'",
+                BinOp::Mod => "call 'erlang':'rem'",
+                BinOp::Eq => "call 'erlang':'=:='",
+                BinOp::Ne => "call 'erlang':'=/='",
+                BinOp::Lt => "call 'erlang':'<'",
+                BinOp::Le => "call 'erlang':'=<'",
+                BinOp::Gt => "call 'erlang':'>'",
+                BinOp::Ge => "call 'erlang':'>='",
+                BinOp::And => "call 'erlang':'and'",
+                BinOp::Or => "call 'erlang':'or'",
+            };
+            Ok(format!("{}({}, {})", op_str, left_core, right_core))
+        }
+        Expr::Tuple(elems) => {
+            let elem_strs: Result<Vec<_>, _> = elems
+                .iter()
+                .map(|e| expr_to_core_inner(e, bindings))
+                .collect();
+            Ok(format!("{{{}}}", elem_strs?.join(", ")))
+        }
+        Expr::List(elems) => {
+            let elem_strs: Result<Vec<_>, _> = elems
+                .iter()
+                .map(|e| expr_to_core_inner(e, bindings))
+                .collect();
+            Ok(format!("[{}]", elem_strs?.join(", ")))
+        }
+        Expr::Call {
+            func,
+            args,
+            type_args: _,
+            inferred_type_args: _,
+        } => {
+            // Handle qualified calls like module::func or Struct::method
+            if let Expr::Path { segments } = func.as_ref() {
+                if segments.len() == 2 {
+                    let first = &segments[0];
+                    let func_name = &segments[1];
+                    let arg_strs: Result<Vec<_>, _> = args
+                        .iter()
+                        .map(|a| expr_to_core_inner(a, bindings))
+                        .collect();
+
+                    // Check if first segment is PascalCase (struct method) or snake_case (module function)
+                    let is_struct_method = first
+                        .chars()
+                        .next()
+                        .map(|c| c.is_uppercase())
+                        .unwrap_or(false);
+
+                    if is_struct_method {
+                        // Struct::method() -> 'dream::struct':'Struct_method'()
+                        let module = first.to_lowercase();
+                        let compiled_func = format!("{}_{}", first, func_name);
+                        return Ok(format!(
+                            "call 'dream::{}'  :'{}'({})",
+                            module,
+                            compiled_func,
+                            arg_strs?.join(", ")
+                        ));
+                    } else {
+                        // module::func() -> 'dream::module':'func'()
+                        return Ok(format!(
+                            "call 'dream::{}'  :'{}'({})",
+                            first,
+                            func_name,
+                            arg_strs?.join(", ")
+                        ));
+                    }
+                }
+            }
+
+            // Simple function call
+            if let Expr::Ident(name) = func.as_ref() {
+                let arg_strs: Result<Vec<_>, _> = args
+                    .iter()
+                    .map(|a| expr_to_core_inner(a, bindings))
+                    .collect();
+                return Ok(format!("apply '{}'({})", name, arg_strs?.join(", ")));
+            }
+
+            Err(format!("Unsupported call expression: {:?}", func))
+        }
+        Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            type_args: _,
+            resolved_module: _,
+            inferred_type_args: _,
+        } => {
+            // Method call: receiver.method(args) -> Struct_method(receiver, args)
+            // We need to figure out the struct type from the receiver
+            // For now, we'll try to infer it from the method name pattern
+            let receiver_core = expr_to_core_inner(receiver, bindings)?;
+            let mut all_args = vec![receiver_core];
+            for arg in args {
+                all_args.push(expr_to_core_inner(arg, bindings)?);
+            }
+
+            // Try to determine the struct type from the receiver
+            // This is a heuristic - check if receiver is a binding with a known struct type
+            // For now, we'll require the user to use Struct::method() syntax for struct methods
+            // But we can try common patterns like Map, Option, Result
+
+            // Check common struct methods
+            let struct_methods: &[(&str, &str)] = &[
+                // Map methods
+                ("put", "Map"),
+                ("get", "Map"),
+                ("get_or", "Map"),
+                ("has_key", "Map"),
+                ("delete", "Map"),
+                ("merge", "Map"),
+                ("keys", "Map"),
+                ("values", "Map"),
+                ("to_list", "Map"),
+                ("size", "Map"),
+                ("is_empty", "Map"),
+                ("fetch", "Map"),
+                // Option methods
+                ("unwrap", "Option"),
+                ("unwrap_or", "Option"),
+                ("is_some", "Option"),
+                ("is_none", "Option"),
+                ("map", "Option"),
+                ("and_then", "Option"),
+                // Result methods
+                ("unwrap", "Result"),
+                ("unwrap_or", "Result"),
+                ("is_ok", "Result"),
+                ("is_err", "Result"),
+                ("ok", "Result"),
+                ("err", "Result"),
+            ];
+
+            // Find matching struct for this method
+            if let Some((_, struct_name)) = struct_methods.iter().find(|(m, _)| *m == method.as_str()) {
+                let module = struct_name.to_lowercase();
+                let compiled_func = format!("{}_{}", struct_name, method);
+                return Ok(format!(
+                    "call 'dream::{}'  :'{}'({})",
+                    module,
+                    compiled_func,
+                    all_args.join(", ")
+                ));
+            }
+
+            Err(format!(
+                "Unknown method '{}'. Use Struct::method() syntax for struct methods.",
+                method
+            ))
+        }
+        Expr::StringInterpolation(parts) => {
+            // Convert interpolated string to iolist and then binary
+            // Result: call 'erlang':'iolist_to_binary'([part1, part2, ...])
+            let mut part_strs = Vec::new();
+            for part in parts {
+                match part {
+                    StringPart::Literal(s) => {
+                        // Emit literal as char code list
+                        let chars: Vec<String> = s.chars().map(|c| (c as u32).to_string()).collect();
+                        part_strs.push(format!("[{}]", chars.join(", ")));
+                    }
+                    StringPart::Expr(e) => {
+                        // Convert expression to string using display::to_string
+                        let expr_core = expr_to_core_inner(e, bindings)?;
+                        part_strs.push(format!("call 'dream::display':'to_string'({})", expr_core));
+                    }
+                }
+            }
+            Ok(format!(
+                "call 'erlang':'iolist_to_binary'([{}])",
+                part_strs.join(", ")
+            ))
+        }
+        Expr::Pipe { left, right } => {
+            // Transform `a |> f(b, c)` into `f(a, b, c)`
+            let left_core = expr_to_core_inner(left, bindings)?;
+
+            // Right side should be a call - inject left as first argument
+            match right.as_ref() {
+                Expr::Call {
+                    func,
+                    args,
+                    type_args: _,
+                    inferred_type_args: _,
+                } => {
+                    // Handle qualified calls like module::func or Struct::method
+                    if let Expr::Path { segments } = func.as_ref() {
+                        if segments.len() == 2 {
+                            let first = &segments[0];
+                            let func_name = &segments[1];
+                            let mut all_args = vec![left_core];
+                            for arg in args {
+                                all_args.push(expr_to_core_inner(arg, bindings)?);
+                            }
+
+                            // Check if first segment is PascalCase (struct method) or snake_case (module function)
+                            let is_struct_method = first
+                                .chars()
+                                .next()
+                                .map(|c| c.is_uppercase())
+                                .unwrap_or(false);
+
+                            if is_struct_method {
+                                // Struct::method() -> 'dream::struct':'Struct_method'()
+                                let module = first.to_lowercase();
+                                let compiled_func = format!("{}_{}", first, func_name);
+                                return Ok(format!(
+                                    "call 'dream::{}'  :'{}'({})",
+                                    module,
+                                    compiled_func,
+                                    all_args.join(", ")
+                                ));
+                            } else {
+                                // module::func() -> 'dream::module':'func'()
+                                return Ok(format!(
+                                    "call 'dream::{}'  :'{}'({})",
+                                    first,
+                                    func_name,
+                                    all_args.join(", ")
+                                ));
+                            }
+                        }
+                    }
+
+                    // Simple function call
+                    if let Expr::Ident(name) = func.as_ref() {
+                        let mut all_args = vec![left_core];
+                        for arg in args {
+                            all_args.push(expr_to_core_inner(arg, bindings)?);
+                        }
+                        return Ok(format!("apply '{}'({})", name, all_args.join(", ")));
+                    }
+
+                    Err(format!("Unsupported pipe target: {:?}", func))
+                }
+                _ => Err(format!(
+                    "Pipe right side must be a function call: {:?}",
+                    right
+                )),
+            }
+        }
+        _ => Err(format!("Unsupported expression type in REPL: {:?}", expr)),
     }
 }
 
@@ -329,6 +770,130 @@ fn capitalize_first(s: &str) -> String {
     }
 }
 
+/// Format an Erlang value as Dream syntax
+fn format_dream_value(value: &str) -> String {
+    let value = value.trim();
+
+    // Option: {some, X} -> Some(X), none -> None
+    if value == "none" {
+        return "None".to_string();
+    }
+    if let Some(inner) = value.strip_prefix("{some,").and_then(|s| s.strip_suffix('}')) {
+        return format!("Some({})", format_dream_value(inner.trim()));
+    }
+
+    // Result: {ok, X} -> Ok(X), {error, X} -> Err(X)
+    if let Some(inner) = value.strip_prefix("{ok,").and_then(|s| s.strip_suffix('}')) {
+        return format!("Ok({})", format_dream_value(inner.trim()));
+    }
+    if let Some(inner) = value.strip_prefix("{error,").and_then(|s| s.strip_suffix('}')) {
+        return format!("Err({})", format_dream_value(inner.trim()));
+    }
+
+    // Atoms: 'atom' or atom -> :atom
+    if let Some(inner) = value.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')) {
+        // Skip special atoms
+        if inner == "true" || inner == "false" || inner == "ok" || inner == "error" {
+            return inner.to_string();
+        }
+        return format!(":{}", inner);
+    }
+    // Unquoted atoms (simple identifiers that aren't keywords)
+    if value.chars().next().map(|c| c.is_lowercase()).unwrap_or(false)
+        && value.chars().all(|c| c.is_alphanumeric() || c == '_')
+        && value != "true"
+        && value != "false"
+        && value != "ok"
+        && value != "error"
+    {
+        return format!(":{}", value);
+    }
+
+    // Binary strings: <<"text">> -> "text"
+    if let Some(inner) = value.strip_prefix("<<\"").and_then(|s| s.strip_suffix("\">>")) {
+        return format!("\"{}\"", inner);
+    }
+
+    // Structs: #{data => ..., '__struct__' => 'module::Name'} -> simplified
+    // For now, just clean up the display a bit
+    if value.starts_with("#{") && value.contains("'__struct__'") {
+        // Extract struct name and data
+        if let Some(struct_start) = value.find("'__struct__' => '") {
+            let after_struct = &value[struct_start + 17..];
+            if let Some(struct_end) = after_struct.find('\'') {
+                let struct_path = &after_struct[..struct_end];
+                // Extract just the struct name (after ::)
+                let struct_name = struct_path.split("::").last().unwrap_or(struct_path);
+
+                // Extract data field
+                if let Some(data_start) = value.find("data => ") {
+                    let after_data = &value[data_start + 8..];
+                    // Find matching brace
+                    if let Some(data_content) = extract_map_content(after_data) {
+                        // For Map struct, use literal syntax { ... }
+                        if struct_name == "Map" {
+                            if data_content == "#{}" {
+                                return "{}".to_string();
+                            }
+                            return format!("{{ {} }}", format_map_fields(&data_content));
+                        }
+                        // For other structs, use Struct(...) syntax
+                        if data_content == "#{}" {
+                            return format!("{}()", struct_name);
+                        }
+                        return format!("{}({})", struct_name, format_map_fields(&data_content));
+                    }
+                }
+            }
+        }
+    }
+
+    // Default: return as-is
+    value.to_string()
+}
+
+/// Extract map content from a string starting with #{
+fn extract_map_content(s: &str) -> Option<String> {
+    if !s.starts_with("#{") {
+        return None;
+    }
+    let mut depth = 0;
+    let mut end_idx = 0;
+    for (i, c) in s.chars().enumerate() {
+        match c {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    end_idx = i + 1;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    if end_idx > 0 {
+        Some(s[..end_idx].to_string())
+    } else {
+        None
+    }
+}
+
+/// Format map fields for display
+fn format_map_fields(map_str: &str) -> String {
+    // Simple transformation: #{key => value} -> key: value
+    let inner = map_str.strip_prefix("#{").and_then(|s| s.strip_suffix('}'));
+    if let Some(inner) = inner {
+        if inner.is_empty() {
+            return String::new();
+        }
+        // This is a simplified version - just replace => with :
+        inner.replace(" => ", ": ")
+    } else {
+        map_str.to_string()
+    }
+}
+
 /// Print the welcome banner
 fn print_banner() {
     println!("Dream {} (BEAM backend)", env!("CARGO_PKG_VERSION"));
@@ -346,21 +911,25 @@ fn print_help() {
     println!();
     println!("Enter Dream expressions to evaluate them.");
     println!("Use 'let x = expr' to create bindings.");
+    println!("Press TAB for completion.");
 }
 
 /// Run the interactive shell
 pub fn run_shell() -> ExitCode {
     print_banner();
 
-    let mut rl = match DefaultEditor::new() {
+    let mut state = ReplState::new();
+
+    // Create editor with completion helper
+    let helper = ReplHelper::new(Rc::clone(&state.bindings));
+    let mut rl = match Editor::new() {
         Ok(editor) => editor,
         Err(e) => {
             eprintln!("Failed to initialize readline: {}", e);
             return ExitCode::from(1);
         }
     };
-
-    let mut state = ReplState::new();
+    rl.set_helper(Some(helper));
 
     loop {
         let readline = rl.readline("dream> ");
@@ -391,10 +960,11 @@ pub fn run_shell() -> ExitCode {
                             continue;
                         }
                         ":bindings" | ":b" => {
-                            if state.bindings.is_empty() {
+                            let bindings = state.bindings.borrow();
+                            if bindings.is_empty() {
                                 println!("No bindings.");
                             } else {
-                                for binding in &state.bindings {
+                                for binding in bindings.iter() {
                                     println!("  {} = <expr>", binding.name);
                                 }
                             }
