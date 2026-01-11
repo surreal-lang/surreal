@@ -1308,8 +1308,13 @@ impl<'source> Parser<'source> {
                             }
 
                             let field_name = self.expect_ident()?;
-                            self.expect(&Token::Colon)?;
-                            let field_value = self.parse_expr()?;
+                            // Support shorthand: `{ x }` is equivalent to `{ x: x }`
+                            let field_value = if self.check(&Token::Colon) {
+                                self.advance();
+                                self.parse_expr()?
+                            } else {
+                                Expr::Ident(field_name.clone())
+                            };
                             fields.push((field_name, field_value));
 
                             if self.check(&Token::Comma) {
@@ -1486,7 +1491,7 @@ impl<'source> Parser<'source> {
         if let Some(Token::TypeIdent(name)) = self.peek().cloned() {
             self.advance();
 
-            // Check for struct init: TypeIdent { ... }
+            // Check for struct init: TypeIdent { ... } with field shorthand support
             if self.check(&Token::LBrace) {
                 self.advance();
                 let mut fields = Vec::new();
@@ -1501,8 +1506,13 @@ impl<'source> Parser<'source> {
                     }
 
                     let field_name = self.expect_ident()?;
-                    self.expect(&Token::Colon)?;
-                    let field_value = self.parse_expr()?;
+                    // Support shorthand: `{ x }` is equivalent to `{ x: x }`
+                    let field_value = if self.check(&Token::Colon) {
+                        self.advance();
+                        self.parse_expr()?
+                    } else {
+                        Expr::Ident(field_name.clone())
+                    };
                     fields.push((field_name, field_value));
 
                     if self.check(&Token::Comma) {
@@ -3087,6 +3097,49 @@ mod tests {
                 }
             } else {
                 panic!("expected EnumVariant expression");
+            }
+        } else {
+            panic!("expected let statement");
+        }
+    }
+
+    #[test]
+    fn test_parse_struct_init_shorthand() {
+        let source = r#"
+            mod test {
+                struct Point {
+                    x: int,
+                    y: int,
+                }
+
+                fn main() {
+                    let x = 10;
+                    let y = 20;
+                    let pt = Point { x, y };
+                    pt
+                }
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        // Find the function
+        let func = module.items.iter().find_map(|item| {
+            if let Item::Function(f) = item { Some(f) } else { None }
+        }).expect("expected function");
+
+        // Check the third let statement (let pt = ...)
+        if let Some(Stmt::Let { value: init, .. }) = func.body.stmts.get(2) {
+            if let Expr::StructInit { name, fields, .. } = init {
+                assert_eq!(name, "Point");
+                assert_eq!(fields.len(), 2);
+                // Check that shorthand expanded to Ident
+                assert_eq!(fields[0].0, "x");
+                assert!(matches!(&fields[0].1, Expr::Ident(n) if n == "x"));
+                assert_eq!(fields[1].0, "y");
+                assert!(matches!(&fields[1].1, Expr::Ident(n) if n == "y"));
+            } else {
+                panic!("expected StructInit expression");
             }
         } else {
             panic!("expected let statement");
