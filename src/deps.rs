@@ -593,8 +593,102 @@ impl DepsManager {
             )));
         }
 
+        // Generate .app file for the Elixir dependency
+        self.generate_elixir_app_file(name, &pkg_dir, &ebin_dir)?;
+
         println!("  {} compiled", name);
         Ok(())
+    }
+
+    /// Generate a .app file for an Elixir dependency.
+    fn generate_elixir_app_file(
+        &self,
+        name: &str,
+        pkg_dir: &Path,
+        ebin_dir: &Path,
+    ) -> DepsResult<()> {
+        // Parse version from mix.exs
+        let mix_exs = pkg_dir.join("mix.exs");
+        let version = if mix_exs.exists() {
+            Self::parse_mix_version(&mix_exs).unwrap_or_else(|| "0.0.0".to_string())
+        } else {
+            "0.0.0".to_string()
+        };
+
+        // Get list of compiled modules from .beam files
+        let modules: Vec<String> = fs::read_dir(ebin_dir)
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .filter_map(|e| {
+                        let path = e.path();
+                        if path.extension().map_or(false, |ext| ext == "beam") {
+                            path.file_stem()
+                                .and_then(|s| s.to_str())
+                                .map(|s| format!("'{}'", s))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let modules_str = modules.join(", ");
+
+        // Generate the .app file content
+        let app_content = format!(
+            r#"{{application, {name}, [
+  {{description, "An Elixir dependency"}},
+  {{vsn, "{version}"}},
+  {{modules, [{modules}]}},
+  {{registered, []}},
+  {{applications, [kernel, stdlib, elixir]}}
+]}}.
+"#,
+            name = name,
+            version = version,
+            modules = modules_str,
+        );
+
+        let app_file = ebin_dir.join(format!("{}.app", name));
+        fs::write(&app_file, app_content).map_err(|e| {
+            DepsError::new(format!("Failed to write .app file for {}: {}", name, e))
+        })?;
+
+        Ok(())
+    }
+
+    /// Parse version from mix.exs file.
+    fn parse_mix_version(mix_exs: &Path) -> Option<String> {
+        let content = fs::read_to_string(mix_exs).ok()?;
+
+        // Try to find @version "x.y.z" pattern
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("@version") {
+                // Extract version string from @version "1.2.3"
+                if let Some(start) = trimmed.find('"') {
+                    if let Some(end) = trimmed[start + 1..].find('"') {
+                        return Some(trimmed[start + 1..start + 1 + end].to_string());
+                    }
+                }
+            }
+        }
+
+        // Try to find version: "x.y.z" in project definition
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("version:") {
+                if let Some(start) = trimmed.find('"') {
+                    if let Some(end) = trimmed[start + 1..].find('"') {
+                        return Some(trimmed[start + 1..start + 1 + end].to_string());
+                    }
+                }
+            }
+        }
+
+        None
     }
 
     /// Recursively find all .ex files in a directory.
