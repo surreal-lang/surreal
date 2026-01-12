@@ -31,8 +31,9 @@ pub fn cmd_bindgen(files: &[std::path::PathBuf], output: Option<&Path>, _module:
         // Detect file type by extension
         let extension = file.extension().and_then(|s| s.to_str()).unwrap_or("");
         let is_elixir = extension == "ex" || extension == "exs";
+        let is_header = extension == "hrl";
 
-        let (module_name, type_defs, specs) = if is_elixir {
+        let (module_name, type_defs, specs, records, structs) = if is_elixir {
             // Parse Elixir file
             let module_name = extract_elixir_module_name(&source)
                 .unwrap_or_else(|| {
@@ -49,9 +50,26 @@ pub fn cmd_bindgen(files: &[std::path::PathBuf], output: Option<&Path>, _module:
             }
 
             let specs = parse_elixir_specs(&source, &registry);
-            (module_name, type_defs, specs)
+
+            // Parse defstruct declarations
+            let structs = parse_elixir_structs(&source, &module_name);
+
+            (module_name, type_defs, specs, Vec::new(), structs)
+        } else if is_header {
+            // Parse Erlang header file (.hrl)
+            // Header files typically don't have a module declaration, use filename
+            let module_name = file.file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("unknown")
+                .to_string();
+
+            let type_defs = parse_type_defs(&source);
+            let records = parse_erlang_records(&source);
+
+            // No specs in header files typically
+            (module_name, type_defs, Vec::new(), records, Vec::new())
         } else {
-            // Parse Erlang file
+            // Parse Erlang source file (.erl)
             let module_name = extract_module_name(&source)
                 .unwrap_or_else(|| {
                     file.file_stem()
@@ -61,13 +79,14 @@ pub fn cmd_bindgen(files: &[std::path::PathBuf], output: Option<&Path>, _module:
                 });
 
             let type_defs = parse_type_defs(&source);
+            let records = parse_erlang_records(&source);
             let mut registry = TypeRegistry::new();
             for td in &type_defs {
                 registry.register(td.clone());
             }
 
             let specs = parse_specs(&source, &registry);
-            (module_name, type_defs, specs)
+            (module_name, type_defs, specs, records, Vec::new())
         };
 
         let entry = all_modules
@@ -75,6 +94,8 @@ pub fn cmd_bindgen(files: &[std::path::PathBuf], output: Option<&Path>, _module:
             .or_insert_with(ModuleInfo::new);
         entry.specs.extend(specs);
         entry.type_defs.extend(type_defs);
+        entry.records.extend(records);
+        entry.structs.extend(structs);
     }
 
     // Generate output
@@ -98,10 +119,12 @@ pub fn cmd_bindgen(files: &[std::path::PathBuf], output: Option<&Path>, _module:
     }
 }
 
-/// Module information including specs and type definitions.
+/// Module information including specs, type definitions, records, and structs.
 struct ModuleInfo {
     specs: Vec<ErlangSpec>,
     type_defs: Vec<ErlangTypeDef>,
+    records: Vec<ErlangRecord>,
+    structs: Vec<ElixirStruct>,
 }
 
 impl ModuleInfo {
@@ -109,6 +132,8 @@ impl ModuleInfo {
         Self {
             specs: Vec::new(),
             type_defs: Vec::new(),
+            records: Vec::new(),
+            structs: Vec::new(),
         }
     }
 }
@@ -120,6 +145,21 @@ struct ErlangTypeDef {
     #[allow(dead_code)]
     params: Vec<String>,
     definition: ErlangType,
+}
+
+/// An Erlang record definition (for structs).
+#[derive(Debug, Clone)]
+struct ErlangRecord {
+    name: String,
+    fields: Vec<(String, ErlangType)>,
+}
+
+/// An Elixir struct definition.
+#[derive(Debug, Clone)]
+struct ElixirStruct {
+    /// The module that defines this struct (e.g., "Jason.Error")
+    module: String,
+    fields: Vec<(String, ErlangType)>,
 }
 
 /// Type registry for resolving type references.
@@ -172,6 +212,8 @@ enum ErlangType {
     Option(Box<ErlangType>),
     /// Remote type like module:type()
     Remote(String, String),
+    /// Struct type %Module{field1: type1, field2: type2}
+    Struct { module: String, fields: Vec<(String, ErlangType)> },
     /// any() or term()
     Any,
 }
@@ -474,12 +516,25 @@ fn parse_elixir_type(s: &str) -> ErlangType {
 
     // Handle map %{} or map()
     if s.starts_with("%{") || s == "map()" || s == "map" {
+        // Check if it has typed fields: %{key: type, ...}
+        if s.starts_with("%{") && s.ends_with('}') {
+            let inner = &s[2..s.len()-1].trim();
+            if !inner.is_empty() && inner.contains("::") {
+                let fields = parse_elixir_struct_fields(inner);
+                if !fields.is_empty() {
+                    return ErlangType::Struct {
+                        module: String::new(), // Anonymous struct
+                        fields,
+                    };
+                }
+            }
+        }
         return ErlangType::Named("map".to_string());
     }
 
-    // Handle struct types %Module{}
+    // Handle struct types %Module{} or %__MODULE__{}
     if s.starts_with('%') && s.contains('{') {
-        return ErlangType::Named("map".to_string());
+        return parse_elixir_struct_type(s);
     }
 
     // Handle remote types: Module.type() or Module.type
@@ -599,6 +654,198 @@ fn parse_elixir_type_list(s: &str) -> Vec<ErlangType> {
         .collect()
 }
 
+/// Parse an Elixir struct type: %Module{field: type, ...} or %__MODULE__{...}
+fn parse_elixir_struct_type(s: &str) -> ErlangType {
+    let s = s.trim();
+
+    // Find the module name and fields part
+    let brace_pos = match s.find('{') {
+        Some(pos) => pos,
+        None => return ErlangType::Named("map".to_string()),
+    };
+
+    let module_part = &s[1..brace_pos]; // Skip leading %
+    let fields_part = &s[brace_pos..];
+
+    // Handle __MODULE__ or actual module name
+    let module = if module_part == "__MODULE__" {
+        String::new() // Will be filled in from context
+    } else {
+        module_part.to_string()
+    };
+
+    // Parse fields from {field: type, ...}
+    let fields = if fields_part.starts_with('{') && fields_part.ends_with('}') {
+        let inner = &fields_part[1..fields_part.len()-1];
+        if inner.is_empty() {
+            Vec::new()
+        } else {
+            parse_elixir_struct_fields(inner)
+        }
+    } else {
+        Vec::new()
+    };
+
+    ErlangType::Struct { module, fields }
+}
+
+/// Parse struct fields from "field1: type1, field2: type2" or "field1 :: type1, field2 :: type2"
+fn parse_elixir_struct_fields(s: &str) -> Vec<(String, ErlangType)> {
+    let mut fields = Vec::new();
+
+    for field in split_top_level(s, ',') {
+        let field = field.trim();
+        if field.is_empty() {
+            continue;
+        }
+
+        // Handle "field :: type" (Elixir type spec syntax)
+        if let Some(pos) = field.find("::") {
+            let name = field[..pos].trim().to_string();
+            let type_str = field[pos + 2..].trim();
+            let ty = parse_elixir_type(type_str);
+            fields.push((name, ty));
+        }
+        // Handle "field: type" (keyword list style)
+        else if let Some(pos) = field.find(':') {
+            let name = field[..pos].trim().to_string();
+            let type_str = field[pos + 1..].trim();
+            let ty = parse_elixir_type(type_str);
+            fields.push((name, ty));
+        }
+        // Handle "required(:field) => type" (map type spec)
+        else if field.starts_with("required(") || field.starts_with("optional(") {
+            if let Some(arrow_pos) = field.find("=>") {
+                let key_part = &field[..arrow_pos];
+                let type_str = field[arrow_pos + 2..].trim();
+
+                // Extract field name from required(:field) or optional(:field)
+                let name = key_part
+                    .trim_start_matches("required(")
+                    .trim_start_matches("optional(")
+                    .trim_end_matches(')')
+                    .trim()
+                    .trim_start_matches(':')
+                    .to_string();
+
+                let ty = parse_elixir_type(type_str);
+                fields.push((name, ty));
+            }
+        }
+    }
+
+    fields
+}
+
+/// Parse defstruct declarations from Elixir source.
+/// Handles: defstruct [:field1, :field2] and defstruct field1: nil, field2: value
+fn parse_elixir_structs(source: &str, module_name: &str) -> Vec<ElixirStruct> {
+    let mut structs = Vec::new();
+    let mut in_defstruct = false;
+    let mut defstruct_text = String::new();
+
+    for line in source.lines() {
+        let trimmed = line.trim();
+
+        // Skip comments
+        if trimmed.starts_with('#') {
+            continue;
+        }
+
+        if trimmed.starts_with("defstruct ") || trimmed == "defstruct" {
+            in_defstruct = true;
+            defstruct_text = trimmed.to_string();
+
+            // Check if defstruct is complete (single line)
+            if is_defstruct_complete(&defstruct_text) {
+                if let Some(st) = parse_single_defstruct(&defstruct_text, module_name) {
+                    structs.push(st);
+                }
+                in_defstruct = false;
+                defstruct_text.clear();
+            }
+        } else if in_defstruct {
+            defstruct_text.push(' ');
+            defstruct_text.push_str(trimmed);
+
+            if is_defstruct_complete(&defstruct_text) {
+                if let Some(st) = parse_single_defstruct(&defstruct_text, module_name) {
+                    structs.push(st);
+                }
+                in_defstruct = false;
+                defstruct_text.clear();
+            }
+        }
+    }
+
+    structs
+}
+
+/// Check if a defstruct declaration is complete.
+fn is_defstruct_complete(text: &str) -> bool {
+    let text = text.trim();
+    // Count brackets to ensure balanced
+    let open_brackets = text.chars().filter(|&c| c == '[').count();
+    let close_brackets = text.chars().filter(|&c| c == ']').count();
+
+    // Simple heuristic: defstruct ends when brackets are balanced
+    if open_brackets > 0 {
+        open_brackets == close_brackets
+    } else {
+        // For keyword list style: defstruct foo: nil, bar: nil
+        // Check if ends with something reasonable (not a comma)
+        !text.ends_with(',')
+    }
+}
+
+/// Parse a single defstruct declaration.
+fn parse_single_defstruct(text: &str, module_name: &str) -> Option<ElixirStruct> {
+    let text = text.trim_start_matches("defstruct").trim();
+
+    if text.is_empty() {
+        return Some(ElixirStruct {
+            module: module_name.trim_start_matches("Elixir.").to_string(),
+            fields: Vec::new(),
+        });
+    }
+
+    let mut fields = Vec::new();
+
+    // Handle list style: [:field1, :field2]
+    if text.starts_with('[') {
+        let inner = text.trim_start_matches('[').trim_end_matches(']');
+        for field in split_top_level(inner, ',') {
+            let field = field.trim();
+            if field.is_empty() {
+                continue;
+            }
+
+            // Field name starts with : for atoms
+            let name = field.trim_start_matches(':').to_string();
+            fields.push((name, ErlangType::Any));
+        }
+    } else {
+        // Handle keyword style: field1: nil, field2: default
+        for field in split_top_level(text, ',') {
+            let field = field.trim();
+            if field.is_empty() {
+                continue;
+            }
+
+            if let Some(colon_pos) = field.find(':') {
+                let name = field[..colon_pos].trim().to_string();
+                // Type is unknown from defstruct alone; we'll try to match with @type t
+                fields.push((name, ErlangType::Any));
+            }
+        }
+    }
+
+    Some(ElixirStruct {
+        module: module_name.trim_start_matches("Elixir.").to_string(),
+        fields,
+    })
+}
+
 /// Parse all -type declarations from Erlang source.
 fn parse_type_defs(source: &str) -> Vec<ErlangTypeDef> {
     let mut type_defs = Vec::new();
@@ -678,6 +925,106 @@ fn parse_single_type_def(text: &str) -> Option<ErlangTypeDef> {
         params,
         definition,
     })
+}
+
+/// Parse all -record declarations from Erlang source.
+/// Format: -record(name, {field1, field2 :: type, field3 = default :: type}).
+fn parse_erlang_records(source: &str) -> Vec<ErlangRecord> {
+    let mut records = Vec::new();
+    let mut in_record = false;
+    let mut record_text = String::new();
+
+    for line in source.lines() {
+        let trimmed = line.trim();
+
+        // Skip comments
+        if trimmed.starts_with('%') {
+            continue;
+        }
+
+        if trimmed.starts_with("-record(") {
+            in_record = true;
+            record_text = trimmed.to_string();
+
+            if record_text.ends_with(").") {
+                if let Some(rec) = parse_single_record(&record_text) {
+                    records.push(rec);
+                }
+                in_record = false;
+                record_text.clear();
+            }
+        } else if in_record {
+            record_text.push(' ');
+            record_text.push_str(trimmed);
+
+            if trimmed.ends_with(").") {
+                if let Some(rec) = parse_single_record(&record_text) {
+                    records.push(rec);
+                }
+                in_record = false;
+                record_text.clear();
+            }
+        }
+    }
+
+    records
+}
+
+/// Parse a single -record declaration.
+fn parse_single_record(text: &str) -> Option<ErlangRecord> {
+    // Format: -record(name, {field1, field2 :: type, field3 = default :: type}).
+    let text = text.trim_start_matches("-record(").trim();
+    let text = text.trim_end_matches(").");
+
+    // Find the comma separating name from fields
+    let comma_pos = text.find(',')?;
+    let name = text[..comma_pos].trim().to_string();
+
+    // Find the fields block { ... }
+    let fields_start = text.find('{')?;
+    let fields_end = text.rfind('}')?;
+    let fields_str = &text[fields_start + 1..fields_end];
+
+    let mut fields = Vec::new();
+    for field in split_top_level(fields_str, ',') {
+        let field = field.trim();
+        if field.is_empty() {
+            continue;
+        }
+
+        // Parse field: "name", "name :: type", "name = default", "name = default :: type"
+        let (field_name, field_type) = parse_record_field(field);
+        fields.push((field_name, field_type));
+    }
+
+    Some(ErlangRecord { name, fields })
+}
+
+/// Parse a single record field.
+fn parse_record_field(field: &str) -> (String, ErlangType) {
+    let field = field.trim();
+
+    // Check for type annotation: "name :: type" or "name = default :: type"
+    if let Some(type_pos) = field.find("::") {
+        // Get field name (before = or ::)
+        let name_part = &field[..type_pos];
+        let name = if let Some(eq_pos) = name_part.find('=') {
+            name_part[..eq_pos].trim().to_string()
+        } else {
+            name_part.trim().to_string()
+        };
+
+        let type_str = field[type_pos + 2..].trim();
+        let ty = parse_type(type_str);
+        (name, ty)
+    } else if let Some(eq_pos) = field.find('=') {
+        // Just "name = default" with no type
+        let name = field[..eq_pos].trim().to_string();
+        (name, ErlangType::Any)
+    } else {
+        // Just "name"
+        (field.to_string(), ErlangType::Any)
+    }
 }
 
 /// Parse all -spec declarations from Erlang source.
@@ -897,6 +1244,14 @@ fn resolve_type_vars_inner(
         ErlangType::Union(types) => {
             ErlangType::Union(types.iter().map(|t| resolve_type_vars_inner(t, type_var_map, visited)).collect())
         }
+        ErlangType::Struct { module, fields } => {
+            ErlangType::Struct {
+                module: module.clone(),
+                fields: fields.iter()
+                    .map(|(n, t)| (n.clone(), resolve_type_vars_inner(t, type_var_map, visited)))
+                    .collect(),
+            }
+        }
         _ => ty.clone(),
     }
 }
@@ -944,6 +1299,14 @@ fn resolve_type_refs_inner(
         }
         ErlangType::Union(types) => {
             ErlangType::Union(types.iter().map(|t| resolve_type_refs_inner(t, registry, visited)).collect())
+        }
+        ErlangType::Struct { module, fields } => {
+            ErlangType::Struct {
+                module: module.clone(),
+                fields: fields.iter()
+                    .map(|(n, t)| (n.clone(), resolve_type_refs_inner(t, registry, visited)))
+                    .collect(),
+            }
         }
         _ => ty.clone(),
     }
@@ -1258,6 +1621,40 @@ fn parse_type(s: &str) -> ErlangType {
                 "maybe_improper_list" | "nonempty_maybe_improper_list" | "nonempty_improper_list" => {
                     return ErlangType::List(Box::new(ErlangType::Any));
                 }
+                // Handle basic types with () suffix
+                "integer" | "non_neg_integer" | "pos_integer" | "neg_integer" | "number" => {
+                    return ErlangType::Named("int".to_string());
+                }
+                "atom" | "module" => {
+                    return ErlangType::Named("atom".to_string());
+                }
+                "boolean" => {
+                    return ErlangType::Named("boolean".to_string());
+                }
+                "binary" | "bitstring" => {
+                    return ErlangType::Named("binary".to_string());
+                }
+                "float" => {
+                    return ErlangType::Named("float".to_string());
+                }
+                "string" => {
+                    return ErlangType::Named("string".to_string());
+                }
+                "pid" => {
+                    return ErlangType::Named("pid".to_string());
+                }
+                "reference" | "ref" => {
+                    return ErlangType::Named("ref".to_string());
+                }
+                "map" => {
+                    return ErlangType::Named("map".to_string());
+                }
+                "any" | "term" => {
+                    return ErlangType::Any;
+                }
+                "tuple" | "iodata" | "iolist" | "no_return" | "none" => {
+                    return ErlangType::Any;
+                }
                 _ => {
                     // Other parameterized types
                     return ErlangType::Named(name.to_string());
@@ -1453,6 +1850,78 @@ fn generate_dreamt(modules: &HashMap<String, ModuleInfo>) -> String {
     let mut module_names: Vec<_> = modules.keys().collect();
     module_names.sort();
 
+    // Generate commented type declarations for records and structs
+    // NOTE: extern type syntax is not yet supported by the parser, so these are
+    // generated as comments for documentation purposes. Future parser updates
+    // could enable these as actual type declarations.
+    let mut generated_types: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut has_type_comments = false;
+
+    for module_name in &module_names {
+        let info = &modules[*module_name];
+
+        // Generate commented extern types for Erlang records
+        for record in &info.records {
+            let type_name = sanitize_identifier(&record.name);
+            if generated_types.contains(&type_name) {
+                continue;
+            }
+
+            if !has_type_comments {
+                output.push_str("// Type declarations (for documentation - extern type not yet supported):\n");
+                has_type_comments = true;
+            }
+
+            output.push_str(&format!("// Record from: {}\n", module_name));
+            output.push_str(&format!("// extern type {} = struct {{\n", type_name));
+
+            for (field_name, field_type) in &record.fields {
+                let safe_field = sanitize_identifier(field_name);
+                output.push_str(&format!(
+                    "//     {}: {},\n",
+                    safe_field,
+                    erlang_type_to_dream(field_type)
+                ));
+            }
+
+            output.push_str("// };\n\n");
+            generated_types.insert(type_name);
+        }
+
+        // Generate commented extern types for Elixir structs
+        for struct_def in &info.structs {
+            let type_name = sanitize_module_name(&struct_def.module);
+            if generated_types.contains(&type_name) {
+                continue;
+            }
+
+            if !has_type_comments {
+                output.push_str("// Type declarations (for documentation - extern type not yet supported):\n");
+                has_type_comments = true;
+            }
+
+            output.push_str(&format!("// Struct: {}\n", struct_def.module));
+            output.push_str(&format!("// extern type {} = struct {{\n", type_name));
+
+            for (field_name, field_type) in &struct_def.fields {
+                let safe_field = sanitize_identifier(field_name);
+                output.push_str(&format!(
+                    "//     {}: {},\n",
+                    safe_field,
+                    erlang_type_to_dream(field_type)
+                ));
+            }
+
+            output.push_str("// };\n\n");
+            generated_types.insert(type_name);
+        }
+    }
+
+    if has_type_comments {
+        output.push_str("\n");
+    }
+
+    // Then generate extern mod declarations with functions
     for module_name in module_names {
         let info = &modules[module_name];
         if info.specs.is_empty() {
@@ -1576,6 +2045,15 @@ fn erlang_type_to_dream(ty: &ErlangType) -> String {
         }
         ErlangType::Option(inner) => {
             format!("Option<{}>", erlang_type_to_dream(inner))
+        }
+        ErlangType::Struct { module, fields: _ } => {
+            // For now, emit the struct type name if known, otherwise map
+            if module.is_empty() {
+                "map".to_string()
+            } else {
+                // Use a type reference that will match the extern type
+                sanitize_module_name(module)
+            }
         }
     }
 }
@@ -1728,6 +2206,8 @@ mod tests {
                 return_type: ErlangType::Any,
             }],
             type_defs: Vec::new(),
+            records: Vec::new(),
+            structs: Vec::new(),
         });
 
         let output = generate_dreamt(&modules);
@@ -1751,6 +2231,8 @@ mod tests {
                 return_type: ErlangType::List(Box::new(ErlangType::Any)),
             }],
             type_defs: Vec::new(),
+            records: Vec::new(),
+            structs: Vec::new(),
         });
 
         let output = generate_dreamt(&modules);
@@ -1822,5 +2304,120 @@ mod tests {
     fn test_parse_elixir_result_pattern() {
         let ty = parse_elixir_type("{:ok, String.t()} | {:error, Exception.t()}");
         assert!(matches!(ty, ErlangType::Result(_, _)));
+    }
+
+    #[test]
+    fn test_parse_erlang_record_simple() {
+        let records = parse_erlang_records("-record(person, {name, age}).");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].name, "person");
+        assert_eq!(records[0].fields.len(), 2);
+        assert_eq!(records[0].fields[0].0, "name");
+        assert_eq!(records[0].fields[1].0, "age");
+    }
+
+    #[test]
+    fn test_parse_erlang_record_with_types() {
+        let records = parse_erlang_records("-record(user, {name :: string(), age :: integer()}).");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].name, "user");
+        assert_eq!(records[0].fields.len(), 2);
+        assert_eq!(records[0].fields[0].0, "name");
+        assert!(matches!(records[0].fields[0].1, ErlangType::Named(ref n) if n == "string"));
+        assert_eq!(records[0].fields[1].0, "age");
+        assert!(matches!(records[0].fields[1].1, ErlangType::Named(ref n) if n == "int"));
+    }
+
+    #[test]
+    fn test_parse_erlang_record_with_defaults() {
+        let records = parse_erlang_records("-record(config, {timeout = 5000 :: integer(), host :: string()}).");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].name, "config");
+        assert_eq!(records[0].fields.len(), 2);
+        assert_eq!(records[0].fields[0].0, "timeout");
+        assert_eq!(records[0].fields[1].0, "host");
+    }
+
+    #[test]
+    fn test_parse_elixir_defstruct_list_style() {
+        let structs = parse_elixir_structs("defstruct [:name, :age]", "Elixir.Person");
+        assert_eq!(structs.len(), 1);
+        assert_eq!(structs[0].module, "Person");
+        assert_eq!(structs[0].fields.len(), 2);
+        assert_eq!(structs[0].fields[0].0, "name");
+        assert_eq!(structs[0].fields[1].0, "age");
+    }
+
+    #[test]
+    fn test_parse_elixir_defstruct_keyword_style() {
+        let structs = parse_elixir_structs("defstruct name: nil, age: 0", "Elixir.User");
+        assert_eq!(structs.len(), 1);
+        assert_eq!(structs[0].module, "User");
+        assert_eq!(structs[0].fields.len(), 2);
+        assert_eq!(structs[0].fields[0].0, "name");
+        assert_eq!(structs[0].fields[1].0, "age");
+    }
+
+    #[test]
+    fn test_parse_elixir_struct_type() {
+        let ty = parse_elixir_type("%User{name: String.t(), age: integer()}");
+        assert!(matches!(ty, ErlangType::Struct { ref module, ref fields }
+            if module == "User" && fields.len() == 2));
+    }
+
+    #[test]
+    fn test_parse_elixir_module_struct_type() {
+        let ty = parse_elixir_type("%__MODULE__{message: String.t()}");
+        assert!(matches!(ty, ErlangType::Struct { ref module, ref fields }
+            if module.is_empty() && fields.len() == 1));
+    }
+
+    #[test]
+    fn test_generate_extern_type_for_record() {
+        let mut modules = HashMap::new();
+        modules.insert("test".to_string(), ModuleInfo {
+            specs: Vec::new(),
+            type_defs: Vec::new(),
+            records: vec![ErlangRecord {
+                name: "person".to_string(),
+                fields: vec![
+                    ("name".to_string(), ErlangType::Named("string".to_string())),
+                    ("age".to_string(), ErlangType::Named("int".to_string())),
+                ],
+            }],
+            structs: Vec::new(),
+        });
+
+        let output = generate_dreamt(&modules);
+        // Types are generated as comments since extern type isn't supported yet
+        assert!(output.contains("// extern type person = struct {"),
+            "Expected commented extern type declaration, got:\n{}", output);
+        assert!(output.contains("//     name: string,"),
+            "Expected name field, got:\n{}", output);
+        assert!(output.contains("//     age: int,"),
+            "Expected age field, got:\n{}", output);
+    }
+
+    #[test]
+    fn test_generate_extern_type_for_struct() {
+        let mut modules = HashMap::new();
+        modules.insert("Elixir.Jason.Error".to_string(), ModuleInfo {
+            specs: Vec::new(),
+            type_defs: Vec::new(),
+            records: Vec::new(),
+            structs: vec![ElixirStruct {
+                module: "Jason.Error".to_string(),
+                fields: vec![
+                    ("message".to_string(), ErlangType::Named("string".to_string())),
+                ],
+            }],
+        });
+
+        let output = generate_dreamt(&modules);
+        // Types are generated as comments since extern type isn't supported yet
+        assert!(output.contains("// extern type jason_error = struct {"),
+            "Expected commented extern type declaration, got:\n{}", output);
+        assert!(output.contains("//     message: string,"),
+            "Expected message field, got:\n{}", output);
     }
 }
