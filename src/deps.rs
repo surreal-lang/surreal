@@ -637,13 +637,15 @@ impl DepsManager {
         let modules_str = modules.join(", ");
 
         // Generate the .app file content
+        // Note: We don't include 'elixir' as a dependency since we're running
+        // on a pure Erlang runtime without Elixir installed
         let app_content = format!(
             r#"{{application, {name}, [
   {{description, "An Elixir dependency"}},
   {{vsn, "{version}"}},
   {{modules, [{modules}]}},
   {{registered, []}},
-  {{applications, [kernel, stdlib, elixir]}}
+  {{applications, [kernel, stdlib]}}
 ]}}.
 "#,
             name = name,

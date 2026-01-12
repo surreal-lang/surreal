@@ -1,12 +1,13 @@
 // HTTP API Example
 // Uses cowboy (Erlang) for HTTP server
 
+/// Application module - implements OTP application behavior
 mod http_api {
-    /// Start the HTTP server on port 8080
-    pub fn main() -> atom {
-        // Start cowboy and its dependencies
-        :application::ensure_all_started(:cowboy);
+    use io::println;
 
+    /// OTP Application start callback
+    /// Called automatically when the application starts
+    pub fn start(_type: atom, _args: [any]) -> Result<pid, any> {
         let dispatch = compile_routes();
 
         // Build the options map using maps::put
@@ -14,27 +15,23 @@ mod http_api {
         let opts = :maps::put(:env, env_map, :maps::new());
 
         // Start cowboy HTTP listener
-        let result = :cowboy::start_clear(
-            :http_listener,
-            [(:port, 8080)],
-            opts
-        );
+        match :cowboy::start_clear(:http_listener, [(:port, 8080)], opts) {
+            (:ok, pid) => {
+                println("Server started on http://localhost:8080");
+                println("Try: curl http://localhost:8080/api/hello");
+                println("     curl http://localhost:8080/api/users");
 
-        // Check if start was successful using element/2
-        let status = :erlang::element(1, result);
-        if status == :ok {
-            :io::format("Server started on http://localhost:8080~n", []);
-            :io::format("Try: curl http://localhost:8080/api/hello~n", []);
-            :io::format("     curl http://localhost:8080/api/users~n", []);
-            // Keep the process alive
-            receive {
-                :stop => :ok
-            }
-        } else {
-            let reason = :erlang::element(2, result);
-            :io::format("Failed to start server: ~p~n", [reason]);
-            :error
+                Ok(pid)
+            },
+            (:error, reason) => Err(reason),
+            _ => Err(:unknown_error)
         }
+    }
+
+    /// OTP Application stop callback
+    pub fn stop(_state: any) -> atom {
+        :cowboy::stop_listener(:http_listener);
+        :ok
     }
 
     /// Compile cowboy routes

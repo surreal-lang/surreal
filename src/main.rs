@@ -650,17 +650,31 @@ fn generate_app_file(
         format!("kernel, stdlib, {}", deps_str)
     };
 
+    // Build the mod entry if an application module is configured
+    let mod_entry = if let Some(ref app_config) = config.application {
+        if let Some(ref module) = app_config.module {
+            // Build fully qualified module name: dream::package::module
+            let full_module = format!("dream::{}::{}", app_name, module);
+            format!("  {{mod, {{'{}', []}}}},\n", full_module)
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
+
     let app_content = format!(
         r#"{{application, {app_name}, [
   {{description, "A Dream application"}},
   {{vsn, "{version}"}},
-  {{modules, [{modules}]}},
+{mod_entry}  {{modules, [{modules}]}},
   {{registered, []}},
   {{applications, [{applications}]}}
 ]}}.
 "#,
         app_name = app_name,
         version = version,
+        mod_entry = mod_entry,
         modules = modules_str,
         applications = applications,
     );
@@ -1074,18 +1088,25 @@ fn cmd_run(
 /// Run in application mode - start the supervision tree and keep running.
 fn run_application(
     beam_dir: &Path,
-    module_name: &str,
+    _module_name: &str,
     app_config: &ApplicationConfig,
     stdlib_dir: Option<&PathBuf>,
     deps_dirs: &[PathBuf],
 ) -> ExitCode {
+    // Get the OTP application name from config (not the module name)
+    let app_name = if let Ok((_, config)) = ProjectConfig::from_project_root() {
+        config.package.name
+    } else {
+        return ExitCode::from(1);
+    };
+
     println!();
-    println!("Starting application '{}'...", module_name);
+    println!("Starting application '{}'...", app_name);
     println!();
 
     // Build the eval expression for application mode:
     // 1. Set environment variables from config
-    // 2. Call the Application's start/2 function
+    // 2. Use application:ensure_all_started/1 to start deps and our app
     // 3. Block forever (receive loop)
     let mut eval_parts = Vec::new();
 
@@ -1094,23 +1115,24 @@ fn run_application(
         let erlang_value = toml_to_erlang(value);
         eval_parts.push(format!(
             "application:set_env('{}', '{}', {})",
-            module_name, key, erlang_value
+            app_name, key, erlang_value
         ));
     }
 
-    // Start the application
+    // Start all dependencies and then our application using OTP
+    // This reads the .app file's {applications, [...]} and {mod, {...}} entries
     eval_parts.push(format!(
-        "case '{}':start(normal, []) of \
-            {{ok, _Pid}} -> ok; \
-            {{error, Reason}} -> io:format(\"Failed to start: ~p~n\", [Reason]), halt(1) \
+        "case application:ensure_all_started({}) of \
+            {{ok, _Started}} -> ok; \
+            {{error, {{_App, Reason}}}} -> io:format(\"Failed to start: ~p~n\", [Reason]), halt(1) \
         end",
-        module_name
+        app_name
     ));
 
     // Print startup message
     eval_parts.push(format!(
         "io:format(\"Application '{}' started. Press Ctrl+C to stop.~n\", [])",
-        module_name
+        app_name
     ));
 
     // Block forever - the supervision tree handles everything
