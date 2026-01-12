@@ -767,6 +767,45 @@ fn find_stubs_dir() -> Option<PathBuf> {
     None
 }
 
+/// Find Elixir's ebin directories for stdlib support.
+/// This is needed when using Elixir dependencies that require Elixir.Enum, etc.
+fn find_elixir_ebin_dirs() -> Vec<PathBuf> {
+    // Try to run elixir to get its lib directory
+    let output = Command::new("elixir")
+        .arg("-e")
+        .arg("IO.puts(:code.lib_dir(:elixir))")
+        .output();
+
+    let elixir_lib = match output {
+        Ok(out) if out.status.success() => {
+            let path_str = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            PathBuf::from(path_str)
+        }
+        _ => return Vec::new(), // Elixir not found
+    };
+
+    // The lib directory structure is: elixir_root/lib/{app}/ebin
+    // elixir_lib is like: /path/to/elixir/lib/elixir
+    // We want: /path/to/elixir/lib/*/ebin
+    let lib_root = match elixir_lib.parent() {
+        Some(p) => p,
+        None => return Vec::new(),
+    };
+
+    // Collect ebin directories for all Elixir stdlib apps
+    let mut ebin_dirs = Vec::new();
+    if let Ok(entries) = fs::read_dir(lib_root) {
+        for entry in entries.flatten() {
+            let ebin_path = entry.path().join("ebin");
+            if ebin_path.is_dir() {
+                ebin_dirs.push(ebin_path);
+            }
+        }
+    }
+
+    ebin_dirs
+}
+
 /// Load .dreamt stub files and parse them into modules.
 /// These provide type information for FFI calls to external libraries.
 fn load_stub_modules() -> Vec<Module> {
@@ -1054,7 +1093,7 @@ fn cmd_run(
     let has_script_module = script_beam.exists();
 
     // Get deps ebin paths if in project mode
-    let deps_dirs: Vec<PathBuf> = if file.is_none() {
+    let mut deps_dirs: Vec<PathBuf> = if file.is_none() {
         // Re-load config to get project root for DepsManager
         if let Ok((project_root, config)) = ProjectConfig::from_project_root() {
             let deps_manager = DepsManager::new(project_root, config);
@@ -1065,6 +1104,10 @@ fn cmd_run(
     } else {
         Vec::new()
     };
+
+    // Add Elixir stdlib paths if Elixir is installed
+    // This enables Elixir dependencies that require Elixir.Enum, etc.
+    deps_dirs.extend(find_elixir_ebin_dirs());
 
     if use_app_mode {
         run_application(&beam_dir, &module_name, &app_config.unwrap(), stdlib_dir.as_ref(), &deps_dirs)
