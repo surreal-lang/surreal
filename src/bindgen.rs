@@ -1,7 +1,8 @@
-//! Generate .dreamt type stubs from Erlang source files.
+//! Generate .dreamt type stubs from Erlang and Elixir source files.
 //!
-//! Parses Erlang -spec and -type declarations and converts them to Dream extern mod syntax.
-//! Detects Result/Option patterns and generates appropriate Dream types.
+//! Parses Erlang -spec/-type and Elixir @spec/@type declarations and converts them
+//! to Dream extern mod syntax. Detects Result/Option patterns and generates
+//! appropriate Dream types.
 
 use std::collections::HashMap;
 use std::fs;
@@ -27,30 +28,53 @@ pub fn cmd_bindgen(files: &[std::path::PathBuf], output: Option<&Path>, _module:
             }
         };
 
-        // Get module name from -module() declaration or filename
-        let module_name = extract_module_name(&source)
-            .unwrap_or_else(|| {
-                file.file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("unknown")
-                    .to_string()
-            });
+        // Detect file type by extension
+        let extension = file.extension().and_then(|s| s.to_str()).unwrap_or("");
+        let is_elixir = extension == "ex" || extension == "exs";
 
-        // Parse all -type declarations first to build registry
-        let type_defs = parse_type_defs(&source);
-        let mut registry = TypeRegistry::new();
-        for td in type_defs {
-            registry.register(td);
-        }
+        let (module_name, type_defs, specs) = if is_elixir {
+            // Parse Elixir file
+            let module_name = extract_elixir_module_name(&source)
+                .unwrap_or_else(|| {
+                    file.file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("unknown")
+                        .to_string()
+                });
 
-        // Parse all -spec declarations with type resolution
-        let specs = parse_specs(&source, &registry);
+            let type_defs = parse_elixir_type_defs(&source);
+            let mut registry = TypeRegistry::new();
+            for td in &type_defs {
+                registry.register(td.clone());
+            }
 
-        all_modules
+            let specs = parse_elixir_specs(&source, &registry);
+            (module_name, type_defs, specs)
+        } else {
+            // Parse Erlang file
+            let module_name = extract_module_name(&source)
+                .unwrap_or_else(|| {
+                    file.file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("unknown")
+                        .to_string()
+                });
+
+            let type_defs = parse_type_defs(&source);
+            let mut registry = TypeRegistry::new();
+            for td in &type_defs {
+                registry.register(td.clone());
+            }
+
+            let specs = parse_specs(&source, &registry);
+            (module_name, type_defs, specs)
+        };
+
+        let entry = all_modules
             .entry(module_name)
-            .or_insert_with(ModuleInfo::new)
-            .specs
-            .extend(specs);
+            .or_insert_with(ModuleInfo::new);
+        entry.specs.extend(specs);
+        entry.type_defs.extend(type_defs);
     }
 
     // Generate output
@@ -77,11 +101,15 @@ pub fn cmd_bindgen(files: &[std::path::PathBuf], output: Option<&Path>, _module:
 /// Module information including specs and type definitions.
 struct ModuleInfo {
     specs: Vec<ErlangSpec>,
+    type_defs: Vec<ErlangTypeDef>,
 }
 
 impl ModuleInfo {
     fn new() -> Self {
-        Self { specs: Vec::new() }
+        Self {
+            specs: Vec::new(),
+            type_defs: Vec::new(),
+        }
     }
 }
 
@@ -148,7 +176,7 @@ enum ErlangType {
     Any,
 }
 
-/// Extract module name from -module(name). declaration.
+/// Extract module name from -module(name). declaration (Erlang).
 fn extract_module_name(source: &str) -> Option<String> {
     for line in source.lines() {
         let trimmed = line.trim();
@@ -163,6 +191,412 @@ fn extract_module_name(source: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Extract module name from defmodule declaration (Elixir).
+/// Handles: defmodule Foo.Bar do, defmodule Foo.Bar.Baz do
+fn extract_elixir_module_name(source: &str) -> Option<String> {
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("defmodule ") {
+            // defmodule Foo.Bar do
+            let rest = trimmed.strip_prefix("defmodule ")?.trim();
+            // Find the end of module name (before 'do' or ',')
+            let end = rest.find(" do")
+                .or_else(|| rest.find(','))
+                .unwrap_or(rest.len());
+            let module_name = rest[..end].trim();
+            // Return with Elixir. prefix for proper BEAM name
+            return Some(format!("Elixir.{}", module_name));
+        }
+    }
+    None
+}
+
+/// Parse all @type declarations from Elixir source.
+fn parse_elixir_type_defs(source: &str) -> Vec<ErlangTypeDef> {
+    let mut type_defs = Vec::new();
+    let mut in_type = false;
+    let mut type_text = String::new();
+
+    for line in source.lines() {
+        let trimmed = line.trim();
+
+        // Skip comments
+        if trimmed.starts_with('#') {
+            continue;
+        }
+
+        // Look for @type or @typep or @opaque
+        if trimmed.starts_with("@type ") || trimmed.starts_with("@typep ") || trimmed.starts_with("@opaque ") {
+            in_type = true;
+            type_text = trimmed.to_string();
+
+            // Check if type is complete (no trailing operators suggesting continuation)
+            if is_elixir_type_complete(&type_text) {
+                if let Some(td) = parse_elixir_single_type_def(&type_text) {
+                    type_defs.push(td);
+                }
+                in_type = false;
+                type_text.clear();
+            }
+        } else if in_type {
+            type_text.push(' ');
+            type_text.push_str(trimmed);
+
+            if is_elixir_type_complete(&type_text) {
+                if let Some(td) = parse_elixir_single_type_def(&type_text) {
+                    type_defs.push(td);
+                }
+                in_type = false;
+                type_text.clear();
+            }
+        }
+    }
+
+    type_defs
+}
+
+/// Check if an Elixir type definition is complete.
+fn is_elixir_type_complete(text: &str) -> bool {
+    let text = text.trim();
+    // A type is incomplete if it ends with | or ::
+    !text.ends_with('|') && !text.ends_with("::")
+}
+
+/// Parse a single Elixir @type declaration.
+fn parse_elixir_single_type_def(text: &str) -> Option<ErlangTypeDef> {
+    // Format: @type name :: definition
+    // Or: @type name(param) :: definition
+    let text = text.trim_start_matches("@type")
+        .trim_start_matches("@typep")
+        .trim_start_matches("@opaque")
+        .trim();
+
+    // Find :: separator
+    let def_pos = text.find("::")?;
+
+    // Parse name and params
+    let name_part = text[..def_pos].trim();
+    let (name, params) = if let Some(paren_pos) = name_part.find('(') {
+        let name = name_part[..paren_pos].trim().to_string();
+        let params_end = name_part.rfind(')')?;
+        let params_str = &name_part[paren_pos + 1..params_end];
+        let params: Vec<String> = if params_str.trim().is_empty() {
+            Vec::new()
+        } else {
+            split_top_level(params_str, ',')
+                .into_iter()
+                .map(|s| s.trim().to_string())
+                .collect()
+        };
+        (name, params)
+    } else {
+        (name_part.to_string(), Vec::new())
+    };
+
+    // Parse definition (convert Elixir types to Erlang-compatible format)
+    let def_str = text[def_pos + 2..].trim();
+    let definition = parse_elixir_type(def_str);
+
+    Some(ErlangTypeDef {
+        name,
+        params,
+        definition,
+    })
+}
+
+/// Parse all @spec declarations from Elixir source.
+fn parse_elixir_specs(source: &str, registry: &TypeRegistry) -> Vec<ErlangSpec> {
+    let mut specs = Vec::new();
+    let mut in_spec = false;
+    let mut spec_text = String::new();
+
+    for line in source.lines() {
+        let trimmed = line.trim();
+
+        // Skip comments
+        if trimmed.starts_with('#') {
+            continue;
+        }
+
+        if trimmed.starts_with("@spec ") {
+            in_spec = true;
+            spec_text = trimmed.to_string();
+
+            // Check if spec is complete
+            if is_elixir_spec_complete(&spec_text) {
+                if let Some(spec) = parse_elixir_single_spec(&spec_text, registry) {
+                    specs.push(spec);
+                }
+                in_spec = false;
+                spec_text.clear();
+            }
+        } else if in_spec {
+            spec_text.push(' ');
+            spec_text.push_str(trimmed);
+
+            if is_elixir_spec_complete(&spec_text) {
+                if let Some(spec) = parse_elixir_single_spec(&spec_text, registry) {
+                    specs.push(spec);
+                }
+                in_spec = false;
+                spec_text.clear();
+            }
+        }
+    }
+
+    specs
+}
+
+/// Check if an Elixir spec is complete.
+fn is_elixir_spec_complete(text: &str) -> bool {
+    let text = text.trim();
+    // A spec is incomplete if it ends with | or ::
+    !text.ends_with('|') && !text.ends_with("::")
+}
+
+/// Parse a single Elixir @spec declaration.
+fn parse_elixir_single_spec(spec: &str, registry: &TypeRegistry) -> Option<ErlangSpec> {
+    // Format: @spec function_name(type1, type2) :: return_type
+    // Or: @spec function_name(arg1 :: type1, arg2 :: type2) :: return_type
+    let spec = spec.trim_start_matches("@spec").trim();
+
+    // Find function name
+    let paren_pos = spec.find('(')?;
+    let name = spec[..paren_pos].trim().to_string();
+
+    // Skip operators and internal functions
+    if name.starts_with('_') || name.is_empty() {
+        return None;
+    }
+
+    // Find :: separator for return type (after closing paren)
+    let close_paren = find_matching_paren(spec, paren_pos)?;
+    let rest = &spec[close_paren + 1..];
+    let arrow_pos = rest.find("::")?;
+    let return_str = rest[arrow_pos + 2..].trim();
+
+    // Parse parameters
+    let params_str = &spec[paren_pos + 1..close_paren];
+    let params = parse_elixir_param_list(params_str, registry);
+
+    // Parse return type
+    let mut return_type = parse_elixir_type(return_str);
+    return_type = resolve_type_refs(&return_type, registry);
+    return_type = detect_result_option_pattern(return_type);
+
+    Some(ErlangSpec {
+        name,
+        params,
+        return_type,
+    })
+}
+
+/// Find the matching closing parenthesis.
+fn find_matching_paren(s: &str, open_pos: usize) -> Option<usize> {
+    let mut depth = 0;
+    for (i, c) in s[open_pos..].char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(open_pos + i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Parse Elixir parameter list.
+fn parse_elixir_param_list(s: &str, registry: &TypeRegistry) -> Vec<(String, ErlangType)> {
+    if s.trim().is_empty() {
+        return Vec::new();
+    }
+
+    split_top_level(s, ',')
+        .into_iter()
+        .enumerate()
+        .map(|(i, t)| {
+            let t = t.trim();
+            // Check for "name :: type" annotation
+            if let Some(pos) = t.find("::") {
+                let param_name = sanitize_param_name(t[..pos].trim());
+                let type_str = t[pos + 2..].trim();
+                let mut ty = parse_elixir_type(type_str);
+                ty = resolve_type_refs(&ty, registry);
+                (param_name, ty)
+            } else {
+                // Just a type
+                let mut ty = parse_elixir_type(t);
+                ty = resolve_type_refs(&ty, registry);
+                (format!("arg{}", i), ty)
+            }
+        })
+        .collect()
+}
+
+/// Parse an Elixir type expression.
+fn parse_elixir_type(s: &str) -> ErlangType {
+    let s = s.trim();
+
+    if s.is_empty() {
+        return ErlangType::Any;
+    }
+
+    // Handle Elixir-specific type syntax
+
+    // Handle union types (A | B)
+    let parts = split_top_level(s, '|');
+    if parts.len() > 1 {
+        let types: Vec<ErlangType> = parts.iter().map(|p| parse_elixir_type(p.trim())).collect();
+        return detect_result_option_pattern(ErlangType::Union(types));
+    }
+
+    // Handle tuple {A, B, C}
+    if s.starts_with('{') && s.ends_with('}') {
+        let inner = &s[1..s.len()-1];
+        let elements = parse_elixir_type_list(inner);
+        return ErlangType::Tuple(elements);
+    }
+
+    // Handle list [T]
+    if s.starts_with('[') && s.ends_with(']') {
+        let inner = &s[1..s.len()-1];
+        if inner.is_empty() {
+            return ErlangType::List(Box::new(ErlangType::Any));
+        }
+        return ErlangType::List(Box::new(parse_elixir_type(inner)));
+    }
+
+    // Handle map %{} or map()
+    if s.starts_with("%{") || s == "map()" || s == "map" {
+        return ErlangType::Named("map".to_string());
+    }
+
+    // Handle struct types %Module{}
+    if s.starts_with('%') && s.contains('{') {
+        return ErlangType::Named("map".to_string());
+    }
+
+    // Handle remote types: Module.type() or Module.type
+    if s.contains('.') && !s.starts_with(':') && !s.starts_with('"') {
+        if let Some(dot_pos) = s.rfind('.') {
+            let module = &s[..dot_pos];
+            let rest = &s[dot_pos + 1..];
+            let type_name = if let Some(paren_pos) = rest.find('(') {
+                &rest[..paren_pos]
+            } else {
+                rest
+            };
+
+            // Handle common Elixir types
+            match (module, type_name) {
+                ("String", "t") => return ErlangType::Named("string".to_string()),
+                ("Integer", "t") => return ErlangType::Named("int".to_string()),
+                ("Atom", "t") => return ErlangType::Named("atom".to_string()),
+                ("Exception", "t") => return ErlangType::Any,
+                _ => return ErlangType::Remote(module.to_string(), type_name.to_string()),
+            }
+        }
+    }
+
+    // Handle atom literals :ok, :error, etc.
+    if s.starts_with(':') {
+        let atom_name = s.trim_start_matches(':');
+        return ErlangType::AtomLiteral(atom_name.to_string());
+    }
+
+    // Handle parameterized types: name(args)
+    if let Some(paren_pos) = s.find('(') {
+        if s.ends_with(')') {
+            let name = &s[..paren_pos];
+            let args_str = &s[paren_pos + 1..s.len() - 1];
+
+            match name {
+                "list" => {
+                    if args_str.is_empty() {
+                        return ErlangType::List(Box::new(ErlangType::Any));
+                    }
+                    return ErlangType::List(Box::new(parse_elixir_type(args_str)));
+                }
+                "nonempty_list" => {
+                    if args_str.is_empty() {
+                        return ErlangType::List(Box::new(ErlangType::Any));
+                    }
+                    return ErlangType::List(Box::new(parse_elixir_type(args_str)));
+                }
+                // Handle basic types with () suffix
+                "any" | "term" => return ErlangType::Any,
+                "atom" => return ErlangType::Named("atom".to_string()),
+                "boolean" => return ErlangType::Named("boolean".to_string()),
+                "integer" | "non_neg_integer" | "pos_integer" | "neg_integer" | "number" => {
+                    return ErlangType::Named("int".to_string());
+                }
+                "float" => return ErlangType::Named("float".to_string()),
+                "binary" | "bitstring" => return ErlangType::Named("binary".to_string()),
+                "pid" => return ErlangType::Named("pid".to_string()),
+                "reference" => return ErlangType::Named("ref".to_string()),
+                "map" => return ErlangType::Named("map".to_string()),
+                "tuple" => return ErlangType::Any,
+                "iodata" | "iolist" => return ErlangType::Any,
+                "charlist" => return ErlangType::Named("string".to_string()),
+                "keyword" => return ErlangType::List(Box::new(ErlangType::Any)),
+                "no_return" => return ErlangType::Any,
+                _ => {
+                    return ErlangType::Named(name.to_string());
+                }
+            }
+        }
+    }
+
+    // Handle simple Elixir types
+    match s {
+        "any" | "term" | "any()" | "term()" => ErlangType::Any,
+        "atom" | "atom()" => ErlangType::Named("atom".to_string()),
+        "boolean" | "boolean()" | "bool" => ErlangType::Named("boolean".to_string()),
+        "true" => ErlangType::AtomLiteral("true".to_string()),
+        "false" => ErlangType::AtomLiteral("false".to_string()),
+        "nil" => ErlangType::AtomLiteral("nil".to_string()),
+        "integer" | "integer()" | "non_neg_integer" | "non_neg_integer()" |
+        "pos_integer" | "pos_integer()" | "neg_integer" | "neg_integer()" |
+        "number" | "number()" => ErlangType::Named("int".to_string()),
+        "float" | "float()" => ErlangType::Named("float".to_string()),
+        "binary" | "binary()" | "bitstring" | "bitstring()" => ErlangType::Named("binary".to_string()),
+        "pid" | "pid()" => ErlangType::Named("pid".to_string()),
+        "reference" | "reference()" => ErlangType::Named("ref".to_string()),
+        "map" | "map()" => ErlangType::Named("map".to_string()),
+        "tuple" | "tuple()" => ErlangType::Any,
+        "iodata" | "iodata()" | "iolist" | "iolist()" => ErlangType::Any,
+        "charlist" | "charlist()" => ErlangType::Named("string".to_string()),
+        "keyword" | "keyword()" => ErlangType::List(Box::new(ErlangType::Any)),
+        "no_return" | "no_return()" => ErlangType::Any,
+        // Elixir shorthand types
+        "t" => ErlangType::Any, // Usually refers to the module's main type
+        s if s.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) => {
+            // Type variable
+            ErlangType::Var(s.to_string())
+        }
+        _ => {
+            // Unknown type name
+            ErlangType::Named(s.to_string())
+        }
+    }
+}
+
+/// Parse a comma-separated list of Elixir types.
+fn parse_elixir_type_list(s: &str) -> Vec<ErlangType> {
+    if s.trim().is_empty() {
+        return Vec::new();
+    }
+
+    split_top_level(s, ',')
+        .into_iter()
+        .map(|t| parse_elixir_type(t.trim()))
+        .collect()
 }
 
 /// Parse all -type declarations from Erlang source.
@@ -1293,6 +1727,7 @@ mod tests {
                 params: vec![("input".to_string(), ErlangType::Any)],
                 return_type: ErlangType::Any,
             }],
+            type_defs: Vec::new(),
         });
 
         let output = generate_dreamt(&modules);
@@ -1315,6 +1750,7 @@ mod tests {
                 params: vec![("list".to_string(), ErlangType::List(Box::new(ErlangType::Any)))],
                 return_type: ErlangType::List(Box::new(ErlangType::Any)),
             }],
+            type_defs: Vec::new(),
         });
 
         let output = generate_dreamt(&modules);
@@ -1325,5 +1761,66 @@ mod tests {
         // Should use simple name
         assert!(output.contains("extern mod lists"),
             "Expected 'extern mod lists', got:\n{}", output);
+    }
+
+    #[test]
+    fn test_extract_elixir_module_name() {
+        assert_eq!(
+            extract_elixir_module_name("defmodule Jason do\nend"),
+            Some("Elixir.Jason".to_string())
+        );
+        assert_eq!(
+            extract_elixir_module_name("defmodule Jason.Encoder do\nend"),
+            Some("Elixir.Jason.Encoder".to_string())
+        );
+        assert_eq!(
+            extract_elixir_module_name("defmodule Phoenix.Controller do\n  use Phoenix\nend"),
+            Some("Elixir.Phoenix.Controller".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_elixir_spec() {
+        let registry = TypeRegistry::new();
+        let spec = parse_elixir_single_spec(
+            "@spec encode(term()) :: {:ok, String.t()} | {:error, Exception.t()}",
+            &registry
+        ).unwrap();
+        assert_eq!(spec.name, "encode");
+        assert_eq!(spec.params.len(), 1);
+        assert!(matches!(spec.return_type, ErlangType::Result(_, _)));
+    }
+
+    #[test]
+    fn test_parse_elixir_spec_with_named_args() {
+        let registry = TypeRegistry::new();
+        let spec = parse_elixir_single_spec(
+            "@spec decode(input :: binary()) :: {:ok, term()} | {:error, Exception.t()}",
+            &registry
+        ).unwrap();
+        assert_eq!(spec.name, "decode");
+        assert_eq!(spec.params.len(), 1);
+        assert_eq!(spec.params[0].0, "input");
+    }
+
+    #[test]
+    fn test_parse_elixir_type() {
+        assert!(matches!(parse_elixir_type("String.t()"), ErlangType::Named(n) if n == "string"));
+        assert!(matches!(parse_elixir_type("integer()"), ErlangType::Named(n) if n == "int"));
+        assert!(matches!(parse_elixir_type(":ok"), ErlangType::AtomLiteral(n) if n == "ok"));
+        assert!(matches!(parse_elixir_type("[binary()]"), ErlangType::List(_)));
+    }
+
+    #[test]
+    fn test_parse_elixir_type_def() {
+        let td = parse_elixir_single_type_def("@type options :: keyword()").unwrap();
+        assert_eq!(td.name, "options");
+        assert!(td.params.is_empty());
+    }
+
+    #[test]
+    fn test_parse_elixir_result_pattern() {
+        let ty = parse_elixir_type("{:ok, String.t()} | {:error, Exception.t()}");
+        assert!(matches!(ty, ErlangType::Result(_, _)));
     }
 }
