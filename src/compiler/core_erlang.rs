@@ -1197,7 +1197,10 @@ impl CoreErlangEmitter {
     pub fn emit_module(&mut self, module: &Module) -> CoreErlangResult<String> {
         // All Dream modules are prefixed with dream:: (like Elixir uses Elixir.)
         // This ensures Dream modules are properly namespaced on the BEAM
-        self.module_name = if module.name.starts_with(Self::STDLIB_PREFIX) {
+        // Unless skip_stdlib_prefix is set (for REPL modules)
+        self.module_name = if self.module_context.skip_stdlib_prefix {
+            module.name.clone()
+        } else if module.name.starts_with(Self::STDLIB_PREFIX) {
             module.name.clone()
         } else {
             format!("{}{}", Self::STDLIB_PREFIX, module.name)

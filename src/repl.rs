@@ -1031,6 +1031,7 @@ fn format_dream_value(value: &str) -> String {
                 let struct_path = &after_struct[..struct_end];
                 let struct_name = struct_path.split("::").last().unwrap_or(struct_path);
 
+                // Check for wrapped struct format: data => #{...}
                 if let Some(data_start) = value.find("data => ") {
                     let after_data = &value[data_start + 8..];
                     if let Some(data_content) = extract_map_content(after_data) {
@@ -1045,6 +1046,14 @@ fn format_dream_value(value: &str) -> String {
                         }
                         return format!("{}({})", struct_name, format_map_fields(&data_content));
                     }
+                } else {
+                    // Direct struct format: #{field => val, '__struct__' => 'Type', ...}
+                    // Extract fields excluding __struct__
+                    let fields = format_struct_fields(value, struct_name);
+                    if fields.is_empty() {
+                        return format!("{} {{}}", struct_name);
+                    }
+                    return format!("{} {{ {} }}", struct_name, fields);
                 }
             }
         }
@@ -1082,6 +1091,100 @@ fn format_map_fields(map_str: &str) -> String {
         inner.replace(" => ", ": ")
     } else {
         map_str.to_string()
+    }
+}
+
+/// Format struct fields from an Erlang map, excluding __struct__
+/// Input: #{name => <<"Sonny">>,'__struct__' => 'repl_edit::User',age => 45}
+/// Output: name: "Sonny", age: 45
+fn format_struct_fields(map_str: &str, _struct_name: &str) -> String {
+    let inner = map_str
+        .strip_prefix("#{")
+        .and_then(|s| s.strip_suffix('}'));
+
+    let Some(inner) = inner else {
+        return String::new();
+    };
+
+    if inner.is_empty() {
+        return String::new();
+    }
+
+    // Parse the key => value pairs, handling nested structures
+    // We need to handle Erlang binaries like <<"text">> specially
+    let mut fields = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0;
+    let mut in_binary = false;
+    let chars: Vec<char> = inner.chars().collect();
+    let mut i = 0;
+
+    while i < chars.len() {
+        let c = chars[i];
+
+        // Check for binary start: <<
+        if c == '<' && i + 1 < chars.len() && chars[i + 1] == '<' {
+            in_binary = true;
+            current.push('<');
+            current.push('<');
+            i += 2;
+            continue;
+        }
+
+        // Check for binary end: >>
+        if c == '>' && i + 1 < chars.len() && chars[i + 1] == '>' && in_binary {
+            in_binary = false;
+            current.push('>');
+            current.push('>');
+            i += 2;
+            continue;
+        }
+
+        match c {
+            '{' | '[' | '(' => {
+                depth += 1;
+                current.push(c);
+            }
+            '}' | ']' | ')' => {
+                depth -= 1;
+                current.push(c);
+            }
+            ',' if depth == 0 && !in_binary => {
+                let field = current.trim();
+                if !field.is_empty() && !field.contains("'__struct__'") {
+                    fields.push(format_single_field(field));
+                }
+                current.clear();
+            }
+            _ => current.push(c),
+        }
+        i += 1;
+    }
+
+    // Don't forget the last field
+    let field = current.trim();
+    if !field.is_empty() && !field.contains("'__struct__'") {
+        fields.push(format_single_field(field));
+    }
+
+    fields.join(", ")
+}
+
+/// Format a single field: "name => <<"Sonny">>" -> "name: \"Sonny\""
+fn format_single_field(field: &str) -> String {
+    if let Some(arrow_pos) = field.find(" => ") {
+        let key = field[..arrow_pos].trim();
+        let value = field[arrow_pos + 4..].trim();
+
+        // Clean up atom keys (remove quotes)
+        let clean_key = key.trim_matches('\'');
+
+        // Format the value
+        let formatted_value = format_dream_value(value);
+
+        format!("{}: {}", clean_key, formatted_value)
+    } else {
+        field.to_string()
     }
 }
 
@@ -1437,6 +1540,13 @@ fn edit_and_eval(state: &mut ReplState) -> Result<Option<String>, String> {
     let content = std::fs::read_to_string(&temp_file)
         .map_err(|e| format!("Failed to read temp file: {}", e))?;
 
+    // Debug: show what we're about to parse if DREAM_DEBUG is set
+    if std::env::var("DREAM_DEBUG").is_ok() {
+        eprintln!("=== DEBUG: Content to parse ({} bytes) ===", content.len());
+        eprintln!("{:?}", content);
+        eprintln!("=== END DEBUG ===");
+    }
+
     // Clean up temp file
     let _ = std::fs::remove_file(&temp_file);
 
@@ -1506,11 +1616,11 @@ fn compile_and_run_source(
     let mut loaded_modules = Vec::new();
 
     for module in &annotated_modules {
-        // Prefix module name with dream:: (like Elixir's Elixir. prefix)
-        let mut prefixed_module = module.clone();
-        prefixed_module.name = format!("dream::{}", module.name);
+        // Don't prefix REPL-edited modules - let users call them directly
+        let prefixed_module = module.clone();
 
-        let module_context = ModuleContext::default();
+        let mut module_context = ModuleContext::default();
+        module_context.skip_stdlib_prefix = true;  // REPL modules don't get dream:: prefix
         let mut emitter = CoreErlangEmitter::with_registry_and_context(registry.clone(), module_context);
 
         let core_erlang = emitter

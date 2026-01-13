@@ -142,6 +142,8 @@ pub struct ModuleContext {
     /// Set of local module names (short names only, e.g., "hello_handler")
     /// Used to resolve atom literals that reference local modules
     pub local_modules: std::collections::HashSet<String>,
+    /// If true, don't add the dream:: prefix to module names (for REPL modules)
+    pub skip_stdlib_prefix: bool,
 }
 
 impl ModuleContext {
@@ -154,6 +156,7 @@ impl ModuleContext {
             package_name: Some(package_name),
             current_path: vec![],
             local_modules: std::collections::HashSet::new(),
+            skip_stdlib_prefix: false,
         }
     }
 
@@ -176,6 +179,7 @@ impl ModuleContext {
             package_name: Some(package_name.to_string()),
             current_path,
             local_modules: std::collections::HashSet::new(),
+            skip_stdlib_prefix: false,
         }
     }
 
