@@ -3737,7 +3737,16 @@ impl CoreErlangEmitter {
     fn emit_quoted_item(&mut self, item: &Item) -> CoreErlangResult<()> {
         match item {
             Item::Impl(impl_block) => {
-                self.emit(&format!("{{'impl', '{}', [", self.escape_erlang_atom(&impl_block.type_name)));
+                // Check if type name is an unquote marker: $UNQUOTE:varname
+                if let Some(unquote_var) = impl_block.type_name.strip_prefix("$UNQUOTE:") {
+                    // Emit as: {'impl', VarName, [methods]}
+                    // where VarName is evaluated at runtime
+                    self.emit("{'impl', ");
+                    self.emit(&Self::var_name(unquote_var));
+                    self.emit(", [");
+                } else {
+                    self.emit(&format!("{{'impl', '{}', [", self.escape_erlang_atom(&impl_block.type_name)));
+                }
                 for (i, method) in impl_block.methods.iter().enumerate() {
                     if i > 0 {
                         self.emit(", ");

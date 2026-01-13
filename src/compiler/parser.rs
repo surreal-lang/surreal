@@ -16,6 +16,9 @@ pub struct Parser<'source> {
     /// Tracks if we have a pending `>` from splitting a `>>` token.
     /// This enables parsing nested generics like `Option<Option<T>>`.
     pending_gt: bool,
+    /// Tracks if we're currently parsing inside a quote block.
+    /// When true, allows `#ident` (unquote) in type name positions.
+    in_quote: bool,
 }
 
 impl<'source> Parser<'source> {
@@ -28,6 +31,7 @@ impl<'source> Parser<'source> {
             pos: 0,
             source,
             pending_gt: false,
+            in_quote: false,
         }
     }
 
@@ -653,6 +657,14 @@ impl<'source> Parser<'source> {
 
     /// Parse a type name that may be module-qualified: `Point` or `genserver::GenServer`
     fn parse_possibly_qualified_type_name(&mut self) -> ParseResult<String> {
+        // In quote mode, allow #ident for unquote in type position
+        if self.in_quote && self.check(&Token::Hash) {
+            self.advance(); // consume #
+            let var_name = self.expect_ident()?;
+            // Use special marker prefix that codegen recognizes
+            return Ok(format!("$UNQUOTE:{}", var_name));
+        }
+
         // Check for module-qualified name: module::Type
         if let Some(Token::Ident(module_name)) = self.peek().cloned() {
             if self.peek_next() == Some(&Token::ColonColon) {
@@ -2113,13 +2125,17 @@ impl<'source> Parser<'source> {
         self.expect(&Token::Quote)?;
         self.expect(&Token::LBrace)?;
 
+        // Enter quote mode - allows #ident in type positions
+        let was_in_quote = self.in_quote;
+        self.in_quote = true;
+
         // Check if the content is an item (impl, fn, struct, enum, trait)
         let is_item = matches!(
             self.peek(),
             Some(Token::Impl) | Some(Token::Fn) | Some(Token::Struct) | Some(Token::Enum) | Some(Token::Trait)
         );
 
-        if is_item {
+        let result = if is_item {
             // Parse as a quoted item - parse_item handles its own attributes
             let item = self.parse_item()?;
             self.expect(&Token::RBrace)?;
@@ -2129,7 +2145,11 @@ impl<'source> Parser<'source> {
             let block = self.parse_block_contents()?;
             self.expect(&Token::RBrace)?;
             Ok(Expr::Quote(Box::new(Expr::Block(block))))
-        }
+        };
+
+        // Restore quote mode
+        self.in_quote = was_in_quote;
+        result
     }
 
     /// Parse an if expression.
