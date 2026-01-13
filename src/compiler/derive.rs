@@ -150,12 +150,29 @@ impl MacroRegistry {
             DeriveError::new(format!("macro expansion failed: {}", e.message), Span::default())
         })?;
 
-        // For now, we parse the result as an impl block
-        // TODO: Implement proper deserialization from Erlang term to AST
-        // For now, return empty - the full implementation will come when
-        // we have complete AST deserialization
-        let _ = result;
-        Ok(vec![])
+        // Parse the result as Erlang term
+        let term = ast_serde::parse_term(&result).map_err(|e| {
+            DeriveError::new(format!("failed to parse macro result: {}", e), Span::default())
+        })?;
+
+        // Convert to Item(s)
+        // Macros can return a single item or a list of items
+        match &term {
+            ast_serde::Term::List(items) => {
+                items.iter()
+                    .map(|t| ast_serde::term_to_item(t).map_err(|e| {
+                        DeriveError::new(format!("failed to convert macro result: {}", e), Span::default())
+                    }))
+                    .collect()
+            }
+            _ => {
+                // Single item
+                let item = ast_serde::term_to_item(&term).map_err(|e| {
+                    DeriveError::new(format!("failed to convert macro result: {}", e), Span::default())
+                })?;
+                Ok(vec![item])
+            }
+        }
     }
 
     /// Expand a user-defined derive macro on an enum.
@@ -182,9 +199,27 @@ impl MacroRegistry {
             DeriveError::new(format!("macro expansion failed: {}", e.message), Span::default())
         })?;
 
-        // For now, return empty - see above
-        let _ = result;
-        Ok(vec![])
+        // Parse the result as Erlang term
+        let term = ast_serde::parse_term(&result).map_err(|e| {
+            DeriveError::new(format!("failed to parse macro result: {}", e), Span::default())
+        })?;
+
+        // Convert to Item(s)
+        match &term {
+            ast_serde::Term::List(items) => {
+                items.iter()
+                    .map(|t| ast_serde::term_to_item(t).map_err(|e| {
+                        DeriveError::new(format!("failed to convert macro result: {}", e), Span::default())
+                    }))
+                    .collect()
+            }
+            _ => {
+                let item = ast_serde::term_to_item(&term).map_err(|e| {
+                    DeriveError::new(format!("failed to convert macro result: {}", e), Span::default())
+                })?;
+                Ok(vec![item])
+            }
+        }
     }
 
     /// Get or create the macro expander.

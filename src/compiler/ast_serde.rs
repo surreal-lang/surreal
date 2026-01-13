@@ -516,13 +516,917 @@ pub fn item_to_erlang_term(item: &Item) -> String {
 }
 
 // =============================================================================
-// Erlang Term to AST (Deserialization) - TODO
+// Erlang Term to AST (Deserialization)
 // =============================================================================
 
-// Note: Deserialization is more complex and will be implemented when needed.
-// For now, macros will return text that gets parsed by the Dream parser,
-// or we can implement specific deserialization for ImplBlock which is the
-// main output type from derive macros.
+/// Error type for term parsing failures.
+#[derive(Debug)]
+pub struct TermParseError {
+    pub message: String,
+    pub position: usize,
+}
+
+impl TermParseError {
+    fn new(message: impl Into<String>, position: usize) -> Self {
+        TermParseError {
+            message: message.into(),
+            position,
+        }
+    }
+}
+
+impl std::fmt::Display for TermParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Parse error at position {}: {}", self.position, self.message)
+    }
+}
+
+impl std::error::Error for TermParseError {}
+
+/// Result type for term parsing.
+pub type TermParseResult<T> = Result<T, TermParseError>;
+
+/// Erlang term representation for parsing.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Term {
+    Atom(String),
+    Int(i64),
+    Float(f64),
+    String(String),      // Binary string: <<"...">>
+    Tuple(Vec<Term>),
+    List(Vec<Term>),
+}
+
+/// Parser for Erlang term text format.
+pub struct TermParser<'a> {
+    input: &'a str,
+    pos: usize,
+}
+
+impl<'a> TermParser<'a> {
+    pub fn new(input: &'a str) -> Self {
+        TermParser { input, pos: 0 }
+    }
+
+    /// Parse the entire input as a term.
+    pub fn parse(&mut self) -> TermParseResult<Term> {
+        self.skip_whitespace();
+        let term = self.parse_term()?;
+        self.skip_whitespace();
+        if self.pos < self.input.len() {
+            return Err(TermParseError::new(
+                format!("unexpected character: '{}'", self.peek().unwrap_or('\0')),
+                self.pos,
+            ));
+        }
+        Ok(term)
+    }
+
+    fn parse_term(&mut self) -> TermParseResult<Term> {
+        self.skip_whitespace();
+
+        match self.peek() {
+            Some('{') => self.parse_tuple(),
+            Some('[') => self.parse_list(),
+            Some('\'') => self.parse_atom(),
+            Some('<') => self.parse_binary_string(),
+            Some('"') => self.parse_charlist(),
+            Some(c) if c.is_ascii_digit() || c == '-' => self.parse_number(),
+            Some(c) if c.is_ascii_lowercase() => self.parse_bare_atom(),
+            Some(c) => Err(TermParseError::new(
+                format!("unexpected character: '{}'", c),
+                self.pos,
+            )),
+            None => Err(TermParseError::new("unexpected end of input", self.pos)),
+        }
+    }
+
+    fn parse_tuple(&mut self) -> TermParseResult<Term> {
+        self.expect('{')?;
+        let mut elements = Vec::new();
+
+        self.skip_whitespace();
+        if self.peek() == Some('}') {
+            self.advance();
+            return Ok(Term::Tuple(elements));
+        }
+
+        loop {
+            elements.push(self.parse_term()?);
+            self.skip_whitespace();
+
+            match self.peek() {
+                Some(',') => {
+                    self.advance();
+                    self.skip_whitespace();
+                }
+                Some('}') => {
+                    self.advance();
+                    break;
+                }
+                Some(c) => return Err(TermParseError::new(
+                    format!("expected ',' or '}}', found '{}'", c),
+                    self.pos,
+                )),
+                None => return Err(TermParseError::new("unclosed tuple", self.pos)),
+            }
+        }
+
+        Ok(Term::Tuple(elements))
+    }
+
+    fn parse_list(&mut self) -> TermParseResult<Term> {
+        self.expect('[')?;
+        let mut elements = Vec::new();
+
+        self.skip_whitespace();
+        if self.peek() == Some(']') {
+            self.advance();
+            return Ok(Term::List(elements));
+        }
+
+        loop {
+            elements.push(self.parse_term()?);
+            self.skip_whitespace();
+
+            match self.peek() {
+                Some(',') => {
+                    self.advance();
+                    self.skip_whitespace();
+                }
+                Some(']') => {
+                    self.advance();
+                    break;
+                }
+                Some(c) => return Err(TermParseError::new(
+                    format!("expected ',' or ']', found '{}'", c),
+                    self.pos,
+                )),
+                None => return Err(TermParseError::new("unclosed list", self.pos)),
+            }
+        }
+
+        Ok(Term::List(elements))
+    }
+
+    fn parse_atom(&mut self) -> TermParseResult<Term> {
+        self.expect('\'')?;
+        let mut name = String::new();
+
+        loop {
+            match self.peek() {
+                Some('\'') => {
+                    self.advance();
+                    break;
+                }
+                Some('\\') => {
+                    self.advance();
+                    match self.peek() {
+                        Some('\'') => { self.advance(); name.push('\''); }
+                        Some('\\') => { self.advance(); name.push('\\'); }
+                        Some('n') => { self.advance(); name.push('\n'); }
+                        Some('t') => { self.advance(); name.push('\t'); }
+                        Some(c) => { self.advance(); name.push(c); }
+                        None => return Err(TermParseError::new("unexpected end in escape", self.pos)),
+                    }
+                }
+                Some(c) => {
+                    self.advance();
+                    name.push(c);
+                }
+                None => return Err(TermParseError::new("unclosed atom", self.pos)),
+            }
+        }
+
+        Ok(Term::Atom(name))
+    }
+
+    fn parse_bare_atom(&mut self) -> TermParseResult<Term> {
+        let start = self.pos;
+        while let Some(c) = self.peek() {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '@' {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        let name = &self.input[start..self.pos];
+        Ok(Term::Atom(name.to_string()))
+    }
+
+    fn parse_binary_string(&mut self) -> TermParseResult<Term> {
+        self.expect('<')?;
+        self.expect('<')?;
+        self.expect('"')?;
+
+        let mut content = String::new();
+
+        loop {
+            match self.peek() {
+                Some('"') => {
+                    self.advance();
+                    break;
+                }
+                Some('\\') => {
+                    self.advance();
+                    match self.peek() {
+                        Some('"') => { self.advance(); content.push('"'); }
+                        Some('\\') => { self.advance(); content.push('\\'); }
+                        Some('n') => { self.advance(); content.push('\n'); }
+                        Some('r') => { self.advance(); content.push('\r'); }
+                        Some('t') => { self.advance(); content.push('\t'); }
+                        Some(c) => { self.advance(); content.push(c); }
+                        None => return Err(TermParseError::new("unexpected end in escape", self.pos)),
+                    }
+                }
+                Some(c) => {
+                    self.advance();
+                    content.push(c);
+                }
+                None => return Err(TermParseError::new("unclosed binary string", self.pos)),
+            }
+        }
+
+        self.expect('>')?;
+        self.expect('>')?;
+
+        Ok(Term::String(content))
+    }
+
+    fn parse_charlist(&mut self) -> TermParseResult<Term> {
+        self.expect('"')?;
+
+        let mut content = String::new();
+
+        loop {
+            match self.peek() {
+                Some('"') => {
+                    self.advance();
+                    break;
+                }
+                Some('\\') => {
+                    self.advance();
+                    match self.peek() {
+                        Some('"') => { self.advance(); content.push('"'); }
+                        Some('\\') => { self.advance(); content.push('\\'); }
+                        Some('n') => { self.advance(); content.push('\n'); }
+                        Some('r') => { self.advance(); content.push('\r'); }
+                        Some('t') => { self.advance(); content.push('\t'); }
+                        Some(c) => { self.advance(); content.push(c); }
+                        None => return Err(TermParseError::new("unexpected end in escape", self.pos)),
+                    }
+                }
+                Some(c) => {
+                    self.advance();
+                    content.push(c);
+                }
+                None => return Err(TermParseError::new("unclosed string", self.pos)),
+            }
+        }
+
+        // Return as string (charlists are used for format strings in Dream)
+        Ok(Term::String(content))
+    }
+
+    fn parse_number(&mut self) -> TermParseResult<Term> {
+        let start = self.pos;
+        let mut has_dot = false;
+
+        if self.peek() == Some('-') {
+            self.advance();
+        }
+
+        while let Some(c) = self.peek() {
+            if c.is_ascii_digit() {
+                self.advance();
+            } else if c == '.' && !has_dot {
+                has_dot = true;
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        let num_str = &self.input[start..self.pos];
+
+        if has_dot {
+            num_str.parse::<f64>()
+                .map(Term::Float)
+                .map_err(|_| TermParseError::new(format!("invalid float: {}", num_str), start))
+        } else {
+            num_str.parse::<i64>()
+                .map(Term::Int)
+                .map_err(|_| TermParseError::new(format!("invalid integer: {}", num_str), start))
+        }
+    }
+
+    fn peek(&self) -> Option<char> {
+        self.input[self.pos..].chars().next()
+    }
+
+    fn advance(&mut self) {
+        if let Some(c) = self.peek() {
+            self.pos += c.len_utf8();
+        }
+    }
+
+    fn expect(&mut self, expected: char) -> TermParseResult<()> {
+        match self.peek() {
+            Some(c) if c == expected => {
+                self.advance();
+                Ok(())
+            }
+            Some(c) => Err(TermParseError::new(
+                format!("expected '{}', found '{}'", expected, c),
+                self.pos,
+            )),
+            None => Err(TermParseError::new(
+                format!("expected '{}', found end of input", expected),
+                self.pos,
+            )),
+        }
+    }
+
+    fn skip_whitespace(&mut self) {
+        while let Some(c) = self.peek() {
+            if c.is_whitespace() {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+    }
+}
+
+/// Parse an Erlang term string.
+pub fn parse_term(input: &str) -> TermParseResult<Term> {
+    TermParser::new(input).parse()
+}
+
+// =============================================================================
+// Term to AST Conversion
+// =============================================================================
+
+/// Convert an Erlang term to an Expression.
+pub fn term_to_expr(term: &Term) -> TermParseResult<Expr> {
+    match term {
+        Term::Tuple(elements) => {
+            if elements.is_empty() {
+                return Ok(Expr::Unit);
+            }
+
+            let tag = match &elements[0] {
+                Term::Atom(s) => s.as_str(),
+                _ => return Err(TermParseError::new("expected atom tag in tuple", 0)),
+            };
+
+            match tag {
+                "int" => {
+                    let n = expect_int(&elements[1])?;
+                    Ok(Expr::Int(n))
+                }
+                "string" => {
+                    let s = expect_string(&elements[1])?;
+                    Ok(Expr::String(s))
+                }
+                "charlist" => {
+                    let s = expect_string(&elements[1])?;
+                    Ok(Expr::Charlist(s))
+                }
+                "atom" => {
+                    let s = expect_atom(&elements[1])?;
+                    Ok(Expr::Atom(s))
+                }
+                "bool" => {
+                    let b = expect_atom(&elements[1])?;
+                    Ok(Expr::Bool(b == "true"))
+                }
+                "unit" => Ok(Expr::Unit),
+                "ident" => {
+                    let name = expect_atom(&elements[1])?;
+                    Ok(Expr::Ident(name))
+                }
+                "path" => {
+                    let segments = expect_list(&elements[1])?
+                        .iter()
+                        .map(expect_atom)
+                        .collect::<TermParseResult<Vec<_>>>()?;
+                    Ok(Expr::Path { segments })
+                }
+                "binary_op" => {
+                    let op = atom_to_binop(&expect_atom(&elements[1])?)?;
+                    let left = term_to_expr(&elements[2])?;
+                    let right = term_to_expr(&elements[3])?;
+                    Ok(Expr::Binary {
+                        op,
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    })
+                }
+                "unary_op" => {
+                    let op = atom_to_unaryop(&expect_atom(&elements[1])?)?;
+                    let expr = term_to_expr(&elements[2])?;
+                    Ok(Expr::Unary {
+                        op,
+                        expr: Box::new(expr),
+                    })
+                }
+                "call" => {
+                    let func = term_to_expr(&elements[1])?;
+                    let args = expect_list(&elements[2])?
+                        .iter()
+                        .map(term_to_expr)
+                        .collect::<TermParseResult<Vec<_>>>()?;
+                    Ok(Expr::Call {
+                        func: Box::new(func),
+                        args,
+                        type_args: vec![],
+                        inferred_type_args: vec![],
+                    })
+                }
+                "method_call" => {
+                    let receiver = term_to_expr(&elements[1])?;
+                    let method = expect_atom(&elements[2])?;
+                    let args = expect_list(&elements[3])?
+                        .iter()
+                        .map(term_to_expr)
+                        .collect::<TermParseResult<Vec<_>>>()?;
+                    Ok(Expr::MethodCall {
+                        receiver: Box::new(receiver),
+                        method,
+                        args,
+                        type_args: vec![],
+                        resolved_module: None,
+                        inferred_type_args: vec![],
+                    })
+                }
+                "field_access" => {
+                    let expr = term_to_expr(&elements[1])?;
+                    let field = expect_atom(&elements[2])?;
+                    Ok(Expr::FieldAccess {
+                        expr: Box::new(expr),
+                        field,
+                    })
+                }
+                "tuple" => {
+                    let elems = expect_list(&elements[1])?
+                        .iter()
+                        .map(term_to_expr)
+                        .collect::<TermParseResult<Vec<_>>>()?;
+                    Ok(Expr::Tuple(elems))
+                }
+                "list" => {
+                    let elems = expect_list(&elements[1])?
+                        .iter()
+                        .map(term_to_expr)
+                        .collect::<TermParseResult<Vec<_>>>()?;
+                    Ok(Expr::List(elems))
+                }
+                "struct_init" => {
+                    let name = expect_atom(&elements[1])?;
+                    let fields = expect_list(&elements[2])?
+                        .iter()
+                        .map(|t| {
+                            let pair = expect_tuple(t)?;
+                            let fname = expect_atom(&pair[0])?;
+                            let fexpr = term_to_expr(&pair[1])?;
+                            Ok((fname, fexpr))
+                        })
+                        .collect::<TermParseResult<Vec<_>>>()?;
+                    Ok(Expr::StructInit {
+                        name,
+                        fields,
+                        base: None,
+                    })
+                }
+                "if" => {
+                    let cond = term_to_expr(&elements[1])?;
+                    let then_block = term_to_block(&elements[2])?;
+                    let else_block = if elements.len() > 3 && !is_none(&elements[3]) {
+                        Some(term_to_block(&elements[3])?)
+                    } else {
+                        None
+                    };
+                    Ok(Expr::If {
+                        cond: Box::new(cond),
+                        then_block,
+                        else_block,
+                    })
+                }
+                "block" => {
+                    let block = term_to_block(&elements[1])?;
+                    Ok(Expr::Block(block))
+                }
+                "return" => {
+                    let inner = if is_none(&elements[1]) {
+                        None
+                    } else {
+                        Some(Box::new(term_to_expr(&elements[1])?))
+                    };
+                    Ok(Expr::Return(inner))
+                }
+                "extern_call" => {
+                    let module = expect_atom(&elements[1])?;
+                    let function = expect_atom(&elements[2])?;
+                    let args = expect_list(&elements[3])?
+                        .iter()
+                        .map(term_to_expr)
+                        .collect::<TermParseResult<Vec<_>>>()?;
+                    Ok(Expr::ExternCall { module, function, args })
+                }
+                "quote" => {
+                    let inner = term_to_expr(&elements[1])?;
+                    Ok(Expr::Quote(Box::new(inner)))
+                }
+                "unquote" => {
+                    let inner = term_to_expr(&elements[1])?;
+                    Ok(Expr::Unquote(Box::new(inner)))
+                }
+                "unquote_splice" => {
+                    let inner = term_to_expr(&elements[1])?;
+                    Ok(Expr::UnquoteSplice(Box::new(inner)))
+                }
+                "spawn" => {
+                    let inner = term_to_expr(&elements[1])?;
+                    Ok(Expr::Spawn(Box::new(inner)))
+                }
+                "send" => {
+                    let to = term_to_expr(&elements[1])?;
+                    let msg = term_to_expr(&elements[2])?;
+                    Ok(Expr::Send {
+                        to: Box::new(to),
+                        msg: Box::new(msg),
+                    })
+                }
+                "pipe" => {
+                    let left = term_to_expr(&elements[1])?;
+                    let right = term_to_expr(&elements[2])?;
+                    Ok(Expr::Pipe {
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    })
+                }
+                _ => Err(TermParseError::new(format!("unknown expression tag: {}", tag), 0)),
+            }
+        }
+        _ => Err(TermParseError::new("expected tuple for expression", 0)),
+    }
+}
+
+/// Convert an Erlang term to a Block.
+fn term_to_block(term: &Term) -> TermParseResult<Block> {
+    let tuple = expect_tuple(term)?;
+    if tuple.len() != 2 {
+        return Err(TermParseError::new("block should be {stmts, expr}", 0));
+    }
+
+    let stmts = expect_list(&tuple[0])?
+        .iter()
+        .map(term_to_stmt)
+        .collect::<TermParseResult<Vec<_>>>()?;
+
+    let expr = if is_none(&tuple[1]) {
+        None
+    } else {
+        Some(Box::new(term_to_expr(&tuple[1])?))
+    };
+
+    Ok(Block { stmts, expr })
+}
+
+/// Convert an Erlang term to a Statement.
+fn term_to_stmt(term: &Term) -> TermParseResult<Stmt> {
+    let tuple = expect_tuple(term)?;
+    let tag = expect_atom(&tuple[0])?;
+
+    match tag.as_str() {
+        "let" => {
+            let pattern = term_to_pattern(&tuple[1])?;
+            let ty = if is_none(&tuple[2]) {
+                None
+            } else {
+                Some(term_to_type(&tuple[2])?)
+            };
+            let value = term_to_expr(&tuple[3])?;
+            Ok(Stmt::Let { pattern, ty, value })
+        }
+        "expr" => {
+            let expr = term_to_expr(&tuple[1])?;
+            Ok(Stmt::Expr(expr))
+        }
+        _ => Err(TermParseError::new(format!("unknown statement tag: {}", tag), 0)),
+    }
+}
+
+/// Convert an Erlang term to a Type.
+pub fn term_to_type(term: &Term) -> TermParseResult<Type> {
+    match term {
+        Term::Tuple(elements) => {
+            if elements.is_empty() {
+                return Err(TermParseError::new("empty tuple for type", 0));
+            }
+
+            let tag = expect_atom(&elements[0])?;
+
+            match tag.as_str() {
+                "type" => {
+                    let type_name = expect_atom(&elements[1])?;
+                    match type_name.as_str() {
+                        "int" => Ok(Type::Int),
+                        "float" => Ok(Type::Float),
+                        "string" => Ok(Type::String),
+                        "atom" => Ok(Type::Atom),
+                        "bool" => Ok(Type::Bool),
+                        "unit" => Ok(Type::Unit),
+                        "pid" => Ok(Type::Pid),
+                        "ref" => Ok(Type::Ref),
+                        "binary" => Ok(Type::Binary),
+                        "any" => Ok(Type::Any),
+                        "map" => Ok(Type::Map),
+                        _ => Err(TermParseError::new(format!("unknown primitive type: {}", type_name), 0)),
+                    }
+                }
+                "named" => {
+                    let name = expect_atom(&elements[1])?;
+                    let type_args = if elements.len() > 2 {
+                        expect_list(&elements[2])?
+                            .iter()
+                            .map(term_to_type)
+                            .collect::<TermParseResult<Vec<_>>>()?
+                    } else {
+                        vec![]
+                    };
+                    Ok(Type::Named { name, type_args })
+                }
+                "list" => {
+                    let inner = term_to_type(&elements[1])?;
+                    Ok(Type::List(Box::new(inner)))
+                }
+                "tuple" => {
+                    let types = expect_list(&elements[1])?
+                        .iter()
+                        .map(term_to_type)
+                        .collect::<TermParseResult<Vec<_>>>()?;
+                    Ok(Type::Tuple(types))
+                }
+                "type_var" => {
+                    let name = expect_atom(&elements[1])?;
+                    Ok(Type::TypeVar(name))
+                }
+                "fn" => {
+                    let params = expect_list(&elements[1])?
+                        .iter()
+                        .map(term_to_type)
+                        .collect::<TermParseResult<Vec<_>>>()?;
+                    let ret = term_to_type(&elements[2])?;
+                    Ok(Type::Fn {
+                        params,
+                        ret: Box::new(ret),
+                    })
+                }
+                "atom_literal" => {
+                    let name = expect_atom(&elements[1])?;
+                    Ok(Type::AtomLiteral(name))
+                }
+                "union" => {
+                    let types = expect_list(&elements[1])?
+                        .iter()
+                        .map(term_to_type)
+                        .collect::<TermParseResult<Vec<_>>>()?;
+                    Ok(Type::Union(types))
+                }
+                "assoc_type" => {
+                    let base = expect_atom(&elements[1])?;
+                    let name = expect_atom(&elements[2])?;
+                    Ok(Type::AssociatedType { base, name })
+                }
+                _ => Err(TermParseError::new(format!("unknown type tag: {}", tag), 0)),
+            }
+        }
+        _ => Err(TermParseError::new("expected tuple for type", 0)),
+    }
+}
+
+/// Convert an Erlang term to a Pattern.
+pub fn term_to_pattern(term: &Term) -> TermParseResult<Pattern> {
+    match term {
+        Term::Tuple(elements) => {
+            if elements.is_empty() {
+                return Err(TermParseError::new("empty tuple for pattern", 0));
+            }
+
+            let tag = expect_atom(&elements[0])?;
+
+            match tag.as_str() {
+                "wildcard" => Ok(Pattern::Wildcard),
+                "ident" => {
+                    let name = expect_atom(&elements[1])?;
+                    Ok(Pattern::Ident(name))
+                }
+                "int" => {
+                    let n = expect_int(&elements[1])?;
+                    Ok(Pattern::Int(n))
+                }
+                "string" => {
+                    let s = expect_string(&elements[1])?;
+                    Ok(Pattern::String(s))
+                }
+                "charlist" => {
+                    let s = expect_string(&elements[1])?;
+                    Ok(Pattern::Charlist(s))
+                }
+                "atom" => {
+                    let s = expect_atom(&elements[1])?;
+                    Ok(Pattern::Atom(s))
+                }
+                "bool" => {
+                    let b = expect_atom(&elements[1])?;
+                    Ok(Pattern::Bool(b == "true"))
+                }
+                "tuple" => {
+                    let pats = expect_list(&elements[1])?
+                        .iter()
+                        .map(term_to_pattern)
+                        .collect::<TermParseResult<Vec<_>>>()?;
+                    Ok(Pattern::Tuple(pats))
+                }
+                "list" => {
+                    let pats = expect_list(&elements[1])?
+                        .iter()
+                        .map(term_to_pattern)
+                        .collect::<TermParseResult<Vec<_>>>()?;
+                    Ok(Pattern::List(pats))
+                }
+                "list_cons" => {
+                    let head = term_to_pattern(&elements[1])?;
+                    let tail = term_to_pattern(&elements[2])?;
+                    Ok(Pattern::ListCons {
+                        head: Box::new(head),
+                        tail: Box::new(tail),
+                    })
+                }
+                "struct" => {
+                    let name = expect_atom(&elements[1])?;
+                    let fields = expect_list(&elements[2])?
+                        .iter()
+                        .map(|t| {
+                            let pair = expect_tuple(t)?;
+                            let fname = expect_atom(&pair[0])?;
+                            let fpat = term_to_pattern(&pair[1])?;
+                            Ok((fname, fpat))
+                        })
+                        .collect::<TermParseResult<Vec<_>>>()?;
+                    Ok(Pattern::Struct { name, fields })
+                }
+                _ => Err(TermParseError::new(format!("unknown pattern tag: {}", tag), 0)),
+            }
+        }
+        _ => Err(TermParseError::new("expected tuple for pattern", 0)),
+    }
+}
+
+/// Convert an Erlang term to an ImplBlock (main output of derive macros).
+pub fn term_to_impl_block(term: &Term) -> TermParseResult<ImplBlock> {
+    let tuple = expect_tuple(term)?;
+    let tag = expect_atom(&tuple[0])?;
+
+    if tag != "impl" {
+        return Err(TermParseError::new(format!("expected 'impl' tag, found '{}'", tag), 0));
+    }
+
+    let type_name = expect_atom(&tuple[1])?;
+    let methods = expect_list(&tuple[2])?
+        .iter()
+        .map(term_to_function)
+        .collect::<TermParseResult<Vec<_>>>()?;
+
+    Ok(ImplBlock { type_name, methods })
+}
+
+/// Convert an Erlang term to a Function.
+pub fn term_to_function(term: &Term) -> TermParseResult<Function> {
+    let tuple = expect_tuple(term)?;
+    let tag = expect_atom(&tuple[0])?;
+
+    if tag != "function" {
+        return Err(TermParseError::new(format!("expected 'function' tag, found '{}'", tag), 0));
+    }
+
+    let name = expect_atom(&tuple[1])?;
+    let _type_params = expect_list(&tuple[2])?; // TODO: parse type params
+    let params = expect_list(&tuple[3])?
+        .iter()
+        .map(term_to_param)
+        .collect::<TermParseResult<Vec<_>>>()?;
+    let return_type = if is_none(&tuple[4]) {
+        None
+    } else {
+        Some(term_to_type(&tuple[4])?)
+    };
+    let body = term_to_block(&tuple[5])?;
+
+    Ok(Function {
+        attrs: vec![],
+        name,
+        type_params: vec![],
+        params,
+        guard: None,
+        return_type,
+        body,
+        is_pub: true,
+        span: crate::compiler::lexer::Span::default(),
+    })
+}
+
+/// Convert an Erlang term to a Param.
+fn term_to_param(term: &Term) -> TermParseResult<Param> {
+    let tuple = expect_tuple(term)?;
+    let pattern = term_to_pattern(&tuple[0])?;
+    let ty = term_to_type(&tuple[1])?;
+    Ok(Param { pattern, ty })
+}
+
+/// Convert an Erlang term to an Item.
+pub fn term_to_item(term: &Term) -> TermParseResult<Item> {
+    let tuple = expect_tuple(term)?;
+    let tag = expect_atom(&tuple[0])?;
+
+    match tag.as_str() {
+        "impl" => Ok(Item::Impl(term_to_impl_block(term)?)),
+        "function" => Ok(Item::Function(term_to_function(term)?)),
+        _ => Err(TermParseError::new(format!("unsupported item tag: {}", tag), 0)),
+    }
+}
+
+// =============================================================================
+// Helper functions for term extraction
+// =============================================================================
+
+fn expect_atom(term: &Term) -> TermParseResult<String> {
+    match term {
+        Term::Atom(s) => Ok(s.clone()),
+        _ => Err(TermParseError::new("expected atom", 0)),
+    }
+}
+
+fn expect_int(term: &Term) -> TermParseResult<i64> {
+    match term {
+        Term::Int(n) => Ok(*n),
+        _ => Err(TermParseError::new("expected integer", 0)),
+    }
+}
+
+fn expect_string(term: &Term) -> TermParseResult<String> {
+    match term {
+        Term::String(s) => Ok(s.clone()),
+        _ => Err(TermParseError::new("expected string", 0)),
+    }
+}
+
+fn expect_list(term: &Term) -> TermParseResult<&Vec<Term>> {
+    match term {
+        Term::List(items) => Ok(items),
+        _ => Err(TermParseError::new("expected list", 0)),
+    }
+}
+
+fn expect_tuple(term: &Term) -> TermParseResult<&Vec<Term>> {
+    match term {
+        Term::Tuple(items) => Ok(items),
+        _ => Err(TermParseError::new("expected tuple", 0)),
+    }
+}
+
+fn is_none(term: &Term) -> bool {
+    matches!(term, Term::Atom(s) if s == "none")
+}
+
+fn atom_to_binop(s: &str) -> TermParseResult<BinOp> {
+    match s {
+        "+" => Ok(BinOp::Add),
+        "-" => Ok(BinOp::Sub),
+        "*" => Ok(BinOp::Mul),
+        "/" => Ok(BinOp::Div),
+        "rem" => Ok(BinOp::Mod),
+        "==" => Ok(BinOp::Eq),
+        "/=" => Ok(BinOp::Ne),
+        "<" => Ok(BinOp::Lt),
+        "=<" => Ok(BinOp::Le),
+        ">" => Ok(BinOp::Gt),
+        ">=" => Ok(BinOp::Ge),
+        "and" => Ok(BinOp::And),
+        "or" => Ok(BinOp::Or),
+        _ => Err(TermParseError::new(format!("unknown binary op: {}", s), 0)),
+    }
+}
+
+fn atom_to_unaryop(s: &str) -> TermParseResult<UnaryOp> {
+    match s {
+        "-" => Ok(UnaryOp::Neg),
+        "not" => Ok(UnaryOp::Not),
+        _ => Err(TermParseError::new(format!("unknown unary op: {}", s), 0)),
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -601,5 +1505,172 @@ mod tests {
             struct_def_to_erlang_term(&s),
             "{struct, 'Point', [{'x', {type, int}}, {'y', {type, int}}], []}"
         );
+    }
+
+    // =============================================================================
+    // Term Parser Tests
+    // =============================================================================
+
+    #[test]
+    fn test_parse_int() {
+        let term = parse_term("42").unwrap();
+        assert_eq!(term, Term::Int(42));
+    }
+
+    #[test]
+    fn test_parse_negative_int() {
+        let term = parse_term("-42").unwrap();
+        assert_eq!(term, Term::Int(-42));
+    }
+
+    #[test]
+    fn test_parse_atom() {
+        let term = parse_term("'hello'").unwrap();
+        assert_eq!(term, Term::Atom("hello".to_string()));
+    }
+
+    #[test]
+    fn test_parse_bare_atom() {
+        let term = parse_term("hello").unwrap();
+        assert_eq!(term, Term::Atom("hello".to_string()));
+    }
+
+    #[test]
+    fn test_parse_binary_string() {
+        let term = parse_term("<<\"hello\">>").unwrap();
+        assert_eq!(term, Term::String("hello".to_string()));
+    }
+
+    #[test]
+    fn test_parse_tuple() {
+        let term = parse_term("{int, 42}").unwrap();
+        assert_eq!(term, Term::Tuple(vec![
+            Term::Atom("int".to_string()),
+            Term::Int(42),
+        ]));
+    }
+
+    #[test]
+    fn test_parse_list() {
+        let term = parse_term("[1, 2, 3]").unwrap();
+        assert_eq!(term, Term::List(vec![
+            Term::Int(1),
+            Term::Int(2),
+            Term::Int(3),
+        ]));
+    }
+
+    #[test]
+    fn test_parse_nested() {
+        let term = parse_term("{binary_op, '+', {int, 1}, {int, 2}}").unwrap();
+        assert_eq!(term, Term::Tuple(vec![
+            Term::Atom("binary_op".to_string()),
+            Term::Atom("+".to_string()),
+            Term::Tuple(vec![Term::Atom("int".to_string()), Term::Int(1)]),
+            Term::Tuple(vec![Term::Atom("int".to_string()), Term::Int(2)]),
+        ]));
+    }
+
+    // =============================================================================
+    // Term to AST Conversion Tests
+    // =============================================================================
+
+    #[test]
+    fn test_term_to_expr_int() {
+        let term = parse_term("{int, 42}").unwrap();
+        let expr = term_to_expr(&term).unwrap();
+        assert_eq!(expr, Expr::Int(42));
+    }
+
+    #[test]
+    fn test_term_to_expr_string() {
+        let term = parse_term("{string, <<\"hello\">>}").unwrap();
+        let expr = term_to_expr(&term).unwrap();
+        assert_eq!(expr, Expr::String("hello".to_string()));
+    }
+
+    #[test]
+    fn test_term_to_expr_ident() {
+        let term = parse_term("{ident, 'foo'}").unwrap();
+        let expr = term_to_expr(&term).unwrap();
+        assert_eq!(expr, Expr::Ident("foo".to_string()));
+    }
+
+    #[test]
+    fn test_term_to_expr_binary_op() {
+        let term = parse_term("{binary_op, '+', {int, 1}, {int, 2}}").unwrap();
+        let expr = term_to_expr(&term).unwrap();
+        assert_eq!(expr, Expr::Binary {
+            op: BinOp::Add,
+            left: Box::new(Expr::Int(1)),
+            right: Box::new(Expr::Int(2)),
+        });
+    }
+
+    #[test]
+    fn test_term_to_type_int() {
+        let term = parse_term("{type, int}").unwrap();
+        let ty = term_to_type(&term).unwrap();
+        assert_eq!(ty, Type::Int);
+    }
+
+    #[test]
+    fn test_term_to_type_named() {
+        let term = parse_term("{named, 'Point'}").unwrap();
+        let ty = term_to_type(&term).unwrap();
+        assert_eq!(ty, Type::Named { name: "Point".to_string(), type_args: vec![] });
+    }
+
+    // =============================================================================
+    // Round-trip Tests (serialize then deserialize)
+    // =============================================================================
+
+    #[test]
+    fn test_roundtrip_expr_int() {
+        let original = Expr::Int(42);
+        let term_str = expr_to_erlang_term(&original);
+        let term = parse_term(&term_str).unwrap();
+        let result = term_to_expr(&term).unwrap();
+        assert_eq!(result, original);
+    }
+
+    #[test]
+    fn test_roundtrip_expr_string() {
+        let original = Expr::String("hello world".to_string());
+        let term_str = expr_to_erlang_term(&original);
+        let term = parse_term(&term_str).unwrap();
+        let result = term_to_expr(&term).unwrap();
+        assert_eq!(result, original);
+    }
+
+    #[test]
+    fn test_roundtrip_expr_binary_op() {
+        let original = Expr::Binary {
+            op: BinOp::Add,
+            left: Box::new(Expr::Int(1)),
+            right: Box::new(Expr::Int(2)),
+        };
+        let term_str = expr_to_erlang_term(&original);
+        let term = parse_term(&term_str).unwrap();
+        let result = term_to_expr(&term).unwrap();
+        assert_eq!(result, original);
+    }
+
+    #[test]
+    fn test_roundtrip_type_int() {
+        let original = Type::Int;
+        let term_str = type_to_erlang_term(&original);
+        let term = parse_term(&term_str).unwrap();
+        let result = term_to_type(&term).unwrap();
+        assert_eq!(result, original);
+    }
+
+    #[test]
+    fn test_roundtrip_type_named() {
+        let original = Type::Named { name: "Point".to_string(), type_args: vec![] };
+        let term_str = type_to_erlang_term(&original);
+        let term = parse_term(&term_str).unwrap();
+        let result = term_to_type(&term).unwrap();
+        assert_eq!(result, original);
     }
 }
