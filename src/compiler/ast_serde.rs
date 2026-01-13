@@ -214,6 +214,11 @@ pub fn expr_to_erlang_term(expr: &Expr) -> String {
             format!("{{unquote_splice, {}}}", expr_to_erlang_term(inner))
         }
 
+        Expr::QuoteItem(item) => {
+            // For now, just note it's a quote item - full serialization could be added later
+            format!("{{quote_item, {}}}", item_to_erlang_term(item))
+        }
+
         Expr::ExternCall { module, function, args } => {
             let args_str: Vec<String> = args.iter()
                 .map(|a| expr_to_erlang_term(a))

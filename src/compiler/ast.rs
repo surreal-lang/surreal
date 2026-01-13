@@ -655,6 +655,9 @@ pub enum Expr {
     /// Unquote-splicing: `#...list` inside a quote block.
     /// Splices a list of AST nodes into the quoted AST.
     UnquoteSplice(Box<Expr>),
+    /// Quote item: `quote { impl ... }` or `quote { fn ... }`.
+    /// Captures an item (impl, function, struct, enum) as AST data.
+    QuoteItem(Box<Item>),
 }
 
 /// A match arm.

@@ -1168,7 +1168,14 @@ impl<'source> Parser<'source> {
     /// Parse a block.
     fn parse_block(&mut self) -> ParseResult<Block> {
         self.expect(&Token::LBrace)?;
+        let block = self.parse_block_contents()?;
+        self.expect(&Token::RBrace)?;
+        Ok(block)
+    }
 
+    /// Parse block contents (statements and optional trailing expression).
+    /// Does not consume the surrounding braces.
+    fn parse_block_contents(&mut self) -> ParseResult<Block> {
         let mut stmts = Vec::new();
         let mut expr = None;
 
@@ -1200,7 +1207,6 @@ impl<'source> Parser<'source> {
             }
         }
 
-        self.expect(&Token::RBrace)?;
         Ok(Block { stmts, expr })
     }
 
@@ -2101,10 +2107,29 @@ impl<'source> Parser<'source> {
 
     /// Parse a quote expression: `quote { ... }`.
     /// The contents are captured as AST for macro processing.
+    /// If the quote block contains an item (impl, fn, struct, enum, trait),
+    /// it returns QuoteItem; otherwise Quote with a block expression.
     fn parse_quote_expr(&mut self) -> ParseResult<Expr> {
         self.expect(&Token::Quote)?;
-        let block = self.parse_block()?;
-        Ok(Expr::Quote(Box::new(Expr::Block(block))))
+        self.expect(&Token::LBrace)?;
+
+        // Check if the content is an item (impl, fn, struct, enum, trait)
+        let is_item = matches!(
+            self.peek(),
+            Some(Token::Impl) | Some(Token::Fn) | Some(Token::Struct) | Some(Token::Enum) | Some(Token::Trait)
+        );
+
+        if is_item {
+            // Parse as a quoted item - parse_item handles its own attributes
+            let item = self.parse_item()?;
+            self.expect(&Token::RBrace)?;
+            Ok(Expr::QuoteItem(Box::new(item)))
+        } else {
+            // Parse as a quoted block expression
+            let block = self.parse_block_contents()?;
+            self.expect(&Token::RBrace)?;
+            Ok(Expr::Quote(Box::new(Expr::Block(block))))
+        }
     }
 
     /// Parse an if expression.
