@@ -3300,7 +3300,9 @@ impl CoreErlangEmitter {
             }
 
             Expr::String(s) => {
-                self.emit(&format!("{{'string', <<\"{}\">>}}", self.escape_binary_string(s)));
+                // Use list_to_binary to construct the binary at runtime (Core Erlang compatible)
+                let chars: Vec<String> = s.chars().map(|c| (c as u32).to_string()).collect();
+                self.emit(&format!("{{'string', call 'erlang':'list_to_binary'([{}])}}", chars.join(", ")));
             }
 
             Expr::Charlist(s) => {
@@ -3562,7 +3564,9 @@ impl CoreErlangEmitter {
                 self.emit(&format!("{{'int', {}}}", n));
             }
             Pattern::String(s) => {
-                self.emit(&format!("{{'string', <<\"{}\">>}}", self.escape_binary_string(s)));
+                // Use list_to_binary to construct the binary at runtime (Core Erlang compatible)
+                let chars: Vec<String> = s.chars().map(|c| (c as u32).to_string()).collect();
+                self.emit(&format!("{{'string', call 'erlang':'list_to_binary'([{}])}}", chars.join(", ")));
             }
             Pattern::Charlist(s) => {
                 self.emit(&format!("{{'charlist', \"{}\"}}", self.escape_binary_string(s)));
@@ -3666,7 +3670,7 @@ impl CoreErlangEmitter {
             Type::Map => self.emit("{'type', 'map'}"),
             Type::Ref => self.emit("{'type', 'ref'}"),
             Type::Named { name, type_args } => {
-                self.emit(&format!("{{'type', '{}', [", self.escape_erlang_atom(name)));
+                self.emit(&format!("{{'named', '{}', [", self.escape_erlang_atom(name)));
                 for (i, arg) in type_args.iter().enumerate() {
                     if i > 0 {
                         self.emit(", ");
@@ -3676,12 +3680,12 @@ impl CoreErlangEmitter {
                 self.emit("]}");
             }
             Type::List(inner) => {
-                self.emit("{'type', 'list', ");
+                self.emit("{'list', ");
                 self.emit_quoted_type(inner)?;
                 self.emit("}");
             }
             Type::Tuple(elems) => {
-                self.emit("{'type', 'tuple', [");
+                self.emit("{'tuple', [");
                 for (i, elem) in elems.iter().enumerate() {
                     if i > 0 {
                         self.emit(", ");
@@ -3691,7 +3695,7 @@ impl CoreErlangEmitter {
                 self.emit("]}");
             }
             Type::Fn { params, ret } => {
-                self.emit("{'type', 'function', [");
+                self.emit("{'fn', [");
                 for (i, param) in params.iter().enumerate() {
                     if i > 0 {
                         self.emit(", ");
@@ -3703,13 +3707,13 @@ impl CoreErlangEmitter {
                 self.emit("}");
             }
             Type::TypeVar(name) => {
-                self.emit(&format!("{{'type', 'typevar', '{}'}}", self.escape_erlang_atom(name)));
+                self.emit(&format!("{{'type_var', '{}'}}", self.escape_erlang_atom(name)));
             }
             Type::AtomLiteral(name) => {
-                self.emit(&format!("{{'type', 'atom_literal', '{}'}}", self.escape_erlang_atom(name)));
+                self.emit(&format!("{{'atom_literal', '{}'}}", self.escape_erlang_atom(name)));
             }
             Type::Union(types) => {
-                self.emit("{'type', 'union', [");
+                self.emit("{'union', [");
                 for (i, ty) in types.iter().enumerate() {
                     if i > 0 {
                         self.emit(", ");
@@ -3720,7 +3724,7 @@ impl CoreErlangEmitter {
             }
             Type::AssociatedType { base, name } => {
                 self.emit(&format!(
-                    "{{'type', 'associated', '{}', '{}'}}",
+                    "{{'assoc_type', '{}', '{}'}}",
                     self.escape_erlang_atom(base),
                     self.escape_erlang_atom(name)
                 ));
