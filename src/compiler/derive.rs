@@ -230,7 +230,7 @@ fn generate_struct_debug(struct_def: &StructDef) -> Function {
     // Build format string: "Point { x: ~p, y: ~p }"
     let format_parts: Vec<String> = fields
         .iter()
-        .map(|(field_name, _)| format!("{}: ~~p", field_name))
+        .map(|(field_name, _)| format!("{}: ~p", field_name))
         .collect();
     let format_string = format!("{} {{ {} }}", name, format_parts.join(", "));
 
@@ -281,7 +281,7 @@ fn generate_enum_debug(enum_def: &EnumDef) -> Function {
         module: "io_lib".to_string(),
         function: "format".to_string(),
         args: vec![
-            Expr::Charlist(format!("{}::~~p", name)),
+            Expr::Charlist(format!("{}::~p", name)),
             Expr::List(vec![Expr::Ident("self".to_string())]),
         ],
     };

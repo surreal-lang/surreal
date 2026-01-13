@@ -895,9 +895,6 @@ impl CoreErlangEmitter {
         // Total arity includes receiver
         let arity = args.len() + 1;
 
-        // Get current module name without dream:: prefix (for stdlib)
-        let current_module = self.module_name.strip_prefix(Self::STDLIB_PREFIX).unwrap_or(&self.module_name).to_string();
-
         // Bind the receiver to a variable for dispatch
         let receiver_var = self.fresh_var();
         self.emit(&format!("let <{}> = ", receiver_var));
@@ -918,8 +915,8 @@ impl CoreErlangEmitter {
         for (i, type_name) in impl_types.iter().enumerate() {
             let mangled_name = format!("{}_{}", type_name, method_name);
 
-            // Match on fully qualified atom 'module::Type'
-            self.emit(&format!("<'{}::{}'>", current_module, type_name));
+            // Match on fully qualified atom 'module::Type' (includes dream:: prefix)
+            self.emit(&format!("<'{}::{}'>", self.module_name, type_name));
             self.emit(" when 'true' ->");
             self.newline();
             self.indent += 1;
