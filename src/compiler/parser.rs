@@ -1299,6 +1299,46 @@ impl<'source> Parser<'source> {
         )
     }
 
+    /// Try to parse a map key shorthand: `ident:` or `"string":`
+    /// Returns Some((key_expr, true)) if shorthand found and colon consumed,
+    /// Returns None if not a shorthand pattern.
+    fn try_parse_map_key_shorthand(&mut self) -> ParseResult<Option<(Expr, bool)>> {
+        // Check for ident: pattern (but not ident::)
+        if let Some(Token::Ident(name)) = self.peek() {
+            let name = name.clone();
+            // Look ahead for : but not ::
+            if self.check_ahead(1, &Token::Colon) && !self.check_ahead(2, &Token::Colon) {
+                self.advance(); // consume ident
+                self.advance(); // consume :
+                return Ok(Some((Expr::Atom(name), true)));
+            }
+        }
+        // Check for "string": pattern
+        if let Some(Token::String(s)) = self.peek() {
+            let s = s.clone();
+            if self.check_ahead(1, &Token::Colon) && !self.check_ahead(2, &Token::Colon) {
+                self.advance(); // consume string
+                self.advance(); // consume :
+                return Ok(Some((Expr::String(s), true)));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Parse a map entry: either `key: value` or `key => value`
+    fn parse_map_entry(&mut self) -> ParseResult<(Expr, Expr)> {
+        // Try shorthand syntax first: ident: or "string":
+        if let Some((key, true)) = self.try_parse_map_key_shorthand()? {
+            let value = self.parse_expr()?;
+            return Ok((key, value));
+        }
+        // Otherwise parse expr => value
+        let key = self.parse_expr()?;
+        self.expect(&Token::FatArrow)?;
+        let value = self.parse_expr()?;
+        Ok((key, value))
+    }
+
     /// Parse a let statement.
     fn parse_let_stmt(&mut self) -> ParseResult<Stmt> {
         self.expect(&Token::Let)?;
@@ -2006,7 +2046,10 @@ impl<'source> Parser<'source> {
         }
 
         // Map literal or block expression: { ... }
-        // Map literal: { key => value, ... }
+        // Map literal syntaxes:
+        //   { atom: value, ... }     - atom key shorthand
+        //   { "string": value, ... } - string key with colon
+        //   { expr => value, ... }   - any expression with fat arrow
         // Block: { stmt; stmt; expr }
         if self.check(&Token::LBrace) {
             self.advance(); // consume '{'
@@ -2024,12 +2067,33 @@ impl<'source> Parser<'source> {
                 return Ok(Expr::Block(block));
             }
 
+            // Check for atom: or "string": shorthand syntax
+            // Look for ident: or string: pattern (but not ::)
+            if let Some((key_expr, is_shorthand)) = self.try_parse_map_key_shorthand()? {
+                if is_shorthand {
+                    // It's a map with shorthand syntax
+                    let value = self.parse_expr()?;
+                    let mut pairs = vec![(key_expr, value)];
+
+                    while self.check(&Token::Comma) {
+                        self.advance();
+                        if self.check(&Token::RBrace) {
+                            break;
+                        }
+                        let (key, value) = self.parse_map_entry()?;
+                        pairs.push((key, value));
+                    }
+                    self.expect(&Token::RBrace)?;
+                    return Ok(Expr::MapLiteral(pairs));
+                }
+            }
+
             // Try to determine if this is a map or block
             // Parse first expression and check for '=>'
             let first = self.parse_expr()?;
 
             if self.check(&Token::FatArrow) {
-                // It's a map literal
+                // It's a map literal with => syntax
                 self.advance(); // consume '=>'
                 let value = self.parse_expr()?;
                 let mut pairs = vec![(first, value)];
@@ -2039,9 +2103,7 @@ impl<'source> Parser<'source> {
                     if self.check(&Token::RBrace) {
                         break;
                     }
-                    let key = self.parse_expr()?;
-                    self.expect(&Token::FatArrow)?;
-                    let value = self.parse_expr()?;
+                    let (key, value) = self.parse_map_entry()?;
                     pairs.push((key, value));
                 }
                 self.expect(&Token::RBrace)?;
@@ -3086,6 +3148,11 @@ impl<'source> Parser<'source> {
 
     fn check(&self, expected: &Token) -> bool {
         self.peek() == Some(expected)
+    }
+
+    /// Check if a token at a specific offset matches expected.
+    fn check_ahead(&self, offset: usize, expected: &Token) -> bool {
+        self.tokens.get(self.pos + offset).map(|t| &t.token) == Some(expected)
     }
 
     /// Expect a `>` token, handling the case where `>>` needs to be split.
