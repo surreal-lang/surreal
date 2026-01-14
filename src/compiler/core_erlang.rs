@@ -635,7 +635,8 @@ impl CoreErlangEmitter {
             Expr::Bool(_) => "bool".to_string(),
             Expr::BitString(_) => "binary".to_string(),
             Expr::Unit => "unit".to_string(),
-            Expr::List(_) => "list".to_string(),
+            Expr::List(_) | Expr::ListCons { .. } => "list".to_string(),
+            Expr::MapLiteral(_) => "map".to_string(),
             Expr::Tuple(_) => "tuple".to_string(),
             Expr::StructInit { name, .. } => name.clone(),
             // For other expressions, default to "any" (runtime dispatch)
@@ -2917,6 +2918,31 @@ impl CoreErlangEmitter {
                 }
             }
 
+            Expr::ListCons { head, tail } => {
+                self.emit("[");
+                self.emit_expr(head)?;
+                self.emit("|");
+                self.emit_expr(tail)?;
+                self.emit("]");
+            }
+
+            Expr::MapLiteral(pairs) => {
+                if pairs.is_empty() {
+                    self.emit("~{}~");
+                } else {
+                    self.emit("~{");
+                    for (i, (key, value)) in pairs.iter().enumerate() {
+                        if i > 0 {
+                            self.emit(",");
+                        }
+                        self.emit_expr(key)?;
+                        self.emit("=>");
+                        self.emit_expr(value)?;
+                    }
+                    self.emit("}~");
+                }
+            }
+
             Expr::Spawn(expr) => {
                 // Core Erlang requires binding the fun to a variable first
                 let tmp_var = self.fresh_var();
@@ -3450,6 +3476,29 @@ impl CoreErlangEmitter {
                 self.emit("{'list', ");
                 self.emit_quoted_list_with_splice(elems)?;
                 self.emit("}");
+            }
+
+            Expr::ListCons { head, tail } => {
+                self.emit("{'list_cons', ");
+                self.emit_quoted_expr(head)?;
+                self.emit(", ");
+                self.emit_quoted_expr(tail)?;
+                self.emit("}");
+            }
+
+            Expr::MapLiteral(pairs) => {
+                self.emit("{'map_literal', [");
+                for (i, (key, value)) in pairs.iter().enumerate() {
+                    if i > 0 {
+                        self.emit(", ");
+                    }
+                    self.emit("{");
+                    self.emit_quoted_expr(key)?;
+                    self.emit(", ");
+                    self.emit_quoted_expr(value)?;
+                    self.emit("}");
+                }
+                self.emit("]}");
             }
 
             Expr::StructInit { name, fields, base } => {

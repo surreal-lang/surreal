@@ -1942,6 +1942,35 @@ impl TypeChecker {
                 }
             }
 
+            // List cons: [head | tail]
+            Expr::ListCons { head, tail } => {
+                let head_ty = self.infer_expr(head)?;
+                let tail_ty = self.infer_expr(tail)?;
+                // Tail should be a list; result is a list of the head's type
+                if let Ty::List(elem_ty) = tail_ty {
+                    if self.types_compatible(&head_ty, &elem_ty) {
+                        Ok(Ty::List(elem_ty))
+                    } else {
+                        // Widen to any for heterogeneous cons
+                        Ok(Ty::List(Box::new(Ty::Any)))
+                    }
+                } else {
+                    // If tail is Any, result is list of any
+                    Ok(Ty::List(Box::new(Ty::Any)))
+                }
+            }
+
+            // Map literal: %{key => value, ...}
+            Expr::MapLiteral(pairs) => {
+                // Infer types for all keys and values
+                for (key, value) in pairs {
+                    self.infer_expr(key)?;
+                    self.infer_expr(value)?;
+                }
+                // Return map type (we don't have a more specific map type yet)
+                Ok(Ty::Any)
+            }
+
             // Struct initialization
             Expr::StructInit { name, fields, base } => {
                 if let Some(info) = self.env.get_struct(name).cloned() {
@@ -3358,6 +3387,15 @@ impl TypeChecker {
 
             Expr::List(exprs) => Expr::List(exprs.iter().map(|e| self.annotate_expr(e)).collect()),
 
+            Expr::ListCons { head, tail } => Expr::ListCons {
+                head: Box::new(self.annotate_expr(head)),
+                tail: Box::new(self.annotate_expr(tail)),
+            },
+
+            Expr::MapLiteral(pairs) => Expr::MapLiteral(
+                pairs.iter().map(|(k, v)| (self.annotate_expr(k), self.annotate_expr(v))).collect()
+            ),
+
             Expr::FieldAccess { expr, field } => Expr::FieldAccess {
                 expr: Box::new(self.annotate_expr(expr)),
                 field: field.clone(),
@@ -3988,6 +4026,16 @@ impl MethodResolver {
                     self.resolve_expr(e);
                 }
             }
+            Expr::ListCons { head, tail } => {
+                self.resolve_expr(head);
+                self.resolve_expr(tail);
+            }
+            Expr::MapLiteral(pairs) => {
+                for (k, v) in pairs {
+                    self.resolve_expr(k);
+                    self.resolve_expr(v);
+                }
+            }
             Expr::StructInit { fields, .. } => {
                 for (_, e) in fields {
                     self.resolve_expr(e);
@@ -4092,7 +4140,8 @@ impl MethodResolver {
             Expr::Bool(_) => Ty::Bool,
             Expr::Atom(name) => Ty::AtomLiteral(name.clone()),
             Expr::Unit => Ty::Unit,
-            Expr::List(_) => Ty::List(Box::new(Ty::Any)),
+            Expr::List(_) | Expr::ListCons { .. } => Ty::List(Box::new(Ty::Any)),
+            Expr::MapLiteral(_) => Ty::Any,
             Expr::Tuple(exprs) => {
                 Ty::Tuple(exprs.iter().map(|e| self.infer_expr_type(e)).collect())
             }

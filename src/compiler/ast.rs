@@ -658,6 +658,15 @@ pub enum Expr {
     /// Quote item: `quote { impl ... }` or `quote { fn ... }`.
     /// Captures an item (impl, function, struct, enum) as AST data.
     QuoteItem(Box<Item>),
+    /// List cons expression: `[head | tail]`.
+    /// Constructs a list by prepending head to tail.
+    ListCons {
+        head: Box<Expr>,
+        tail: Box<Expr>,
+    },
+    /// Map literal: `%{key => value, ...}`.
+    /// Creates an Erlang map at runtime.
+    MapLiteral(Vec<(Expr, Expr)>),
 }
 
 /// A match arm.

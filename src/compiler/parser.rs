@@ -1926,21 +1926,66 @@ impl<'source> Parser<'source> {
             return Ok(first);
         }
 
-        // List
+        // List or list cons
         if self.check(&Token::LBracket) {
             self.advance();
-            let mut elements = Vec::new();
-            if !self.check(&Token::RBracket) {
+
+            // Empty list
+            if self.check(&Token::RBracket) {
+                self.advance();
+                return Ok(Expr::List(vec![]));
+            }
+
+            let first = self.parse_expr()?;
+
+            // Check for cons syntax: [head | tail]
+            if self.check(&Token::Pipe) {
+                self.advance();
+                let tail = self.parse_expr()?;
+                self.expect(&Token::RBracket)?;
+                return Ok(Expr::ListCons {
+                    head: Box::new(first),
+                    tail: Box::new(tail),
+                });
+            }
+
+            // Regular list with remaining elements
+            let mut elements = vec![first];
+            while self.check(&Token::Comma) {
+                self.advance();
+                if self.check(&Token::RBracket) {
+                    break;
+                }
+                elements.push(self.parse_expr()?);
+            }
+            self.expect(&Token::RBracket)?;
+            return Ok(Expr::List(elements));
+        }
+
+        // Map literal: %{key => value, ...}
+        if self.check(&Token::Percent) {
+            self.advance();
+            self.expect(&Token::LBrace)?;
+
+            let mut pairs = Vec::new();
+            if !self.check(&Token::RBrace) {
                 loop {
-                    elements.push(self.parse_expr()?);
+                    let key = self.parse_expr()?;
+                    self.expect(&Token::FatArrow)?;
+                    let value = self.parse_expr()?;
+                    pairs.push((key, value));
+
                     if !self.check(&Token::Comma) {
                         break;
                     }
                     self.advance();
+                    if self.check(&Token::RBrace) {
+                        break;
+                    }
                 }
             }
-            self.expect(&Token::RBracket)?;
-            return Ok(Expr::List(elements));
+            self.expect(&Token::RBrace)?;
+            return Ok(Expr::MapLiteral(pairs));
         }
 
         // Block expression
@@ -5315,6 +5360,85 @@ mod repl_edit {
                 }
             } else {
                 panic!("expected quote item expr, got {:?}", f.body.expr);
+            }
+        } else {
+            panic!("expected function");
+        }
+    }
+
+    #[test]
+    fn test_parse_list_cons_expr() {
+        // Test that [head | tail] syntax works in expressions
+        let source = r#"
+            mod test {
+                fn prepend(x: int, xs: [int]) -> [int] {
+                    [x | xs]
+                }
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        if let Item::Function(f) = first_user_item(&module) {
+            if let Some(Expr::ListCons { head, tail }) = f.body.expr.as_deref() {
+                assert!(matches!(head.as_ref(), Expr::Ident(n) if n == "x"));
+                assert!(matches!(tail.as_ref(), Expr::Ident(n) if n == "xs"));
+            } else {
+                panic!("expected list cons expr, got {:?}", f.body.expr);
+            }
+        } else {
+            panic!("expected function");
+        }
+    }
+
+    #[test]
+    fn test_parse_map_literal() {
+        // Test that %{key => value} syntax works
+        let source = r#"
+            mod test {
+                fn make_map() {
+                    %{:foo => 1, :bar => 2}
+                }
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        if let Item::Function(f) = first_user_item(&module) {
+            if let Some(Expr::MapLiteral(pairs)) = f.body.expr.as_deref() {
+                assert_eq!(pairs.len(), 2);
+                // First pair: :foo => 1
+                assert!(matches!(&pairs[0].0, Expr::Atom(a) if a == "foo"));
+                assert!(matches!(&pairs[0].1, Expr::Int(1)));
+                // Second pair: :bar => 2
+                assert!(matches!(&pairs[1].0, Expr::Atom(a) if a == "bar"));
+                assert!(matches!(&pairs[1].1, Expr::Int(2)));
+            } else {
+                panic!("expected map literal, got {:?}", f.body.expr);
+            }
+        } else {
+            panic!("expected function");
+        }
+    }
+
+    #[test]
+    fn test_parse_empty_map_literal() {
+        // Test that empty map literal %{} works
+        let source = r#"
+            mod test {
+                fn empty_map() {
+                    %{}
+                }
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        if let Item::Function(f) = first_user_item(&module) {
+            if let Some(Expr::MapLiteral(pairs)) = f.body.expr.as_deref() {
+                assert!(pairs.is_empty());
+            } else {
+                panic!("expected empty map literal, got {:?}", f.body.expr);
             }
         } else {
             panic!("expected function");

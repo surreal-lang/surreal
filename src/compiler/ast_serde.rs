@@ -134,6 +134,19 @@ pub fn expr_to_erlang_term(expr: &Expr) -> String {
             format!("{{list, [{}]}}", elems_str.join(", "))
         }
 
+        Expr::ListCons { head, tail } => {
+            format!("{{list_cons, {}, {}}}",
+                expr_to_erlang_term(head),
+                expr_to_erlang_term(tail))
+        }
+
+        Expr::MapLiteral(pairs) => {
+            let pairs_str: Vec<String> = pairs.iter()
+                .map(|(k, v)| format!("{{{}, {}}}", expr_to_erlang_term(k), expr_to_erlang_term(v)))
+                .collect();
+            format!("{{map_literal, [{}]}}", pairs_str.join(", "))
+        }
+
         Expr::StructInit { name, fields, base } => {
             let fields_str: Vec<String> = fields.iter()
                 .map(|(n, e)| format!("{{'{}', {}}}", escape_atom(n), expr_to_erlang_term(e)))

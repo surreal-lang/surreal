@@ -359,6 +359,8 @@ impl Codegen {
                 }) || block.expr.as_ref().map_or(false, |e| Self::contains_call(e))
             }
             Expr::Tuple(elems) | Expr::List(elems) => elems.iter().any(|e| Self::contains_call(e)),
+            Expr::ListCons { head, tail } => Self::contains_call(head) || Self::contains_call(tail),
+            Expr::MapLiteral(pairs) => pairs.iter().any(|(k, v)| Self::contains_call(k) || Self::contains_call(v)),
             Expr::StructInit { fields, .. } => fields.iter().any(|(_, e)| Self::contains_call(e)),
             Expr::EnumVariant { args, .. } => match args {
                 EnumVariantArgs::Unit => false,
@@ -782,6 +784,40 @@ impl Codegen {
 
                     Ok(dest)
                 }
+            }
+
+            Expr::ListCons { head, tail } => {
+                // Compile head and tail, then cons them together
+                let head_reg = self.compile_expr(head)?;
+                let tail_reg = self.compile_expr(tail)?;
+                let dest = self.regs.alloc();
+                self.emit(Instruction::Cons {
+                    head: head_reg,
+                    tail: tail_reg,
+                    dest,
+                });
+                Ok(dest)
+            }
+
+            Expr::MapLiteral(pairs) => {
+                // Build a map from key-value pairs
+                for (key, value) in pairs {
+                    let key_reg = self.compile_expr(key)?;
+                    self.emit(Instruction::Push {
+                        source: Operand::Reg(key_reg),
+                    });
+                    let val_reg = self.compile_expr(value)?;
+                    self.emit(Instruction::Push {
+                        source: Operand::Reg(val_reg),
+                    });
+                }
+
+                let dest = self.regs.alloc();
+                self.emit(Instruction::MakeMap {
+                    count: pairs.len() as u8,
+                    dest,
+                });
+                Ok(dest)
             }
 
             Expr::StructInit { name, fields, .. } => {

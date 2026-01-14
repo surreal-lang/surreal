@@ -43,7 +43,6 @@ enum DeriveKind {
     Default,
     Eq,
     Hash,
-    ToJson,
 }
 
 impl DeriveKind {
@@ -55,14 +54,8 @@ impl DeriveKind {
             "Default" => Some(DeriveKind::Default),
             "PartialEq" | "Eq" => Some(DeriveKind::Eq),
             "Hash" => Some(DeriveKind::Hash),
-            "ToJson" => Some(DeriveKind::ToJson),
             _ => None,
         }
-    }
-
-    /// Check if this derive generates a trait impl (vs regular impl).
-    fn is_trait_impl(self) -> bool {
-        matches!(self, DeriveKind::ToJson)
     }
 }
 
@@ -372,8 +365,8 @@ fn generate_struct_derives(
 
         match DeriveKind::from_name(&derive_name) {
             Some(kind) => {
-                if let Some(item) = generate_struct_derive(struct_def, kind) {
-                    impls.push(item);
+                if let Some(impl_block) = generate_struct_derive(struct_def, kind) {
+                    impls.push(Item::Impl(impl_block));
                 }
             }
             None => {
@@ -424,8 +417,8 @@ fn generate_enum_derives(
 
         match DeriveKind::from_name(&derive_name) {
             Some(kind) => {
-                if let Some(item) = generate_enum_derive(enum_def, kind) {
-                    impls.push(item);
+                if let Some(impl_block) = generate_enum_derive(enum_def, kind) {
+                    impls.push(Item::Impl(impl_block));
                 }
             }
             None => {
@@ -458,57 +451,35 @@ fn generate_enum_derives(
 }
 
 /// Generate a single derive impl for a struct.
-/// Returns either an ImplBlock or TraitImpl depending on the derive kind.
-fn generate_struct_derive(struct_def: &StructDef, kind: DeriveKind) -> Option<Item> {
-    if kind.is_trait_impl() {
-        // Trait-based derives return TraitImpl
-        match kind {
-            DeriveKind::ToJson => Some(Item::TraitImpl(generate_struct_to_json(struct_def))),
-            _ => None,
-        }
-    } else {
-        // Regular derives return ImplBlock
-        let method = match kind {
-            DeriveKind::Debug => generate_struct_debug(struct_def),
-            DeriveKind::Clone => generate_struct_clone(struct_def),
-            DeriveKind::Default => generate_struct_default(struct_def),
-            DeriveKind::Eq => generate_struct_eq(struct_def),
-            DeriveKind::Hash => generate_hash(),
-            DeriveKind::ToJson => unreachable!(), // Handled above
-        };
+fn generate_struct_derive(struct_def: &StructDef, kind: DeriveKind) -> Option<ImplBlock> {
+    let method = match kind {
+        DeriveKind::Debug => generate_struct_debug(struct_def),
+        DeriveKind::Clone => generate_struct_clone(struct_def),
+        DeriveKind::Default => generate_struct_default(struct_def),
+        DeriveKind::Eq => generate_struct_eq(struct_def),
+        DeriveKind::Hash => generate_hash(),
+    };
 
-        Some(Item::Impl(ImplBlock {
-            type_name: struct_def.name.clone(),
-            methods: vec![method],
-        }))
-    }
+    Some(ImplBlock {
+        type_name: struct_def.name.clone(),
+        methods: vec![method],
+    })
 }
 
 /// Generate a single derive impl for an enum.
-/// Returns either an ImplBlock or TraitImpl depending on the derive kind.
-fn generate_enum_derive(enum_def: &EnumDef, kind: DeriveKind) -> Option<Item> {
-    if kind.is_trait_impl() {
-        // Trait-based derives return TraitImpl
-        match kind {
-            DeriveKind::ToJson => Some(Item::TraitImpl(generate_enum_to_json(enum_def))),
-            _ => None,
-        }
-    } else {
-        // Regular derives return ImplBlock
-        let method = match kind {
-            DeriveKind::Debug => generate_enum_debug(enum_def),
-            DeriveKind::Clone => generate_enum_clone(enum_def),
-            DeriveKind::Default => generate_enum_default(enum_def)?,
-            DeriveKind::Eq => generate_enum_eq(enum_def),
-            DeriveKind::Hash => generate_hash(),
-            DeriveKind::ToJson => unreachable!(), // Handled above
-        };
+fn generate_enum_derive(enum_def: &EnumDef, kind: DeriveKind) -> Option<ImplBlock> {
+    let method = match kind {
+        DeriveKind::Debug => generate_enum_debug(enum_def),
+        DeriveKind::Clone => generate_enum_clone(enum_def),
+        DeriveKind::Default => generate_enum_default(enum_def)?,
+        DeriveKind::Eq => generate_enum_eq(enum_def),
+        DeriveKind::Hash => generate_hash(),
+    };
 
-        Some(Item::Impl(ImplBlock {
-            type_name: enum_def.name.clone(),
-            methods: vec![method],
-        }))
-    }
+    Some(ImplBlock {
+        type_name: enum_def.name.clone(),
+        methods: vec![method],
+    })
 }
 
 // =============================================================================
@@ -879,139 +850,6 @@ fn generate_hash() -> Function {
         Some(Type::Int),
         body_expr,
     )
-}
-
-// =============================================================================
-// ToJson derive
-// =============================================================================
-
-/// Generate `impl ToJson for Struct` with `fn to_json(self) -> any`.
-///
-/// Produces code like:
-/// ```text
-/// impl ToJson for User {
-///     fn to_json(self) -> any {
-///         let map = :maps::new();
-///         let map = :maps::put(:id, self.id, map);
-///         let map = :maps::put(:name, self.name, map);
-///         map
-///     }
-/// }
-/// ```
-fn generate_struct_to_json(struct_def: &StructDef) -> TraitImpl {
-    let fields = &struct_def.fields;
-
-    // Build the method body as a sequence of statements
-    // let map = :maps::new();
-    // let map = :maps::put(:field, self.field, map);
-    // ...
-    // map
-
-    let mut stmts = Vec::new();
-
-    // let map = :maps::new();
-    stmts.push(Stmt::Let {
-        pattern: Pattern::Ident("map".to_string()),
-        ty: None,
-        value: Expr::ExternCall {
-            module: "maps".to_string(),
-            function: "new".to_string(),
-            args: vec![],
-        },
-    });
-
-    // For each field: let map = :maps::put(:field_name, self.field_name, map);
-    for (field_name, _) in fields {
-        stmts.push(Stmt::Let {
-            pattern: Pattern::Ident("map".to_string()),
-            ty: None,
-            value: Expr::ExternCall {
-                module: "maps".to_string(),
-                function: "put".to_string(),
-                args: vec![
-                    Expr::Atom(field_name.clone()),
-                    Expr::FieldAccess {
-                        expr: Box::new(Expr::Ident("self".to_string())),
-                        field: field_name.clone(),
-                    },
-                    Expr::Ident("map".to_string()),
-                ],
-            },
-        });
-    }
-
-    // Final expression: map
-    let body_expr = Expr::Ident("map".to_string());
-
-    let method = Function {
-        attrs: vec![],
-        name: "to_json".to_string(),
-        type_params: vec![],
-        params: vec![make_self_param()],
-        guard: None,
-        return_type: Some(Type::Any),
-        body: Block {
-            stmts,
-            expr: Some(Box::new(body_expr)),
-        },
-        is_pub: true,
-        span: Span::default(),
-    };
-
-    TraitImpl {
-        trait_name: "ToJson".to_string(),
-        trait_type_args: vec![],
-        type_name: struct_def.name.clone(),
-        type_bindings: vec![],
-        methods: vec![method],
-    }
-}
-
-/// Generate `impl ToJson for Enum` with `fn to_json(self) -> any`.
-///
-/// For enums, we convert to a map with a "type" key indicating the variant
-/// and additional keys for any variant data.
-fn generate_enum_to_json(enum_def: &EnumDef) -> TraitImpl {
-    // For enums, use a simple approach that converts self to a map representation
-    // with :__type__ key for the variant name
-
-    // :maps::from_list([{:__type__, :erlang::atom_to_binary(:erlang::element(1, self))}])
-    // Or simpler: just return the term and let JSON encoder handle it
-
-    // Simple approach: convert the enum term to a map via :erlang::term_to_binary
-    // Actually, let's use a more JSON-friendly approach with :__variant__ key
-
-    let body_expr = Expr::ExternCall {
-        module: "maps".to_string(),
-        function: "from_list".to_string(),
-        args: vec![Expr::List(vec![Expr::Tuple(vec![
-            Expr::Atom("__variant__".to_string()),
-            Expr::Ident("self".to_string()),
-        ])])],
-    };
-
-    let method = Function {
-        attrs: vec![],
-        name: "to_json".to_string(),
-        type_params: vec![],
-        params: vec![make_self_param()],
-        guard: None,
-        return_type: Some(Type::Any),
-        body: Block {
-            stmts: vec![],
-            expr: Some(Box::new(body_expr)),
-        },
-        is_pub: true,
-        span: Span::default(),
-    };
-
-    TraitImpl {
-        trait_name: "ToJson".to_string(),
-        trait_type_args: vec![],
-        type_name: enum_def.name.clone(),
-        type_bindings: vec![],
-        methods: vec![method],
-    }
 }
 
 // =============================================================================
