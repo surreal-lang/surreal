@@ -1930,16 +1930,15 @@ impl TypeChecker {
                     Ok(Ty::List(Box::new(self.fresh_infer())))
                 } else {
                     let elem_ty = self.infer_expr(&exprs[0])?;
+                    let mut unified_ty = elem_ty;
                     for expr in &exprs[1..] {
                         let ty = self.infer_expr(expr)?;
-                        if !self.types_compatible(&ty, &elem_ty) {
-                            self.error(TypeError::with_help(
-                                "list elements must have the same type",
-                                format!("expected {}, found {}", elem_ty, ty),
-                            ));
+                        if !self.types_compatible(&ty, &unified_ty) {
+                            // Widen to `any` for heterogeneous lists (common in macro AST construction)
+                            unified_ty = Ty::Any;
                         }
                     }
-                    Ok(Ty::List(Box::new(elem_ty)))
+                    Ok(Ty::List(Box::new(unified_ty)))
                 }
             }
 

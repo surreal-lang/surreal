@@ -1,12 +1,44 @@
 // JSON serialization utilities for Dream
-//
-// Note: A derive macro for JSON would require type checker improvements
-// to handle heterogeneous AST tuple construction. For now, we provide
-// a trait that structs can implement manually.
 
-mod json {
-    // Trait for types that can be converted to JSON-serializable maps
-    pub trait ToJson {
-        fn to_json(self) -> any;
-    }
+// Trait for types that can be converted to JSON-serializable maps
+pub trait ToJson {
+    fn to_json(self) -> any;
+}
+
+// Derive macro that generates ToJson implementation.
+#[macro]
+pub fn json_encode(ast: any) -> any {
+    let struct_name = :erlang::element(2, ast);
+    let fields = :erlang::element(3, ast);
+
+    // Get field names as a list of atoms
+    let field_names = :lists::map(|field| {
+        :erlang::element(1, field)
+    }, fields);
+
+    // Build the to_json function body that creates a map
+    let body = build_map_expr(field_names);
+
+    // Build the to_json function AST
+    let any_type = (:type, :any);
+    let to_json_fn = (:function, :to_json, [],
+        [((:ident, :self), any_type)],
+        any_type,
+        ([], body));
+
+    // Return impl block
+    (:impl, struct_name, [to_json_fn])
+}
+
+// Helper to build the map expression
+fn build_map_expr(field_names: any) -> any {
+    // Start with :maps::new()
+    let init_map = (:extern_call, :maps, :new, []);
+
+    // Fold to build nested :maps::put calls
+    :lists::foldl(|field_name, acc| {
+        let atom_node = (:atom, field_name);
+        let field_access = (:field_access, (:ident, :self), field_name);
+        (:extern_call, :maps, :put, [atom_node, field_access, acc])
+    }, init_map, field_names)
 }

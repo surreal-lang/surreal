@@ -1,25 +1,12 @@
 // Tests for http_api
 // Only compiled when running `dream test`
 
-// Define a test user struct in this module to avoid import issues
-struct TestUser {
-    id: int,
-    name: string,
-}
-
-impl TestUser {
-    fn to_json(self) -> any {
-        let map = :maps::new();
-        let map = :maps::put(:id, self.id, map);
-        let map = :maps::put(:name, self.name, map);
-        map
-    }
-}
+use crate::models::user::User;
 
 #[test]
 pub fn test_user_to_json() -> atom {
-    // Create a user and convert to JSON map
-    let user = TestUser { id: 42, name: "Alice" };
+    // Create a user and convert to JSON map using the derive macro generated method
+    let user = User::new(42, "Alice");
     let json = user.to_json();
 
     // Check that the map has the correct keys and values
