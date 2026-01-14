@@ -70,7 +70,7 @@ watch:
 
 # Build a project-style example (debug mode for fast iteration)
 example name:
-    cargo run -- build examples/{{name}}/src
+    cargo run -- build examples/{{name}}
 
 # Run a single-file example
 example-run name:

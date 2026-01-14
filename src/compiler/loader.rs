@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use crate::compiler::ast::{Item, ModDecl, Module};
 use crate::compiler::parser::Parser;
+use crate::config::ProjectConfig;
 
 /// Error during module loading.
 #[derive(Debug, Clone)]
@@ -369,11 +370,23 @@ impl ModuleLoader {
     }
 
     /// Load a project from an entry point.
-    /// If path is a directory, looks for main.dream or lib.dream.
+    /// If path is a directory, looks for dream.toml to determine source directory,
+    /// then looks for main.dream or lib.dream.
     pub fn load_project(&mut self, path: &Path) -> LoadResult<Module> {
         let entry = if path.is_dir() {
-            let main_path = path.join("main.dream");
-            let lib_path = path.join("lib.dream");
+            // Check for dream.toml to determine project structure
+            let config_path = path.join("dream.toml");
+            let src_dir = if config_path.exists() {
+                match ProjectConfig::load(&config_path) {
+                    Ok(config) => config.src_dir(path),
+                    Err(_) => path.to_path_buf(), // Fall back to root if config parse fails
+                }
+            } else {
+                path.to_path_buf()
+            };
+
+            let main_path = src_dir.join("main.dream");
+            let lib_path = src_dir.join("lib.dream");
 
             if main_path.exists() {
                 main_path
@@ -382,7 +395,7 @@ impl ModuleLoader {
             } else {
                 return Err(LoadError::with_path(
                     "no main.dream or lib.dream found in directory",
-                    path.to_path_buf(),
+                    src_dir,
                 ));
             }
         } else {
