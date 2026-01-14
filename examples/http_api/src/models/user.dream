@@ -1,9 +1,8 @@
-// User model with JSON serialization via derive macro
+// User model with JSON serialization
 
-use crate::macros::json::json_encode;
+use crate::macros::json::ToJson;
 
 /// A user with an ID and name.
-#[derive(json_encode)]
 pub struct User {
     id: int,
     name: string,
@@ -13,5 +12,16 @@ impl User {
     /// Create a new user with the given ID and name.
     pub fn new(id: int, name: string) -> User {
         User { id: id, name: name }
+    }
+}
+
+/// Manual ToJson implementation.
+/// TODO: Replace with derive macro once macro-generated impl blocks work.
+impl ToJson for User {
+    fn to_json(self) -> any {
+        let map = :maps::new();
+        let map = :maps::put(:id, self.id, map);
+        let map = :maps::put(:name, self.name, map);
+        map
     }
 }

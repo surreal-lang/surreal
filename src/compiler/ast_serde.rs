@@ -509,6 +509,18 @@ pub fn impl_block_to_erlang_term(impl_block: &ImplBlock) -> String {
         methods_str.join(", "))
 }
 
+/// Convert a trait impl to Erlang term format.
+/// Format: {traitimpl, TraitName, TypeName, [Methods]}
+pub fn trait_impl_to_erlang_term(trait_impl: &TraitImpl) -> String {
+    let methods_str: Vec<String> = trait_impl.methods.iter()
+        .map(|m| function_to_erlang_term(m))
+        .collect();
+    format!("{{traitimpl, '{}', '{}', [{}]}}",
+        escape_atom(&trait_impl.trait_name),
+        escape_atom(&trait_impl.type_name),
+        methods_str.join(", "))
+}
+
 /// Convert an Item to Erlang term format.
 pub fn item_to_erlang_term(item: &Item) -> String {
     match item {
@@ -516,6 +528,7 @@ pub fn item_to_erlang_term(item: &Item) -> String {
         Item::Enum(e) => enum_def_to_erlang_term(e),
         Item::Function(f) => function_to_erlang_term(f),
         Item::Impl(impl_block) => impl_block_to_erlang_term(impl_block),
+        Item::TraitImpl(trait_impl) => trait_impl_to_erlang_term(trait_impl),
         _ => "{unsupported_item}".to_string(),
     }
 }
@@ -1361,6 +1374,32 @@ pub fn term_to_impl_block(term: &Term) -> TermParseResult<ImplBlock> {
     Ok(ImplBlock { type_name, methods })
 }
 
+/// Convert an Erlang term to a TraitImpl.
+/// Format: {traitimpl, TraitName, TypeName, [Methods]}
+pub fn term_to_trait_impl(term: &Term) -> TermParseResult<TraitImpl> {
+    let tuple = expect_tuple(term)?;
+    let tag = expect_atom(&tuple[0])?;
+
+    if tag != "traitimpl" {
+        return Err(TermParseError::new(format!("expected 'traitimpl' tag, found '{}'", tag), 0));
+    }
+
+    let trait_name = expect_atom(&tuple[1])?;
+    let type_name = expect_atom(&tuple[2])?;
+    let methods = expect_list(&tuple[3])?
+        .iter()
+        .map(term_to_function)
+        .collect::<TermParseResult<Vec<_>>>()?;
+
+    Ok(TraitImpl {
+        trait_name,
+        trait_type_args: vec![],
+        type_name,
+        type_bindings: vec![],
+        methods,
+    })
+}
+
 /// Convert an Erlang term to a Function.
 pub fn term_to_function(term: &Term) -> TermParseResult<Function> {
     let tuple = expect_tuple(term)?;
@@ -1411,6 +1450,7 @@ pub fn term_to_item(term: &Term) -> TermParseResult<Item> {
 
     match tag.as_str() {
         "impl" => Ok(Item::Impl(term_to_impl_block(term)?)),
+        "traitimpl" => Ok(Item::TraitImpl(term_to_trait_impl(term)?)),
         "function" => Ok(Item::Function(term_to_function(term)?)),
         _ => Err(TermParseError::new(format!("unsupported item tag: {}", tag), 0)),
     }
