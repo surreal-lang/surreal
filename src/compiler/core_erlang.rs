@@ -256,17 +256,15 @@ impl CoreErlangEmitter {
         "process", "genserver", "supervisor", "application",
     ];
 
-    /// Resolve a simple module name string, adding dream:: prefix for stdlib modules.
+    /// Resolve a simple module name string, adding dream:: prefix for Dream modules.
+    /// All Dream modules (both stdlib and user modules) get the dream:: prefix.
     fn resolve_module_name(module: &str) -> String {
-        // If already has a prefix (contains ::), use as-is
-        if module.contains("::") {
+        // If already has dream:: prefix, use as-is
+        if module.starts_with(Self::STDLIB_PREFIX) {
             module.to_string()
-        } else if Self::STDLIB_MODULES.contains(&module) {
-            // Stdlib module - add dream:: prefix
-            format!("dream::{}", module)
         } else {
-            // User module - use as-is
-            module.to_string()
+            // Add dream:: prefix for all Dream modules
+            format!("{}{}", Self::STDLIB_PREFIX, module)
         }
     }
 
@@ -957,6 +955,13 @@ impl CoreErlangEmitter {
 
     /// Emit dynamic method dispatch for cross-module struct methods.
     /// Uses the __struct__ tag 'module::Type' atom to dispatch to the correct module.
+    ///
+    /// The __struct__ tag format is 'beam_module::TypeName', e.g.:
+    ///   'dream::http_api::models::user::User'
+    /// We need to:
+    ///   - Module: all parts except last joined by "::" -> 'dream::http_api::models::user'
+    ///   - Type: last part -> 'User'
+    ///   - Function: Type_method -> 'User_to_json'
     fn emit_dynamic_method_dispatch(
         &mut self,
         method_name: &str,
@@ -980,7 +985,7 @@ impl CoreErlangEmitter {
         self.emit("in ");
 
         // Convert tag atom to list and split on "::"
-        // TagList = atom_to_list('module::Type') -> "module::Type"
+        // TagList = atom_to_list('beam_mod::Type') -> "beam_mod::Type"
         let tag_list_var = self.fresh_var();
         self.emit(&format!(
             "let <{}> = call 'erlang':'atom_to_list'({})",
@@ -989,7 +994,7 @@ impl CoreErlangEmitter {
         self.newline();
         self.emit("in ");
 
-        // Split on "::" using string:split/3 -> ["module", "Type"]
+        // Split on "::" using string:split/3 -> ["dream", "http_api", "models", "user", "User"]
         // "::" is [58, 58] in character codes
         let parts_var = self.fresh_var();
         self.emit(&format!(
@@ -999,26 +1004,35 @@ impl CoreErlangEmitter {
         self.newline();
         self.emit("in ");
 
-        // Extract module string: lists:nth(1, Parts)
-        let mod_str_var = self.fresh_var();
-        self.emit(&format!(
-            "let <{}> = call 'lists':'nth'(1, {})",
-            mod_str_var, parts_var
-        ));
-        self.newline();
-        self.emit("in ");
-
-        // Extract type string: lists:nth(2, Parts)
+        // Extract type string: lists:last(Parts) -> "User"
         let type_str_var = self.fresh_var();
         self.emit(&format!(
-            "let <{}> = call 'lists':'nth'(2, {})",
+            "let <{}> = call 'lists':'last'({})",
             type_str_var, parts_var
         ));
         self.newline();
         self.emit("in ");
 
-        // The __struct__ tag now stores the full BEAM module name directly
-        // So we just convert the module string to an atom
+        // Extract module parts: lists:droplast(Parts) -> ["dream", "http_api", "models", "user"]
+        let mod_parts_var = self.fresh_var();
+        self.emit(&format!(
+            "let <{}> = call 'lists':'droplast'({})",
+            mod_parts_var, parts_var
+        ));
+        self.newline();
+        self.emit("in ");
+
+        // Join module parts with "::" -> "dream::http_api::models::user"
+        // lists:join("::", ModParts) returns a nested list, flatten it
+        let mod_str_var = self.fresh_var();
+        self.emit(&format!(
+            "let <{}> = call 'lists':'flatten'(call 'lists':'join'([58, 58], {}))",
+            mod_str_var, mod_parts_var
+        ));
+        self.newline();
+        self.emit("in ");
+
+        // Convert module string to atom
         let beam_mod_var = self.fresh_var();
         self.emit(&format!(
             "let <{}> = call 'erlang':'list_to_atom'({})",
@@ -1061,6 +1075,7 @@ impl CoreErlangEmitter {
     }
 
     /// Emit all methods for a trait implementation, including default methods.
+    /// Also emits simple-name wrapper functions (Type_method) for dynamic dispatch.
     fn emit_trait_impl_methods(&mut self, trait_impl: &TraitImpl) -> CoreErlangResult<()> {
         // Collect method names explicitly implemented (only those passing cfg)
         let impl_method_names: HashSet<String> =
@@ -1087,7 +1102,7 @@ impl CoreErlangEmitter {
             );
             let mangled_method = Function {
                 attrs: vec![],
-                name: mangled_name,
+                name: mangled_name.clone(),
                 type_params: method.type_params.clone(),
                 params: method.params.clone(),
                 guard: method.guard.clone(),
@@ -1098,6 +1113,15 @@ impl CoreErlangEmitter {
             };
             self.newline();
             self.emit_function(&mangled_method)?;
+
+            // Also emit simple-name wrapper for dynamic dispatch: Type_method -> Trait_Type_method
+            // This allows cross-module method calls like user.to_json() to work
+            let simple_name = format!("{}_{}", trait_impl.type_name, method.name);
+            self.emit_simple_method_wrapper(
+                &simple_name,
+                &mangled_name,
+                method.params.len(),
+            )?;
         }
 
         // Emit default methods not overridden in this impl
@@ -1111,7 +1135,7 @@ impl CoreErlangEmitter {
                         );
                         let default_method = Function {
                             attrs: vec![],
-                            name: mangled_name,
+                            name: mangled_name.clone(),
                             type_params: trait_method.type_params.clone(),
                             params: trait_method.params.clone(),
                             guard: None,
@@ -1122,6 +1146,14 @@ impl CoreErlangEmitter {
                         };
                         self.newline();
                         self.emit_function(&default_method)?;
+
+                        // Also emit simple-name wrapper for default methods
+                        let simple_name = format!("{}_{}", trait_impl.type_name, trait_method.name);
+                        self.emit_simple_method_wrapper(
+                            &simple_name,
+                            &mangled_name,
+                            trait_method.params.len(),
+                        )?;
                     }
                 }
             }
@@ -1132,6 +1164,35 @@ impl CoreErlangEmitter {
         if simple_trait == "From" && trait_impl.trait_type_args.len() == 1 {
             self.emit_blanket_into_impl(trait_impl)?;
         }
+
+        Ok(())
+    }
+
+    /// Emit a simple wrapper function that delegates to a mangled trait method.
+    /// This enables dynamic dispatch for cross-module method calls.
+    /// e.g., User_to_json(Self) -> ToJson_User_to_json(Self)
+    fn emit_simple_method_wrapper(
+        &mut self,
+        simple_name: &str,
+        mangled_name: &str,
+        arity: usize,
+    ) -> CoreErlangResult<()> {
+        self.newline();
+        // Generate parameter names
+        let params: Vec<String> = (0..arity).map(|i| format!("_@p{}", i)).collect();
+        let params_str = params.join(", ");
+
+        // Core Erlang function format: 'Name'/Arity = fun (Params) -> Body
+        self.emit(&format!("'{}'/{} =", simple_name, arity));
+        self.newline();
+        self.indent += 1;
+        self.emit(&format!("fun ({}) ->", params_str));
+        self.newline();
+        self.indent += 1;
+        self.emit(&format!("apply '{}'/{}", mangled_name, arity));
+        self.emit(&format!("({})", params_str));
+        self.indent -= 1;
+        self.indent -= 1;
 
         Ok(())
     }
@@ -1408,18 +1469,20 @@ impl CoreErlangEmitter {
                         self.format_trait_type_args(&trait_impl.trait_type_args);
 
                     // Export explicitly implemented methods (filtered by cfg)
+                    // Trait impl methods are always exported (visibility comes from trait/type)
                     for method in &trait_impl.methods {
                         // Skip methods excluded by cfg
                         if !cfg::should_include(&method.attrs, &self.compile_options) {
                             continue;
                         }
-                        if method.is_pub {
-                            let mangled_name = format!(
-                                "{}{}_{}_{}",
-                                simple_trait, trait_type_args_suffix, trait_impl.type_name, method.name
-                            );
-                            exports.push(format!("'{}'/{}", mangled_name, method.params.len()));
-                        }
+                        let mangled_name = format!(
+                            "{}{}_{}_{}",
+                            simple_trait, trait_type_args_suffix, trait_impl.type_name, method.name
+                        );
+                        exports.push(format!("'{}'/{}", mangled_name, method.params.len()));
+                        // Also export simple-name wrapper for dynamic dispatch
+                        let simple_name = format!("{}_{}", trait_impl.type_name, method.name);
+                        exports.push(format!("'{}'/{}", simple_name, method.params.len()));
                     }
 
                     // Export default methods not overridden
@@ -1437,6 +1500,11 @@ impl CoreErlangEmitter {
                                 );
                                 exports.push(format!(
                                     "'{}'/{}", mangled_name, trait_method.params.len()
+                                ));
+                                // Also export simple-name wrapper for dynamic dispatch
+                                let simple_name = format!("{}_{}", trait_impl.type_name, trait_method.name);
+                                exports.push(format!(
+                                    "'{}'/{}", simple_name, trait_method.params.len()
                                 ));
                             }
                         }

@@ -1,25 +1,12 @@
 // Tests for http_api
 // Only compiled when running `dream test`
 
-// Define a local test struct to avoid cross-module method resolution issues
-struct TestUser {
-    id: int,
-    name: string,
-}
-
-impl TestUser {
-    fn to_json(self) -> any {
-        let map = :maps::new();
-        let map = :maps::put(:id, self.id, map);
-        let map = :maps::put(:name, self.name, map);
-        map
-    }
-}
+use crate::models::user::User;
 
 #[test]
 pub fn test_user_to_json() -> atom {
-    // Create a user and convert to JSON map
-    let user = TestUser { id: 42, name: "Alice" };
+    // Test cross-module method call - this was the bug!
+    let user = User { id: 42, name: "Alice" };
     let json = user.to_json();
 
     // Check that the map has the correct keys and values
@@ -40,7 +27,7 @@ pub fn test_user_to_json() -> atom {
 #[test]
 pub fn test_map_to_json_compatible() -> atom {
     // Test that to_json returns a map compatible with JSON encoding
-    let user = TestUser { id: 1, name: "Bob" };
+    let user = User { id: 1, name: "Bob" };
     let map = user.to_json();
 
     // Verify the map has the expected structure
