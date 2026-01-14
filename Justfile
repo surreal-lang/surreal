@@ -68,9 +68,9 @@ lint:
 watch:
     cargo watch -x test
 
-# Build a project-style example (debug mode for fast iteration)
+# Build and run a project-style example (debug mode for fast iteration)
 example name:
-    cargo run -- build examples/{{name}}
+    cd examples/{{name}} && cargo run --manifest-path ../../Cargo.toml -- run
 
 # Run a single-file example
 example-run name:
