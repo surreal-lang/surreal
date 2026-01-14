@@ -1,16 +1,18 @@
 // Handler for GET /api/users
+//
+// Demonstrates using the json_encode derive macro to serialize structs to JSON.
 
-/// Convert a string (charlist) to binary for JSON encoding
-fn to_binary(s: string) -> any {
-    :erlang::iolist_to_binary([s])
-}
+use crate::models::user::User;
 
 pub fn init(req: any, state: any) -> (atom, any, any) {
-    // Build a list of user maps for JSON response
-    let user1 = :maps::put(:name, to_binary("Alice"), :maps::put(:id, 1, :maps::new()));
-    let user2 = :maps::put(:name, to_binary("Bob"), :maps::put(:id, 2, :maps::new()));
-    let user3 = :maps::put(:name, to_binary("Charlie"), :maps::put(:id, 3, :maps::new()));
-    let data = :maps::put(:users, [user1, user2, user3], :maps::new());
+    // Create users using the User struct
+    let user1 = User::new(1, "Alice");
+    let user2 = User::new(2, "Bob");
+    let user3 = User::new(3, "Charlie");
+
+    // Convert to JSON-serializable maps using the macro-generated to_json() method
+    let users_json = [user1.to_json(), user2.to_json(), user3.to_json()];
+    let data = :maps::put(:users, users_json, :maps::new());
 
     // Use auto-generated jason bindings from _build/bindings/
     match jason::encode(data, []) {

@@ -1,0 +1,12 @@
+// JSON serialization utilities for Dream
+//
+// Note: A derive macro for JSON would require type checker improvements
+// to handle heterogeneous AST tuple construction. For now, we provide
+// a trait that structs can implement manually.
+
+mod json {
+    // Trait for types that can be converted to JSON-serializable maps
+    pub trait ToJson {
+        fn to_json(self) -> any;
+    }
+}
