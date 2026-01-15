@@ -232,6 +232,14 @@ pub fn expr_to_erlang_term(expr: &Expr) -> String {
             format!("{{quote_item, {}}}", item_to_erlang_term(item))
         }
 
+        Expr::QuoteRepetition { pattern, separator } => {
+            let sep_str = match separator {
+                Some(s) => format!("'{}'", s),
+                None => "none".to_string(),
+            };
+            format!("{{quote_repetition, {}, {}}}", expr_to_erlang_term(pattern), sep_str)
+        }
+
         Expr::ExternCall { module, function, args } => {
             let args_str: Vec<String> = args.iter()
                 .map(|a| expr_to_erlang_term(a))

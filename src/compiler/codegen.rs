@@ -1463,7 +1463,7 @@ impl Codegen {
             }
 
             // Quote/Unquote should be expanded before codegen
-            Expr::Quote(_) | Expr::Unquote(_) | Expr::UnquoteSplice(_) | Expr::QuoteItem(_) => {
+            Expr::Quote(_) | Expr::Unquote(_) | Expr::UnquoteSplice(_) | Expr::QuoteItem(_) | Expr::QuoteRepetition { .. } => {
                 Err(CodegenError::new(
                     "quote/unquote expressions should be expanded before codegen",
                 ))

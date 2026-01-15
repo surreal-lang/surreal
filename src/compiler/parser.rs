@@ -2155,7 +2155,13 @@ impl<'source> Parser<'source> {
         // Unquote expression: #expr (for use inside quote blocks)
         if self.check(&Token::Hash) {
             self.advance();
-            // Check for unquote-splicing: #...expr
+
+            // Check for quote repetition: #(pattern)* or #(pattern),*
+            if self.check(&Token::LParen) {
+                return self.parse_quote_repetition();
+            }
+
+            // Check for unquote-splicing: #..expr
             if self.check(&Token::DotDot) {
                 self.advance();
                 let expr = self.parse_primary()?;
@@ -2352,6 +2358,43 @@ impl<'source> Parser<'source> {
         // Restore quote mode
         self.in_quote = was_in_quote;
         result
+    }
+
+    /// Parse a quote repetition: `#(pattern)*` or `#(pattern),*`.
+    /// Called after consuming `#`.
+    fn parse_quote_repetition(&mut self) -> ParseResult<Expr> {
+        self.expect(&Token::LParen)?;
+
+        // Parse the pattern expression (can contain #var references)
+        let pattern = self.parse_expr()?;
+
+        self.expect(&Token::RParen)?;
+
+        // Check for separator before `*` (e.g., `,*` for comma-separated)
+        let separator = if !self.check(&Token::Star) {
+            // There's a token before * - capture it as separator
+            let sep = match self.peek() {
+                Some(Token::Comma) => Some(",".to_string()),
+                Some(Token::Semi) => Some(";".to_string()),
+                _ => {
+                    return Err(ParseError::new(
+                        "expected `*` or separator followed by `*` in quote repetition",
+                        self.current_span(),
+                    ));
+                }
+            };
+            self.advance(); // consume separator
+            sep
+        } else {
+            None
+        };
+
+        self.expect(&Token::Star)?;
+
+        Ok(Expr::QuoteRepetition {
+            pattern: Box::new(pattern),
+            separator,
+        })
     }
 
     /// Parse an if expression.

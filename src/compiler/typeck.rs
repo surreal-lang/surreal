@@ -2282,6 +2282,7 @@ impl TypeChecker {
             Expr::Unquote(_) => Ok(Ty::Any),
             Expr::UnquoteSplice(_) => Ok(Ty::Any),
             Expr::QuoteItem(_) => Ok(Ty::Any),
+            Expr::QuoteRepetition { .. } => Ok(Ty::Any),
         }
     }
 
@@ -3515,6 +3516,11 @@ impl TypeChecker {
             Expr::UnquoteSplice(inner) => Expr::UnquoteSplice(Box::new(self.annotate_expr(inner))),
             // QuoteItem - items don't need expression annotation
             Expr::QuoteItem(item) => Expr::QuoteItem(item.clone()),
+            // QuoteRepetition - annotate the pattern
+            Expr::QuoteRepetition { pattern, separator } => Expr::QuoteRepetition {
+                pattern: Box::new(self.annotate_expr(pattern)),
+                separator: separator.clone(),
+            },
         }
     }
 
@@ -4122,6 +4128,11 @@ impl MethodResolver {
             // Quote/Unquote - resolve inner expressions
             Expr::Quote(inner) | Expr::Unquote(inner) | Expr::UnquoteSplice(inner) => {
                 self.resolve_expr(inner);
+            }
+
+            // QuoteRepetition - resolve the pattern
+            Expr::QuoteRepetition { pattern, .. } => {
+                self.resolve_expr(pattern);
             }
 
             // QuoteItem - items don't have expressions to resolve in this context

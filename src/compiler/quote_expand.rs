@@ -250,6 +250,12 @@ fn quote_expr_to_tuple(expr: &Expr) -> Expr {
         // (will be handled by containing construct)
         Expr::UnquoteSplice(inner) => *inner.clone(),
 
+        // QuoteRepetition: #(pattern)* or #(pattern),*
+        // This is used to iterate over a list and expand the pattern for each element
+        Expr::QuoteRepetition { pattern, separator } => {
+            quote_repetition_to_expr(pattern, separator.as_deref())
+        }
+
         // Block (statements + optional final expression)
         Expr::Block(block) => quote_block_to_tuple(block),
 
@@ -270,10 +276,12 @@ fn quote_expr_to_tuple(expr: &Expr) -> Expr {
 }
 
 /// Convert a quoted block to tuple construction code.
-/// Handles statement splicing with #..list syntax.
+/// Handles statement splicing with #..list syntax and #(...)* repetition.
 fn quote_block_to_tuple(block: &Block) -> Expr {
-    // Check if any statement is a splice (UnquoteSplice)
-    let has_splice = block.stmts.iter().any(|s| matches!(s, Stmt::Expr(Expr::UnquoteSplice(_))));
+    // Check if any statement is a splice (UnquoteSplice) or repetition (QuoteRepetition)
+    let has_splice = block.stmts.iter().any(|s| {
+        matches!(s, Stmt::Expr(Expr::UnquoteSplice(_)) | Stmt::Expr(Expr::QuoteRepetition { .. }))
+    });
 
     let expr_tuple = block
         .expr
@@ -318,6 +326,15 @@ fn quote_block_with_splice(block: &Block, expr_tuple: Expr) -> Expr {
                 }
                 // Add the splice variable directly (it's already a list)
                 concat_parts.push(*inner.clone());
+            }
+            Stmt::Expr(Expr::QuoteRepetition { pattern, separator }) => {
+                // Flush current group as a list
+                if !current_group.is_empty() {
+                    concat_parts.push(Expr::List(current_group.clone()));
+                    current_group.clear();
+                }
+                // Add the repetition - it produces a list of quoted statements
+                concat_parts.push(quote_repetition_to_expr(pattern, separator.as_deref()));
             }
             _ => {
                 // Add to current group
@@ -451,6 +468,227 @@ fn quote_list_with_splice(elems: &[Expr]) -> Expr {
             stmts,
             expr: Some(Box::new(append_call)),
         })
+    }
+}
+
+/// Handle quote repetition: #(pattern)* or #(pattern),*
+///
+/// This function handles two cases:
+/// 1. Simple case: `#(#var)*` - the pattern is just an unquote of a variable.
+///    In this case, `var` should already be a list of quoted AST elements,
+///    so we just return it directly (like a splice).
+///
+/// 2. Complex case: `#(some_code_with #var)*` - the pattern contains code
+///    with an unquoted variable. We generate a map over the variable,
+///    applying the pattern transformation to each element.
+fn quote_repetition_to_expr(pattern: &Expr, separator: Option<&str>) -> Expr {
+    // Case 1: Simple splice - #(#var)*
+    // Pattern is Unquote(Ident(...)) - just return the variable
+    if let Expr::Unquote(inner) = pattern {
+        if let Expr::Ident(var_name) = inner.as_ref() {
+            // The variable should already contain a list of quoted elements
+            // Just return it directly
+            return Expr::Ident(var_name.clone());
+        }
+    }
+
+    // Case 2: Complex pattern - find the iteration variable and generate a map
+    // Look for unquoted variables in the pattern
+    let iter_vars = find_unquoted_vars(pattern);
+
+    if iter_vars.is_empty() {
+        // No iteration variable found - this is just a repeated literal pattern
+        // Return an empty list (no iteration possible)
+        return Expr::List(vec![]);
+    }
+
+    // Use the first unquoted variable as the iteration variable
+    let iter_var = &iter_vars[0];
+
+    // Generate: iter_var |> :lists::map(|_rep_item| quote_pattern_with_item)
+    // Where quote_pattern_with_item substitutes _rep_item for the iteration variable
+
+    // Create a modified pattern where the iteration variable reference becomes _rep_item
+    let modified_pattern = substitute_var_in_expr(pattern, iter_var, "_rep_item");
+
+    // Now quote the modified pattern
+    let quoted_pattern = quote_expr_to_tuple(&modified_pattern);
+
+    // Generate the closure: |_rep_item| quoted_pattern
+    let closure = Expr::Closure {
+        params: vec!["_rep_item".to_string()],
+        body: Block {
+            stmts: vec![],
+            expr: Some(Box::new(quoted_pattern)),
+        },
+    };
+
+    // Generate: :lists::map(closure, iter_var)
+    let map_call = Expr::ExternCall {
+        module: "lists".to_string(),
+        function: "map".to_string(),
+        args: vec![closure, Expr::Ident(iter_var.clone())],
+    };
+
+    // Handle separator if present (for #(pattern),* syntax)
+    if let Some(sep) = separator {
+        // Generate: :lists::join(sep, map_result)
+        // Actually, join is for strings. For AST elements with separators,
+        // we need to interleave separator tokens.
+        // For now, ignore separator - it's mainly useful for generating comma-separated lists
+        // which we can handle by the caller wrapping in a list node
+        let _ = sep;
+    }
+
+    map_call
+}
+
+/// Find all unquoted variable names in an expression
+fn find_unquoted_vars(expr: &Expr) -> Vec<String> {
+    let mut vars = Vec::new();
+    find_unquoted_vars_recursive(expr, &mut vars);
+    vars
+}
+
+fn find_unquoted_vars_recursive(expr: &Expr, vars: &mut Vec<String>) {
+    match expr {
+        Expr::Unquote(inner) => {
+            if let Expr::Ident(name) = inner.as_ref() {
+                if !vars.contains(name) {
+                    vars.push(name.clone());
+                }
+            }
+        }
+        Expr::Ident(name) => {
+            // Check for $UNQUOTE: marker
+            if let Some(var_name) = name.strip_prefix("$UNQUOTE:") {
+                if !vars.contains(&var_name.to_string()) {
+                    vars.push(var_name.to_string());
+                }
+            }
+        }
+        Expr::Binary { left, right, .. } => {
+            find_unquoted_vars_recursive(left, vars);
+            find_unquoted_vars_recursive(right, vars);
+        }
+        Expr::Unary { expr, .. } => {
+            find_unquoted_vars_recursive(expr, vars);
+        }
+        Expr::Call { func, args, .. } => {
+            find_unquoted_vars_recursive(func, vars);
+            for arg in args {
+                find_unquoted_vars_recursive(arg, vars);
+            }
+        }
+        Expr::MethodCall { receiver, args, .. } => {
+            find_unquoted_vars_recursive(receiver, vars);
+            for arg in args {
+                find_unquoted_vars_recursive(arg, vars);
+            }
+        }
+        Expr::FieldAccess { expr, .. } => {
+            find_unquoted_vars_recursive(expr, vars);
+        }
+        Expr::Tuple(elems) | Expr::List(elems) => {
+            for elem in elems {
+                find_unquoted_vars_recursive(elem, vars);
+            }
+        }
+        Expr::Block(block) => {
+            for stmt in &block.stmts {
+                match stmt {
+                    Stmt::Let { value, .. } => find_unquoted_vars_recursive(value, vars),
+                    Stmt::Expr(e) => find_unquoted_vars_recursive(e, vars),
+                }
+            }
+            if let Some(e) = &block.expr {
+                find_unquoted_vars_recursive(e, vars);
+            }
+        }
+        Expr::ExternCall { args, .. } => {
+            for arg in args {
+                find_unquoted_vars_recursive(arg, vars);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Substitute a variable name with a new expression in an expression tree
+fn substitute_var_in_expr(expr: &Expr, var_name: &str, replacement: &str) -> Expr {
+    match expr {
+        Expr::Unquote(inner) => {
+            if let Expr::Ident(name) = inner.as_ref() {
+                if name == var_name {
+                    // Replace with new variable reference
+                    return Expr::Unquote(Box::new(Expr::Ident(replacement.to_string())));
+                }
+            }
+            Expr::Unquote(Box::new(substitute_var_in_expr(inner, var_name, replacement)))
+        }
+        Expr::Ident(name) => {
+            // Check for $UNQUOTE: marker
+            if let Some(var) = name.strip_prefix("$UNQUOTE:") {
+                if var == var_name {
+                    return Expr::Ident(format!("$UNQUOTE:{}", replacement));
+                }
+            }
+            expr.clone()
+        }
+        Expr::Binary { op, left, right } => Expr::Binary {
+            op: op.clone(),
+            left: Box::new(substitute_var_in_expr(left, var_name, replacement)),
+            right: Box::new(substitute_var_in_expr(right, var_name, replacement)),
+        },
+        Expr::Unary { op, expr: inner } => Expr::Unary {
+            op: op.clone(),
+            expr: Box::new(substitute_var_in_expr(inner, var_name, replacement)),
+        },
+        Expr::Call { func, args, type_args, inferred_type_args } => Expr::Call {
+            func: Box::new(substitute_var_in_expr(func, var_name, replacement)),
+            args: args.iter().map(|a| substitute_var_in_expr(a, var_name, replacement)).collect(),
+            type_args: type_args.clone(),
+            inferred_type_args: inferred_type_args.clone(),
+        },
+        Expr::MethodCall { receiver, method, args, type_args, resolved_module, inferred_type_args } => Expr::MethodCall {
+            receiver: Box::new(substitute_var_in_expr(receiver, var_name, replacement)),
+            method: method.clone(),
+            args: args.iter().map(|a| substitute_var_in_expr(a, var_name, replacement)).collect(),
+            type_args: type_args.clone(),
+            resolved_module: resolved_module.clone(),
+            inferred_type_args: inferred_type_args.clone(),
+        },
+        Expr::FieldAccess { expr: inner, field } => Expr::FieldAccess {
+            expr: Box::new(substitute_var_in_expr(inner, var_name, replacement)),
+            field: field.clone(),
+        },
+        Expr::Tuple(elems) => {
+            Expr::Tuple(elems.iter().map(|e| substitute_var_in_expr(e, var_name, replacement)).collect())
+        }
+        Expr::List(elems) => {
+            Expr::List(elems.iter().map(|e| substitute_var_in_expr(e, var_name, replacement)).collect())
+        }
+        Expr::Block(block) => {
+            let stmts = block.stmts.iter().map(|s| match s {
+                Stmt::Let { pattern, ty, value } => Stmt::Let {
+                    pattern: pattern.clone(),
+                    ty: ty.clone(),
+                    value: substitute_var_in_expr(value, var_name, replacement),
+                },
+                Stmt::Expr(e) => Stmt::Expr(substitute_var_in_expr(e, var_name, replacement)),
+            }).collect();
+            let expr_opt = block.expr.as_ref().map(|e| {
+                Box::new(substitute_var_in_expr(e, var_name, replacement))
+            });
+            Expr::Block(Block { stmts, expr: expr_opt })
+        }
+        Expr::ExternCall { module, function, args } => Expr::ExternCall {
+            module: module.clone(),
+            function: function.clone(),
+            args: args.iter().map(|a| substitute_var_in_expr(a, var_name, replacement)).collect(),
+        },
+        // For other expressions, return as-is
+        _ => expr.clone(),
     }
 }
 
@@ -710,5 +948,58 @@ mod tests {
         let expanded = expand_expr_quotes(expr);
         // Should produce the variable reference: name
         assert!(matches!(expanded, Expr::Ident(n) if n == "name"));
+    }
+
+    #[test]
+    fn test_quote_repetition_simple() {
+        // #(#items)* where pattern is just an unquote -> returns the variable directly
+        let repetition = Expr::QuoteRepetition {
+            pattern: Box::new(Expr::Unquote(Box::new(Expr::Ident("items".to_string())))),
+            separator: None,
+        };
+        let expr = Expr::Quote(Box::new(repetition));
+        let expanded = expand_expr_quotes(expr);
+        // Should produce: items (the variable reference)
+        assert!(matches!(expanded, Expr::Ident(n) if n == "items"));
+    }
+
+    #[test]
+    fn test_quote_repetition_with_separator() {
+        // #(#items),* with comma separator
+        let repetition = Expr::QuoteRepetition {
+            pattern: Box::new(Expr::Unquote(Box::new(Expr::Ident("items".to_string())))),
+            separator: Some(",".to_string()),
+        };
+        let expr = Expr::Quote(Box::new(repetition));
+        let expanded = expand_expr_quotes(expr);
+        // Simple case still returns items directly
+        assert!(matches!(expanded, Expr::Ident(n) if n == "items"));
+    }
+
+    #[test]
+    fn test_find_unquoted_vars() {
+        // Test that we correctly find unquoted variables
+        let expr = Expr::Binary {
+            op: BinOp::Add,
+            left: Box::new(Expr::Unquote(Box::new(Expr::Ident("x".to_string())))),
+            right: Box::new(Expr::Unquote(Box::new(Expr::Ident("y".to_string())))),
+        };
+        let vars = find_unquoted_vars(&expr);
+        assert_eq!(vars.len(), 2);
+        assert!(vars.contains(&"x".to_string()));
+        assert!(vars.contains(&"y".to_string()));
+    }
+
+    #[test]
+    fn test_substitute_var_in_expr() {
+        // Test variable substitution
+        let expr = Expr::Unquote(Box::new(Expr::Ident("field".to_string())));
+        let substituted = substitute_var_in_expr(&expr, "field", "_rep_item");
+        match substituted {
+            Expr::Unquote(inner) => {
+                assert!(matches!(*inner, Expr::Ident(n) if n == "_rep_item"));
+            }
+            _ => panic!("Expected Unquote"),
+        }
     }
 }

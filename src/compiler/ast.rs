@@ -654,9 +654,18 @@ pub enum Expr {
     /// Unquote expression: `#ident` inside a quote block.
     /// Interpolates the value of the expression into the quoted AST.
     Unquote(Box<Expr>),
-    /// Unquote-splicing: `#...list` inside a quote block.
+    /// Unquote-splicing: `#..list` inside a quote block.
     /// Splices a list of AST nodes into the quoted AST.
     UnquoteSplice(Box<Expr>),
+    /// Quote repetition: `#(pattern)*` or `#(pattern),*` inside a quote block.
+    /// Iterates over a collection and generates AST for each element.
+    /// Similar to Rust's `#(#item)*` in proc_macro.
+    QuoteRepetition {
+        /// The pattern to repeat (contains #var references)
+        pattern: Box<Expr>,
+        /// Optional separator token (e.g., "," for `#(#items),*`)
+        separator: Option<String>,
+    },
     /// Quote item: `quote { impl ... }` or `quote { fn ... }`.
     /// Captures an item (impl, function, struct, enum) as AST data.
     QuoteItem(Box<Item>),

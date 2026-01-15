@@ -51,6 +51,7 @@ pub fn serialize_derive(input: any) -> any {
 }
 
 /// Build a list of statements that serialize each field.
+/// Uses quote { } for cleaner code generation.
 fn build_field_stmts(fields: [Field]) -> [any] {
     :lists::filtermap(|field| {
         // Get field name - extract from the Option wrapper
@@ -59,16 +60,13 @@ fn build_field_stmts(fields: [Field]) -> [any] {
             // Some(name) is represented as {:Some, name}
             let field_name = :erlang::element(2, field_ident);
 
-            // Build: let map = :maps::put(:field_name, serialize_value(self.field_name), map);
-            let atom_expr = (:atom, field_name);
-            let self_ident = (:ident, :self);
-            let field_access = (:field_access, self_ident, field_name);
-            // Use fully qualified extern call to avoid path resolution issues across projects
-            let serialize_call = (:extern_call, :'dream::serde::serialize', :serialize_value, [field_access]);
-            let map_ident = (:ident, :map);
-            let put_args = [atom_expr, serialize_call, map_ident];
-            let put_call = (:extern_call, :maps, :put, put_args);
-            let stmt = (:let, (:ident, :map), :none, put_call);
+            // Use quote { } to build the statement tuple
+            // quote { let x = y; } produces ([stmt], :none) at runtime
+            let stmt_block = quote {
+                let map = :maps::put(:#field_name, :dream::serde::serialize::serialize_value(self.#field_name), map);
+            };
+            // Extract the first statement from the block tuple (stmts, expr)
+            let stmt = :hd(:erlang::element(1, stmt_block));
 
             (:true, stmt)
         } else {

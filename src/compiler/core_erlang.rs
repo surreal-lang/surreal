@@ -3384,9 +3384,9 @@ impl CoreErlangEmitter {
             }
 
             // Unquote outside of quote is an error
-            Expr::Unquote(_) | Expr::UnquoteSplice(_) => {
+            Expr::Unquote(_) | Expr::UnquoteSplice(_) | Expr::QuoteRepetition { .. } => {
                 return Err(CoreErlangError::new(
-                    "unquote/unquote-splice can only be used inside quote blocks",
+                    "unquote/unquote-splice/quote-repetition can only be used inside quote blocks",
                 ));
             }
         }
