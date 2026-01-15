@@ -176,6 +176,10 @@ fn evaluate_cfg_arg(arg: &AttributeArg, options: &CompileOptions) -> bool {
                 }
             }
         }
+        AttributeArg::Path(_) => {
+            // Paths don't make sense in cfg context - treat as false
+            false
+        }
     }
 }
 

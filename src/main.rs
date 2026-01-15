@@ -1310,7 +1310,11 @@ fn generate_macros_file(
     Ok(())
 }
 
-/// Load macros from dependency .macros files and register them.
+/// Load macros from dependency .macros files and register them for qualified path lookups.
+/// Macros are registered under their package name (e.g., "serde::Serialize").
+/// This does NOT register them globally - they must be either:
+/// - Imported via `use serde::Serialize;` (for unqualified `#[derive(Serialize)]`)
+/// - Used with qualified path `#[derive(serde::Serialize)]`
 fn load_dependency_macros(
     macro_registry: &mut MacroRegistry,
     dep_ebin_paths: &[PathBuf],
@@ -1321,11 +1325,27 @@ fn load_dependency_macros(
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.extension().map_or(false, |ext| ext == "macros") {
+                    // Extract package name from filename (e.g., "serde.macros" -> "serde")
+                    let package_name = path
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("");
+
+                    if package_name.is_empty() {
+                        continue;
+                    }
+
                     if let Ok(content) = fs::read_to_string(&path) {
                         match serde_json::from_str::<MacrosFile>(&content) {
                             Ok(macros_file) => {
                                 for m in macros_file.macros {
-                                    macro_registry.register(&m.derive_name, &m.module, &m.function);
+                                    // Register under package name for qualified lookups
+                                    macro_registry.register_package_macro(
+                                        package_name,
+                                        &m.derive_name,
+                                        &m.module,
+                                        &m.function,
+                                    );
                                 }
                             }
                             Err(e) => {

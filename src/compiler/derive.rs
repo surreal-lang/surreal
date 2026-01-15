@@ -68,8 +68,12 @@ impl DeriveKind {
 /// User-defined macros are Dream functions marked with `#[macro]` that take
 /// AST data as input and return transformed AST.
 pub struct MacroRegistry {
-    /// User-defined macros: maps derive name to (module, function).
+    /// User-defined macros in current module scope: maps derive name to (module, function).
+    /// These are populated via `use` statements like `use serde::Serialize;`
     user_defined: HashMap<String, (String, String)>,
+    /// Package macros: maps package name to its macros (derive_name -> (module, function)).
+    /// Used for qualified paths like `#[derive(serde::Serialize)]`
+    package_macros: HashMap<String, HashMap<String, (String, String)>>,
     /// BEAM paths for loading macro modules.
     beam_paths: Vec<PathBuf>,
     /// The macro expander (lazily initialized on first use).
@@ -81,6 +85,7 @@ impl MacroRegistry {
     pub fn new() -> Self {
         MacroRegistry {
             user_defined: HashMap::new(),
+            package_macros: HashMap::new(),
             beam_paths: Vec::new(),
             expander: None,
         }
@@ -90,21 +95,38 @@ impl MacroRegistry {
     pub fn with_paths(beam_paths: Vec<PathBuf>) -> Self {
         MacroRegistry {
             user_defined: HashMap::new(),
+            package_macros: HashMap::new(),
             beam_paths,
             expander: None,
         }
     }
 
-    /// Register a user-defined macro.
+    /// Register a user-defined macro in the current module scope.
+    /// This is used for macros imported via `use` statements.
     ///
     /// # Arguments
     ///
-    /// * `name` - The derive name (e.g., "my_debug")
-    /// * `module` - The Dream module containing the macro (e.g., "dream::macros")
-    /// * `function` - The macro function name (e.g., "my_debug")
+    /// * `name` - The derive name (e.g., "Serialize")
+    /// * `module` - The Dream module containing the macro (e.g., "dream::serde::serde")
+    /// * `function` - The macro function name (e.g., "serialize_derive")
     pub fn register(&mut self, name: &str, module: &str, function: &str) {
         self.user_defined
             .insert(name.to_string(), (module.to_string(), function.to_string()));
+    }
+
+    /// Register a macro from a specific package.
+    /// Used for qualified path lookups like `#[derive(serde::Serialize)]`.
+    pub fn register_package_macro(
+        &mut self,
+        package: &str,
+        derive_name: &str,
+        module: &str,
+        function: &str,
+    ) {
+        self.package_macros
+            .entry(package.to_string())
+            .or_default()
+            .insert(derive_name.to_string(), (module.to_string(), function.to_string()));
     }
 
     /// Check if a derive name is a built-in derive.
@@ -112,16 +134,44 @@ impl MacroRegistry {
         DeriveKind::from_name(name).is_some()
     }
 
-    /// Check if a derive name is registered (built-in or user-defined).
+    /// Check if a derive name is registered (built-in or user-defined in scope).
     pub fn is_registered(&self, name: &str) -> bool {
         Self::is_builtin(name) || self.user_defined.contains_key(name)
     }
 
-    /// Get the user-defined macro info for a derive name.
+    /// Get the user-defined macro info for a derive name (unqualified, in scope).
     pub fn get_user_defined(&self, name: &str) -> Option<(&str, &str)> {
         self.user_defined
             .get(name)
             .map(|(m, f)| (m.as_str(), f.as_str()))
+    }
+
+    /// Get macro info by qualified path (e.g., `serde::Serialize`).
+    /// The package is the first segment(s), name is the last segment.
+    pub fn get_qualified(&self, package: &[String], name: &str) -> Option<(&str, &str)> {
+        // For now, support single-segment package names (e.g., "serde")
+        // TODO: support nested packages
+        if package.len() == 1 {
+            self.package_macros
+                .get(&package[0])
+                .and_then(|macros| macros.get(name))
+                .map(|(m, f)| (m.as_str(), f.as_str()))
+        } else {
+            // Multi-segment package path - join with "::"
+            let pkg_name = package.join("::");
+            self.package_macros
+                .get(&pkg_name)
+                .and_then(|macros| macros.get(name))
+                .map(|(m, f)| (m.as_str(), f.as_str()))
+        }
+    }
+
+    /// Get macro info by DeriveRef (handles both qualified and unqualified).
+    pub fn get_by_ref(&self, derive_ref: &DeriveRef) -> Option<(&str, &str)> {
+        match derive_ref {
+            DeriveRef::Name(name) => self.get_user_defined(name),
+            DeriveRef::Path { package, name } => self.get_qualified(package, name),
+        }
     }
 
     /// Expand a user-defined derive macro on a struct.
@@ -187,6 +237,104 @@ impl MacroRegistry {
                 Span::default(),
             )
         })?;
+
+        // Serialize the enum to DeriveInput format (syn-style)
+        let ast_term = ast_serde::enum_to_derive_input(enum_def);
+
+        // Get or create the expander
+        let expander = self.get_expander()?;
+
+        // Call the macro on BEAM
+        let result = expander.expand_macro(&module, &function, &ast_term).map_err(|e| {
+            DeriveError::new(format!("macro expansion failed: {}", e.message), Span::default())
+        })?;
+
+        // Parse the result as Erlang term
+        let term = ast_serde::parse_term(&result).map_err(|e| {
+            DeriveError::new(format!("failed to parse macro result: {}", e), Span::default())
+        })?;
+
+        // Convert to Item(s)
+        match &term {
+            ast_serde::Term::List(items) => {
+                items.iter()
+                    .map(|t| ast_serde::term_to_item(t).map_err(|e| {
+                        DeriveError::new(format!("failed to convert macro result: {}", e), Span::default())
+                    }))
+                    .collect()
+            }
+            _ => {
+                let item = ast_serde::term_to_item(&term).map_err(|e| {
+                    DeriveError::new(format!("failed to convert macro result: {}", e), Span::default())
+                })?;
+                Ok(vec![item])
+            }
+        }
+    }
+
+    /// Expand a derive macro on a struct using DeriveRef (supports both qualified and unqualified).
+    pub fn expand_struct_by_ref(
+        &mut self,
+        derive_ref: &DeriveRef,
+        struct_def: &StructDef,
+    ) -> Result<Vec<Item>, DeriveError> {
+        let (module, function) = self.get_by_ref(derive_ref).ok_or_else(|| {
+            DeriveError::new(
+                format!("unknown derive macro `{}`", derive_ref),
+                Span::default(),
+            )
+        })?;
+        let module = module.to_string();
+        let function = function.to_string();
+
+        // Serialize the struct to DeriveInput format (syn-style)
+        let ast_term = ast_serde::struct_to_derive_input(struct_def);
+
+        // Get or create the expander
+        let expander = self.get_expander()?;
+
+        // Call the macro on BEAM
+        let result = expander.expand_macro(&module, &function, &ast_term).map_err(|e| {
+            DeriveError::new(format!("macro expansion failed: {}", e.message), Span::default())
+        })?;
+
+        // Parse the result as Erlang term
+        let term = ast_serde::parse_term(&result).map_err(|e| {
+            DeriveError::new(format!("failed to parse macro result: {}", e), Span::default())
+        })?;
+
+        // Convert to Item(s)
+        match &term {
+            ast_serde::Term::List(items) => {
+                items.iter()
+                    .map(|t| ast_serde::term_to_item(t).map_err(|e| {
+                        DeriveError::new(format!("failed to convert macro result: {}", e), Span::default())
+                    }))
+                    .collect()
+            }
+            _ => {
+                let item = ast_serde::term_to_item(&term).map_err(|e| {
+                    DeriveError::new(format!("failed to convert macro result: {}", e), Span::default())
+                })?;
+                Ok(vec![item])
+            }
+        }
+    }
+
+    /// Expand a derive macro on an enum using DeriveRef (supports both qualified and unqualified).
+    pub fn expand_enum_by_ref(
+        &mut self,
+        derive_ref: &DeriveRef,
+        enum_def: &EnumDef,
+    ) -> Result<Vec<Item>, DeriveError> {
+        let (module, function) = self.get_by_ref(derive_ref).ok_or_else(|| {
+            DeriveError::new(
+                format!("unknown derive macro `{}`", derive_ref),
+                Span::default(),
+            )
+        })?;
+        let module = module.to_string();
+        let function = function.to_string();
 
         // Serialize the enum to DeriveInput format (syn-style)
         let ast_term = ast_serde::enum_to_derive_input(enum_def);
@@ -326,16 +474,68 @@ pub fn expand_derives_with_registry(
     }
 }
 
-/// Extract derive names from a struct's attributes.
-fn get_derive_names(attrs: &[Attribute]) -> Vec<(String, Span)> {
+/// A derive macro reference - either a simple name or a qualified path.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum DeriveRef {
+    /// Simple unqualified name: `Serialize`
+    Name(String),
+    /// Qualified path: `serde::Serialize` -> (["serde"], "Serialize")
+    Path { package: Vec<String>, name: String },
+}
+
+impl DeriveRef {
+    /// Get the derive macro name (last component of path).
+    pub fn name(&self) -> &str {
+        match self {
+            DeriveRef::Name(n) => n,
+            DeriveRef::Path { name, .. } => name,
+        }
+    }
+
+    /// Get the package path if this is a qualified path.
+    pub fn package(&self) -> Option<&[String]> {
+        match self {
+            DeriveRef::Name(_) => None,
+            DeriveRef::Path { package, .. } => Some(package),
+        }
+    }
+}
+
+impl std::fmt::Display for DeriveRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DeriveRef::Name(n) => write!(f, "{}", n),
+            DeriveRef::Path { package, name } => {
+                write!(f, "{}::{}", package.join("::"), name)
+            }
+        }
+    }
+}
+
+/// Extract derive references from a struct's attributes.
+fn get_derive_refs(attrs: &[Attribute]) -> Vec<(DeriveRef, Span)> {
     let mut derives = Vec::new();
 
     for attr in attrs {
         if attr.name == "derive" {
             if let AttributeArgs::Parenthesized(args) = &attr.args {
                 for arg in args {
-                    if let AttributeArg::Ident(name) = arg {
-                        derives.push((name.clone(), attr.span.clone()));
+                    match arg {
+                        AttributeArg::Ident(name) => {
+                            derives.push((DeriveRef::Name(name.clone()), attr.span.clone()));
+                        }
+                        AttributeArg::Path(segments) => {
+                            if let Some((name, package)) = segments.split_last() {
+                                derives.push((
+                                    DeriveRef::Path {
+                                        package: package.to_vec(),
+                                        name: name.clone(),
+                                    },
+                                    attr.span.clone(),
+                                ));
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -350,45 +550,45 @@ fn generate_struct_derives(
     struct_def: &StructDef,
     mut registry: Option<&mut MacroRegistry>,
 ) -> Result<Vec<Item>, Vec<DeriveError>> {
-    let derives = get_derive_names(&struct_def.attrs);
+    let derives = get_derive_refs(&struct_def.attrs);
     let mut impls = Vec::new();
     let mut errors = Vec::new();
 
     // Track which derives we've already processed to avoid duplicates
     let mut processed = std::collections::HashSet::new();
 
-    for (derive_name, span) in derives {
-        if processed.contains(&derive_name) {
+    for (derive_ref, span) in derives {
+        if processed.contains(&derive_ref) {
             continue;
         }
-        processed.insert(derive_name.clone());
+        processed.insert(derive_ref.clone());
 
-        match DeriveKind::from_name(&derive_name) {
-            Some(kind) => {
+        // Check if it's a built-in derive (only for unqualified names)
+        if let DeriveRef::Name(ref name) = derive_ref {
+            if let Some(kind) = DeriveKind::from_name(name) {
                 if let Some(impl_block) = generate_struct_derive(struct_def, kind) {
                     impls.push(Item::Impl(impl_block));
                 }
-            }
-            None => {
-                // Try user-defined macro if registry is available
-                let mut found_user_macro = false;
-                if let Some(ref mut reg) = registry {
-                    if reg.get_user_defined(&derive_name).is_some() {
-                        match reg.expand_user_defined_struct(&derive_name, struct_def) {
-                            Ok(items) => impls.extend(items),
-                            Err(err) => errors.push(err),
-                        }
-                        found_user_macro = true;
-                    }
-                }
-                if !found_user_macro {
-                    errors.push(DeriveError::new(
-                        format!("unknown derive macro `{}`", derive_name),
-                        span,
-                    ));
-                }
+                continue;
             }
         }
+
+        // Try user-defined macro if registry is available
+        if let Some(ref mut reg) = registry {
+            if reg.get_by_ref(&derive_ref).is_some() {
+                match reg.expand_struct_by_ref(&derive_ref, struct_def) {
+                    Ok(items) => impls.extend(items),
+                    Err(err) => errors.push(err),
+                }
+                continue;
+            }
+        }
+
+        // Not found
+        errors.push(DeriveError::new(
+            format!("unknown derive macro `{}`", derive_ref),
+            span,
+        ));
     }
 
     if errors.is_empty() {
@@ -403,44 +603,44 @@ fn generate_enum_derives(
     enum_def: &EnumDef,
     mut registry: Option<&mut MacroRegistry>,
 ) -> Result<Vec<Item>, Vec<DeriveError>> {
-    let derives = get_derive_names(&enum_def.attrs);
+    let derives = get_derive_refs(&enum_def.attrs);
     let mut impls = Vec::new();
     let mut errors = Vec::new();
 
     let mut processed = std::collections::HashSet::new();
 
-    for (derive_name, span) in derives {
-        if processed.contains(&derive_name) {
+    for (derive_ref, span) in derives {
+        if processed.contains(&derive_ref) {
             continue;
         }
-        processed.insert(derive_name.clone());
+        processed.insert(derive_ref.clone());
 
-        match DeriveKind::from_name(&derive_name) {
-            Some(kind) => {
+        // Check if it's a built-in derive (only for unqualified names)
+        if let DeriveRef::Name(ref name) = derive_ref {
+            if let Some(kind) = DeriveKind::from_name(name) {
                 if let Some(impl_block) = generate_enum_derive(enum_def, kind) {
                     impls.push(Item::Impl(impl_block));
                 }
-            }
-            None => {
-                // Try user-defined macro if registry is available
-                let mut found_user_macro = false;
-                if let Some(ref mut reg) = registry {
-                    if reg.get_user_defined(&derive_name).is_some() {
-                        match reg.expand_user_defined_enum(&derive_name, enum_def) {
-                            Ok(items) => impls.extend(items),
-                            Err(err) => errors.push(err),
-                        }
-                        found_user_macro = true;
-                    }
-                }
-                if !found_user_macro {
-                    errors.push(DeriveError::new(
-                        format!("unknown derive macro `{}`", derive_name),
-                        span,
-                    ));
-                }
+                continue;
             }
         }
+
+        // Try user-defined macro if registry is available
+        if let Some(ref mut reg) = registry {
+            if reg.get_by_ref(&derive_ref).is_some() {
+                match reg.expand_enum_by_ref(&derive_ref, enum_def) {
+                    Ok(items) => impls.extend(items),
+                    Err(err) => errors.push(err),
+                }
+                continue;
+            }
+        }
+
+        // Not found
+        errors.push(DeriveError::new(
+            format!("unknown derive macro `{}`", derive_ref),
+            span,
+        ));
     }
 
     if errors.is_empty() {
@@ -921,7 +1121,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_derive_names() {
+    fn test_get_derive_refs() {
         let attrs = vec![Attribute {
             name: "derive".to_string(),
             args: AttributeArgs::Parenthesized(vec![
@@ -931,10 +1131,33 @@ mod tests {
             span: Span::default(),
         }];
 
-        let derives = get_derive_names(&attrs);
+        let derives = get_derive_refs(&attrs);
         assert_eq!(derives.len(), 2);
-        assert_eq!(derives[0].0, "Debug");
-        assert_eq!(derives[1].0, "Clone");
+        assert_eq!(derives[0].0, DeriveRef::Name("Debug".to_string()));
+        assert_eq!(derives[1].0, DeriveRef::Name("Clone".to_string()));
+    }
+
+    #[test]
+    fn test_get_derive_refs_with_path() {
+        let attrs = vec![Attribute {
+            name: "derive".to_string(),
+            args: AttributeArgs::Parenthesized(vec![
+                AttributeArg::Path(vec!["serde".to_string(), "Serialize".to_string()]),
+                AttributeArg::Ident("Debug".to_string()),
+            ]),
+            span: Span::default(),
+        }];
+
+        let derives = get_derive_refs(&attrs);
+        assert_eq!(derives.len(), 2);
+        assert_eq!(
+            derives[0].0,
+            DeriveRef::Path {
+                package: vec!["serde".to_string()],
+                name: "Serialize".to_string()
+            }
+        );
+        assert_eq!(derives[1].0, DeriveRef::Name("Debug".to_string()));
     }
 
     #[test]

@@ -314,10 +314,20 @@ impl<'source> Parser<'source> {
         Ok(args)
     }
 
-    /// Parse a single attribute argument: `ident`, `key = "value"`, or `func(args)`
+    /// Parse a single attribute argument: `ident`, `path::to::ident`, `key = "value"`, or `func(args)`
     fn parse_attribute_arg(&mut self) -> ParseResult<AttributeArg> {
         // Accept both lowercase identifiers and type identifiers (for derives like Debug, Clone)
         let name = self.expect_ident_or_type_ident()?;
+
+        // Check for path: `serde::Serialize`
+        if self.check(&Token::ColonColon) {
+            let mut segments = vec![name];
+            while self.check(&Token::ColonColon) {
+                self.advance();
+                segments.push(self.expect_ident_or_type_ident()?);
+            }
+            return Ok(AttributeArg::Path(segments));
+        }
 
         if self.check(&Token::Eq) {
             // Key-value: `feature = "json"`

@@ -126,6 +126,8 @@ pub enum AttributeArgs {
 pub enum AttributeArg {
     /// Simple identifier: `test` in `#[cfg(test)]`
     Ident(String),
+    /// Path: `serde::Serialize` in `#[derive(serde::Serialize)]`
+    Path(Vec<String>),
     /// Key-value pair: `feature = "json"` in `#[cfg(feature = "json")]`
     KeyValue(String, String),
     /// Nested function-like: `not(test)` in `#[cfg(not(test))]`
