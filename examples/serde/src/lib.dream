@@ -19,7 +19,7 @@ use syn::{parse_derive_input, get_struct_fields, DeriveInput, Field};
 /// Derive macro for serde::Serialize trait.
 /// Use as #[derive(Serialize)] on structs.
 ///
-/// Uses the syn-like API and quote for cleaner code generation.
+/// Uses the syn-like API and quote with repetition for clean code generation.
 #[proc_macro_derive(Serialize)]
 pub fn serialize_derive(input: any) -> any {
     // Parse input using syn-like API
@@ -27,31 +27,22 @@ pub fn serialize_derive(input: any) -> any {
     let name = derive_input.ident;
     let fields = get_struct_fields(derive_input);
 
-    // Build field serialization statements
+    // Build field serialization statements using quote
     let field_stmts = build_field_stmts(fields);
 
-    // Build the method body: init statement + field statements
-    // quote { ... } produces a block tuple (stmts, expr), so extract the stmts list
-    let init_block = quote { let map = :maps::new(); };
-    let init_stmts = :erlang::element(1, init_block);
-    let all_stmts = :lists::append([init_stmts, field_stmts]);
-    let body = (all_stmts, (:ident, :map));
-
-    // Build method parameter (self)
-    let param = ((:ident, :self), (:named, :Self));
-
-    // Build the serialize method
-    // Use binary_to_atom to avoid the "serialize" name being resolved to the serialize module path
-    let method_name = :erlang::binary_to_atom("serialize", :utf8);
-    let method = (:function, method_name, [], [param], (:type, :any), body);
-
-    // Return trait impl for Serialize
-    // Note: We use manual tuple here because the method body is dynamically built
-    (:traitimpl, :Serialize, name, [method])
+    // Use quote with repetition to generate the entire trait impl
+    quote {
+        impl Serialize for #name {
+            fn serialize(self) -> any {
+                let map = :maps::new();
+                #(#field_stmts)*
+                map
+            }
+        }
+    }
 }
 
-/// Build a list of statements that serialize each field.
-/// Uses quote { } for cleaner code generation.
+/// Build a list of quoted statements that serialize each field.
 fn build_field_stmts(fields: [Field]) -> [any] {
     :lists::filtermap(|field| {
         // Get field name - extract from the Option wrapper
