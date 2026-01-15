@@ -702,6 +702,10 @@ impl TypeChecker {
             // AtomLiterals with the same value unify
             (Ty::AtomLiteral(a), Ty::AtomLiteral(b)) if a == b => Ok(()),
 
+            // Bool unifies with :true and :false atoms (they're the same on BEAM)
+            (Ty::Bool, Ty::AtomLiteral(a)) | (Ty::AtomLiteral(a), Ty::Bool)
+                if a == "true" || a == "false" => Ok(()),
+
             // Union type unification:
             // A type T unifies with a union if T matches any variant in the union
             (ty, Ty::Union(variants)) | (Ty::Union(variants), ty) => {
@@ -2281,6 +2285,8 @@ impl TypeChecker {
             Expr::Quote(_) => Ok(Ty::Any),
             Expr::Unquote(_) => Ok(Ty::Any),
             Expr::UnquoteSplice(_) => Ok(Ty::Any),
+            Expr::UnquoteAtom(_) => Ok(Ty::Any),
+            Expr::UnquoteFieldAccess { .. } => Ok(Ty::Any),
             Expr::QuoteItem(_) => Ok(Ty::Any),
             Expr::QuoteRepetition { .. } => Ok(Ty::Any),
         }
@@ -2741,6 +2747,11 @@ impl TypeChecker {
 
             // Same atom literals are compatible
             (Ty::AtomLiteral(a), Ty::AtomLiteral(b)) => a == b,
+
+            // Bool is compatible with :true and :false atoms (they're the same on BEAM)
+            (Ty::Bool, Ty::AtomLiteral(a)) | (Ty::AtomLiteral(a), Ty::Bool) => {
+                a == "true" || a == "false"
+            }
 
             // Union type compatibility:
             // A type T is compatible with a union if T matches any variant in the union
@@ -3514,6 +3525,11 @@ impl TypeChecker {
             Expr::Quote(inner) => Expr::Quote(Box::new(self.annotate_expr(inner))),
             Expr::Unquote(inner) => Expr::Unquote(Box::new(self.annotate_expr(inner))),
             Expr::UnquoteSplice(inner) => Expr::UnquoteSplice(Box::new(self.annotate_expr(inner))),
+            Expr::UnquoteAtom(inner) => Expr::UnquoteAtom(Box::new(self.annotate_expr(inner))),
+            Expr::UnquoteFieldAccess { expr, field_expr } => Expr::UnquoteFieldAccess {
+                expr: Box::new(self.annotate_expr(expr)),
+                field_expr: Box::new(self.annotate_expr(field_expr)),
+            },
             // QuoteItem - items don't need expression annotation
             Expr::QuoteItem(item) => Expr::QuoteItem(item.clone()),
             // QuoteRepetition - annotate the pattern
@@ -4126,8 +4142,14 @@ impl MethodResolver {
             | Expr::Return(None) => {}
 
             // Quote/Unquote - resolve inner expressions
-            Expr::Quote(inner) | Expr::Unquote(inner) | Expr::UnquoteSplice(inner) => {
+            Expr::Quote(inner) | Expr::Unquote(inner) | Expr::UnquoteSplice(inner) | Expr::UnquoteAtom(inner) => {
                 self.resolve_expr(inner);
+            }
+
+            // UnquoteFieldAccess - resolve both inner expressions
+            Expr::UnquoteFieldAccess { expr, field_expr } => {
+                self.resolve_expr(expr);
+                self.resolve_expr(field_expr);
             }
 
             // QuoteRepetition - resolve the pattern

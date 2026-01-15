@@ -91,3 +91,12 @@ bd sync               # Sync with git
 - NEVER stop before pushing - that leaves work stranded locally
 - NEVER say "ready to push when you are" - YOU must push
 - If push fails, resolve and retry until it succeeds
+
+## Committing Code
+
+**ALWAYS get user approval before committing.** The user wants to validate code changes before they are committed.
+
+1. After making changes, show the user what changed (git status, git diff summary)
+2. Ask the user to review and approve before committing
+3. Only commit after explicit user approval
+4. NEVER auto-commit without asking first

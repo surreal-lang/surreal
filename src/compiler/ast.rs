@@ -611,6 +611,9 @@ pub enum Expr {
     },
     /// Field access: `expr.field`.
     FieldAccess { expr: Box<Expr>, field: String },
+    /// Dynamic field access inside quote: `expr.#field_var`.
+    /// The field name is determined at macro expansion time.
+    UnquoteFieldAccess { expr: Box<Expr>, field_expr: Box<Expr> },
     /// Try operator: `expr?` - early return on Err/None.
     Try { expr: Box<Expr> },
     /// Module path access: `Module::item`.
@@ -657,6 +660,9 @@ pub enum Expr {
     /// Unquote-splicing: `#..list` inside a quote block.
     /// Splices a list of AST nodes into the quoted AST.
     UnquoteSplice(Box<Expr>),
+    /// Unquote-to-atom: `:#var` inside a quote block.
+    /// Creates an atom from the unquoted value at expansion time.
+    UnquoteAtom(Box<Expr>),
     /// Quote repetition: `#(pattern)*` or `#(pattern),*` inside a quote block.
     /// Iterates over a collection and generates AST for each element.
     /// Similar to Rust's `#(#item)*` in proc_macro.

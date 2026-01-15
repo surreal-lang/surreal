@@ -618,4 +618,18 @@ mod tests {
         assert_eq!(lex.next(), Some(Ok(Token::RParen)));
         assert_eq!(lex.next(), Some(Ok(Token::RBracket)));
     }
+
+    #[test]
+    fn test_colon_hash_sequence() {
+        let mut lex = Token::lexer(":#foo");
+        println!("Tokens for :#foo:");
+        while let Some(tok) = lex.next() {
+            println!("  {:?}", tok);
+        }
+        // Reset and assert
+        let mut lex = Token::lexer(":#foo");
+        assert_eq!(lex.next(), Some(Ok(Token::Colon)));
+        assert_eq!(lex.next(), Some(Ok(Token::Hash)));
+        assert_eq!(lex.next(), Some(Ok(Token::Ident("foo".to_string()))));
+    }
 }

@@ -1306,6 +1306,7 @@ impl<'source> Parser<'source> {
                 | Expr::Match { .. }
                 | Expr::Block(_)
                 | Expr::Receive { .. }
+                | Expr::QuoteRepetition { .. }
         )
     }
 
@@ -1572,6 +1573,18 @@ impl<'source> Parser<'source> {
             } else if self.check(&Token::Dot) {
                 // Field access or method call
                 self.advance();
+
+                // In quote mode, allow .#var for dynamic field access
+                if self.in_quote && self.check(&Token::Hash) {
+                    self.advance(); // consume #
+                    let field_expr = self.parse_primary()?;
+                    expr = Expr::UnquoteFieldAccess {
+                        expr: Box::new(expr),
+                        field_expr: Box::new(field_expr),
+                    };
+                    continue;
+                }
+
                 let field = self.expect_ident()?;
 
                 // Check for turbofish: .method::<Type>() or just .method()
@@ -1797,6 +1810,18 @@ impl<'source> Parser<'source> {
             }
             _ => None,
         };
+
+        // Check for unquote-to-atom: :#var (inside quote blocks)
+        // Creates an atom from the unquoted value at macro expansion time
+        if self.check(&Token::Colon) {
+            // Look ahead for # to detect :#var pattern
+            if self.check_ahead(1, &Token::Hash) {
+                self.advance(); // consume :
+                self.advance(); // consume #
+                let var_expr = self.parse_primary()?;
+                return Ok(Expr::UnquoteAtom(Box::new(var_expr)));
+            }
+        }
 
         if let Some(a) = atom_name {
             // Check for extern call: :module::function(args)

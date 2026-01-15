@@ -90,8 +90,11 @@ pub struct CoreErlangEmitter {
     module_context: ModuleContext,
     /// Imported names: local_name → (module, original_name)
     imports: HashMap<String, (String, String)>,
-    /// Impl block methods: (type_name, method_name) for resolving Type::method() calls
-    impl_methods: HashSet<(String, String)>,
+    /// Impl block methods: (actual_type, func_prefix, method_name) for resolving method calls
+    /// - actual_type: the struct name for pattern matching (e.g., "User")
+    /// - func_prefix: the prefix for the function name (e.g., "User" or "Serialize_User")
+    /// - method_name: the method name (e.g., "serialize")
+    impl_methods: HashSet<(String, String, String)>,
     /// Trait definitions: trait_name → TraitDef
     traits: HashMap<String, TraitDef>,
     /// Trait implementations: (trait_name, method_name) → Vec<type_name>
@@ -358,12 +361,29 @@ impl CoreErlangEmitter {
     }
 
     /// Find all types that have a method with the given name in their impl block.
-    fn find_impl_types_for_method(&self, method_name: &str) -> Vec<String> {
+    /// Returns (actual_type, func_prefix) pairs.
+    fn find_impl_types_for_method(&self, method_name: &str) -> Vec<(String, String)> {
         self.impl_methods
             .iter()
-            .filter(|(_, m)| m == method_name)
-            .map(|(t, _)| t.clone())
+            .filter(|(_, _, m)| m == method_name)
+            .map(|(actual_type, func_prefix, _)| (actual_type.clone(), func_prefix.clone()))
             .collect()
+    }
+
+    /// Check if a type has a method with the given name in its impl block.
+    /// Used for Type::method() calls.
+    fn has_impl_method(&self, type_name: &str, method_name: &str) -> bool {
+        self.impl_methods
+            .iter()
+            .any(|(actual_type, _, m)| actual_type == type_name && m == method_name)
+    }
+
+    /// Check if a trait impl method exists with the given func_prefix and method name.
+    /// Used for checking From trait impls.
+    fn has_trait_impl_method(&self, func_prefix: &str, method_name: &str) -> bool {
+        self.impl_methods
+            .iter()
+            .any(|(_, fp, m)| fp == func_prefix && m == method_name)
     }
 
     /// Collect variable names from a pattern and add them to the variables set.
@@ -467,13 +487,13 @@ impl CoreErlangEmitter {
         if !trait_type_args.is_empty() {
             let trait_type_suffix = self.format_trait_type_args(trait_type_args);
             // Look for patterns like "From_int_Wrapper" when calling Wrapper::from::<int>()
-            for (prefix, method) in &self.impl_methods {
-                if method == method_name && prefix.ends_with(&type_suffix) {
+            for (_actual_type, func_prefix, method) in &self.impl_methods {
+                if method == method_name && func_prefix.ends_with(&type_suffix) {
                     // Check if this matches our trait type args
                     // E.g., "From_int_Wrapper" should match trait_type_suffix "_int"
-                    let without_type = prefix.strip_suffix(&type_suffix).unwrap_or(prefix);
+                    let without_type = func_prefix.strip_suffix(&type_suffix).unwrap_or(func_prefix);
                     if without_type.ends_with(&trait_type_suffix) {
-                        return Some(format!("{}_{}", prefix, method_name));
+                        return Some(format!("{}_{}", func_prefix, method_name));
                     }
                 }
             }
@@ -482,9 +502,9 @@ impl CoreErlangEmitter {
         // Without explicit type args, look for any trait impl for this type
         // If multiple impls have the method, we can't disambiguate (return None)
         let mut matches = Vec::new();
-        for (prefix, method) in &self.impl_methods {
-            if method == method_name && prefix.ends_with(&type_suffix) {
-                matches.push(format!("{}_{}", prefix, method_name));
+        for (_actual_type, func_prefix, method) in &self.impl_methods {
+            if method == method_name && func_prefix.ends_with(&type_suffix) {
+                matches.push(format!("{}_{}", func_prefix, method_name));
             }
         }
 
@@ -886,12 +906,13 @@ impl CoreErlangEmitter {
 
     /// Emit UFCS method dispatch for impl methods.
     /// Generates a case expression that matches on __struct__ and calls the appropriate impl.
+    /// impl_types is a list of (actual_type, func_prefix) tuples.
     fn emit_method_dispatch(
         &mut self,
         method_name: &str,
         receiver: &Expr,
         args: &[Expr],
-        impl_types: &[String],
+        impl_types: &[(String, String)],
     ) -> CoreErlangResult<()> {
         // Total arity includes receiver
         let arity = args.len() + 1;
@@ -913,11 +934,12 @@ impl CoreErlangEmitter {
         self.indent += 1;
 
         // Generate a clause for each implementing type (local types)
-        for (i, type_name) in impl_types.iter().enumerate() {
-            let mangled_name = format!("{}_{}", type_name, method_name);
+        for (i, (actual_type, func_prefix)) in impl_types.iter().enumerate() {
+            let mangled_name = format!("{}_{}", func_prefix, method_name);
 
             // Match on fully qualified atom 'module::Type' (includes dream:: prefix)
-            self.emit(&format!("<'{}::{}'>", self.module_name, type_name));
+            // Use actual_type for the pattern (not func_prefix which may include trait name)
+            self.emit(&format!("<'{}::{}'>", self.module_name, actual_type));
             self.emit(" when 'true' ->");
             self.newline();
             self.indent += 1;
@@ -1292,10 +1314,14 @@ impl CoreErlangEmitter {
                 Item::Impl(impl_block) => {
                     // Register impl methods for Type::method() resolution
                     // Filter individual methods by cfg
+                    // For regular impls, actual_type == func_prefix (both are the type name)
                     for method in &impl_block.methods {
                         if cfg::should_include(&method.attrs, &self.compile_options) {
-                            self.impl_methods
-                                .insert((impl_block.type_name.clone(), method.name.clone()));
+                            self.impl_methods.insert((
+                                impl_block.type_name.clone(), // actual_type
+                                impl_block.type_name.clone(), // func_prefix
+                                method.name.clone(),          // method_name
+                            ));
                         }
                     }
                 }
@@ -1324,13 +1350,15 @@ impl CoreErlangEmitter {
                             continue;
                         }
 
-                        // Use simple trait name with type args: From_int_MyType
+                        // Use simple trait name with type args for func_prefix: Serialize_User
+                        // actual_type is just the type name: User
                         self.impl_methods.insert((
+                            trait_impl.type_name.clone(), // actual_type
                             format!(
                                 "{}{}_{}",
                                 simple_trait, trait_type_args_suffix, trait_impl.type_name
-                            ),
-                            method.name.clone(),
+                            ), // func_prefix
+                            method.name.clone(), // method_name
                         ));
 
                         // Track which types implement each trait method
@@ -1353,11 +1381,12 @@ impl CoreErlangEmitter {
                             {
                                 // Register default method for dispatch
                                 self.impl_methods.insert((
+                                    trait_impl.type_name.clone(), // actual_type
                                     format!(
                                         "{}{}_{}",
                                         simple_trait, trait_type_args_suffix, trait_impl.type_name
-                                    ),
-                                    trait_method.name.clone(),
+                                    ), // func_prefix
+                                    trait_method.name.clone(), // method_name
                                 ));
 
                                 let key = (
@@ -1379,8 +1408,9 @@ impl CoreErlangEmitter {
 
                         // Register Into_TargetType_SourceType with method "into"
                         self.impl_methods.insert((
-                            format!("Into_{}_{}", target_type, source_type),
-                            "into".to_string(),
+                            source_type.clone(), // actual_type
+                            format!("Into_{}_{}", target_type, source_type), // func_prefix
+                            "into".to_string(), // method_name
                         ));
 
                         // Track for trait dispatch
@@ -2381,10 +2411,44 @@ impl CoreErlangEmitter {
     /// Emit a map key expression.
     /// For atoms, emit directly without module resolution.
     fn emit_map_key(&mut self, expr: &Expr) -> CoreErlangResult<()> {
+        self.emit_data_expr(expr)
+    }
+
+    /// Emit an expression as data (inside tuples, lists, maps).
+    /// For atoms, emit directly without module resolution since atoms in data
+    /// contexts are literal values, not module references.
+    fn emit_data_expr(&mut self, expr: &Expr) -> CoreErlangResult<()> {
         match expr {
             Expr::Atom(a) => {
                 // Emit atom directly - don't resolve as module reference
                 self.emit(&format!("'{}'", a));
+                Ok(())
+            }
+            // For tuples and lists, recursively emit elements as data
+            Expr::Tuple(elements) => {
+                self.emit("{");
+                for (i, e) in elements.iter().enumerate() {
+                    if i > 0 {
+                        self.emit(", ");
+                    }
+                    self.emit_data_expr(e)?;
+                }
+                self.emit("}");
+                Ok(())
+            }
+            Expr::List(elements) => {
+                if elements.is_empty() {
+                    self.emit("[]");
+                } else {
+                    self.emit("[");
+                    for (i, e) in elements.iter().enumerate() {
+                        if i > 0 {
+                            self.emit(", ");
+                        }
+                        self.emit_data_expr(e)?;
+                    }
+                    self.emit("]");
+                }
                 Ok(())
             }
             // For all other expressions, use normal emission
@@ -2700,10 +2764,7 @@ impl CoreErlangEmitter {
                             self.emit("(");
                             self.emit_args(args)?;
                             self.emit(")");
-                        } else if self
-                            .impl_methods
-                            .contains(&(first.clone(), second.clone()))
-                        {
+                        } else if self.has_impl_method(first, second) {
                             // Call the mangled impl method: Type::method()
                             let mangled_name = format!("{}_{}", first, second);
                             self.emit(&format!("apply '{}'/{}", mangled_name, args.len()));
@@ -2726,7 +2787,7 @@ impl CoreErlangEmitter {
                             let mangled_name = format!("From_{}_{}_from", arg_type, first);
 
                             // Check if this impl exists
-                            if self.impl_methods.contains(&(format!("From_{}_{}", arg_type, first), "from".to_string())) {
+                            if self.has_trait_impl_method(&format!("From_{}_{}", arg_type, first), "from") {
                                 self.emit(&format!("apply '{}'/{}", mangled_name, args.len()));
                                 self.emit("(");
                                 self.emit_args(args)?;
@@ -2876,6 +2937,13 @@ impl CoreErlangEmitter {
                             self.emit(")");
                         }
                     }
+                    Expr::Atom(name) => {
+                        // Bare atom call: :hd(args) -> erlang:hd(args)
+                        // This handles calls like :hd(list), :tl(list), :length(list), etc.
+                        self.emit(&format!("call 'erlang':'{}'(", name));
+                        self.emit_args(args)?;
+                        self.emit(")");
+                    }
                     _ => {
                         // Higher-order function application
                         self.emit("apply ");
@@ -2945,26 +3013,39 @@ impl CoreErlangEmitter {
             }
 
             Expr::Tuple(elements) => {
+                // Use emit_data_expr for tuple elements to avoid module resolution
                 self.emit("{");
-                self.emit_args(elements)?;
+                for (i, e) in elements.iter().enumerate() {
+                    if i > 0 {
+                        self.emit(", ");
+                    }
+                    self.emit_data_expr(e)?;
+                }
                 self.emit("}");
             }
 
             Expr::List(elements) => {
+                // Use emit_data_expr for list elements to avoid module resolution
                 if elements.is_empty() {
                     self.emit("[]");
                 } else {
                     self.emit("[");
-                    self.emit_args(elements)?;
+                    for (i, e) in elements.iter().enumerate() {
+                        if i > 0 {
+                            self.emit(", ");
+                        }
+                        self.emit_data_expr(e)?;
+                    }
                     self.emit("]");
                 }
             }
 
             Expr::ListCons { head, tail } => {
+                // Use emit_data_expr for list cons elements
                 self.emit("[");
-                self.emit_expr(head)?;
+                self.emit_data_expr(head)?;
                 self.emit("|");
-                self.emit_expr(tail)?;
+                self.emit_data_expr(tail)?;
                 self.emit("]");
             }
 
@@ -3384,7 +3465,7 @@ impl CoreErlangEmitter {
             }
 
             // Unquote outside of quote is an error
-            Expr::Unquote(_) | Expr::UnquoteSplice(_) | Expr::QuoteRepetition { .. } => {
+            Expr::Unquote(_) | Expr::UnquoteSplice(_) | Expr::UnquoteAtom(_) | Expr::UnquoteFieldAccess { .. } | Expr::QuoteRepetition { .. } => {
                 return Err(CoreErlangError::new(
                     "unquote/unquote-splice/quote-repetition can only be used inside quote blocks",
                 ));
@@ -3408,6 +3489,15 @@ impl CoreErlangEmitter {
                 // The inner expression is evaluated at runtime and its value
                 // (which should be an AST tuple) is inserted directly
                 self.emit_expr(inner)?;
+            }
+
+            // UnquoteAtom: create an atom tuple from the unquoted value
+            Expr::UnquoteAtom(inner) => {
+                // Generate: {'atom', <value>}
+                // The inner expression should evaluate to an atom at runtime
+                self.emit("{'atom', ");
+                self.emit_expr(inner)?;
+                self.emit("}");
             }
 
             // UnquoteSplice is only valid in list context
@@ -3507,6 +3597,16 @@ impl CoreErlangEmitter {
                 self.emit("{'field_access', ");
                 self.emit_quoted_expr(expr)?;
                 self.emit(&format!(", '{}'}}", self.escape_erlang_atom(field)));
+            }
+
+            // Dynamic field access: expr.#field_var - the field name comes from a variable
+            Expr::UnquoteFieldAccess { expr, field_expr } => {
+                self.emit("{'field_access', ");
+                self.emit_quoted_expr(expr)?;
+                self.emit(", ");
+                // The field expression is evaluated at runtime to get the field name
+                self.emit_expr(field_expr)?;
+                self.emit("}");
             }
 
             Expr::Tuple(elems) => {
@@ -4542,6 +4642,26 @@ impl CoreErlangEmitter {
         &mut self,
         seg: &BitStringSegment<Box<Expr>>,
     ) -> CoreErlangResult<()> {
+        // Special handling for string literals in bitstrings
+        // Each character becomes a separate integer segment
+        // e.g., <<"hi">> becomes #<104>(8,1,'integer',['unsigned'|['big']]), #<105>(8,1,'integer',['unsigned'|['big']])
+        match seg.value.as_ref() {
+            Expr::String(s) => {
+                let chars: Vec<u32> = s.chars().map(|c| c as u32).collect();
+                for (i, code) in chars.iter().enumerate() {
+                    if i > 0 {
+                        self.emit(", ");
+                    }
+                    self.emit(&format!(
+                        "#<{}>(8,1,'integer',['unsigned'|['big']])",
+                        code
+                    ));
+                }
+                return Ok(());
+            }
+            _ => {}
+        }
+
         self.emit("#<");
         self.emit_expr(&seg.value)?;
         self.emit(">(");
@@ -4565,18 +4685,16 @@ impl CoreErlangEmitter {
         };
         self.emit(type_spec);
 
-        self.emit(", [");
-        let mut specs = Vec::new();
-        match seg.endianness {
-            BitEndianness::Big => specs.push("'big'"),
-            BitEndianness::Little => specs.push("'little'"),
-        }
-        match seg.signedness {
-            BitSignedness::Unsigned => specs.push("'unsigned'"),
-            BitSignedness::Signed => specs.push("'signed'"),
-        }
-        self.emit(&specs.join(", "));
-        self.emit("])");
+        // Emit specifiers in linked list format: ['unsigned'|['big']]
+        let sign_spec = match seg.signedness {
+            BitSignedness::Unsigned => "'unsigned'",
+            BitSignedness::Signed => "'signed'",
+        };
+        let endian_spec = match seg.endianness {
+            BitEndianness::Big => "'big'",
+            BitEndianness::Little => "'little'",
+        };
+        self.emit(&format!(", [{}|[{}]])", sign_spec, endian_spec));
 
         Ok(())
     }

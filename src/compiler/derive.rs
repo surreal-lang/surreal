@@ -189,8 +189,8 @@ impl MacroRegistry {
             )
         })?;
 
-        // Serialize the struct to DeriveInput format (syn-style)
-        let ast_term = ast_serde::struct_to_derive_input(struct_def);
+        // Serialize the struct to TokenStream format
+        let ast_term = ast_serde::struct_to_token_stream(struct_def);
 
         // Get or create the expander
         let expander = self.get_expander()?;
@@ -238,8 +238,8 @@ impl MacroRegistry {
             )
         })?;
 
-        // Serialize the enum to DeriveInput format (syn-style)
-        let ast_term = ast_serde::enum_to_derive_input(enum_def);
+        // Serialize the enum to TokenStream format
+        let ast_term = ast_serde::enum_to_token_stream(enum_def);
 
         // Get or create the expander
         let expander = self.get_expander()?;
@@ -287,8 +287,8 @@ impl MacroRegistry {
         let module = module.to_string();
         let function = function.to_string();
 
-        // Serialize the struct to DeriveInput format (syn-style)
-        let ast_term = ast_serde::struct_to_derive_input(struct_def);
+        // Serialize the struct to TokenStream format
+        let ast_term = ast_serde::struct_to_token_stream(struct_def);
 
         // Get or create the expander
         let expander = self.get_expander()?;
@@ -336,8 +336,8 @@ impl MacroRegistry {
         let module = module.to_string();
         let function = function.to_string();
 
-        // Serialize the enum to DeriveInput format (syn-style)
-        let ast_term = ast_serde::enum_to_derive_input(enum_def);
+        // Serialize the enum to TokenStream format
+        let ast_term = ast_serde::enum_to_token_stream(enum_def);
 
         // Get or create the expander
         let expander = self.get_expander()?;
@@ -399,6 +399,62 @@ impl Drop for MacroRegistry {
     }
 }
 
+/// Scan module for `use` statements that import macros from dependencies
+/// and register them in the macro registry's user_defined map.
+///
+/// For example, `use serde::Serialize;` would check if `package_macros["serde"]["Serialize"]`
+/// exists and if so, register it as `user_defined["Serialize"]`.
+fn register_imported_macros(module: &Module, registry: &mut MacroRegistry) {
+    for item in &module.items {
+        if let Item::Use(use_decl) = item {
+            process_use_tree_for_macros(&use_decl.tree, registry);
+        }
+    }
+}
+
+/// Process a use tree to find and register any imported macros.
+fn process_use_tree_for_macros(tree: &UseTree, registry: &mut MacroRegistry) {
+    match tree {
+        UseTree::Path { module: mod_path, name, rename } => {
+            // Check if this import refers to a macro from a known package
+            // e.g., `use serde::Serialize;` -> package="serde", name="Serialize"
+            if mod_path.prefix == PathPrefix::None && mod_path.segments.len() == 1 {
+                let package = &mod_path.segments[0];
+                // Look up in package_macros - clone to avoid borrow issues
+                if let Some((module, function)) = registry.get_qualified(&[package.clone()], name) {
+                    let module = module.to_string();
+                    let function = function.to_string();
+                    let local_name = rename.as_ref().unwrap_or(name);
+                    registry.register(local_name, &module, &function);
+                }
+            }
+        }
+        UseTree::Group { module: mod_path, items } => {
+            // e.g., `use serde::{Serialize, Deserialize};`
+            if mod_path.prefix == PathPrefix::None && mod_path.segments.len() == 1 {
+                let package = &mod_path.segments[0];
+                // Collect all found macros first to avoid borrow issues
+                let found_macros: Vec<_> = items.iter()
+                    .filter_map(|item| {
+                        registry.get_qualified(&[package.clone()], &item.name)
+                            .map(|(m, f)| {
+                                let local_name = item.rename.as_ref().unwrap_or(&item.name).clone();
+                                (local_name, m.to_string(), f.to_string())
+                            })
+                    })
+                    .collect();
+                // Now register them
+                for (local_name, module, function) in found_macros {
+                    registry.register(&local_name, &module, &function);
+                }
+            }
+        }
+        UseTree::Glob { .. } => {
+            // Glob imports don't work well with macros - skip
+        }
+    }
+}
+
 /// Expand all `#[derive(...)]` attributes in a module.
 ///
 /// This adds generated impl blocks for each derive macro found on structs and enums.
@@ -443,6 +499,9 @@ pub fn expand_derives_with_registry(
     module: &mut Module,
     registry: &mut MacroRegistry,
 ) -> Result<(), Vec<DeriveError>> {
+    // First, process use statements to register imported macros
+    register_imported_macros(module, registry);
+
     let mut new_items = Vec::new();
     let mut errors = Vec::new();
 

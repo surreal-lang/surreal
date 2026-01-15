@@ -287,6 +287,11 @@ fn cmd_build(file: Option<&Path>, target: &str, output: Option<&Path>, features:
         return ExitCode::from(1);
     }
 
+    // Compile stdlib first
+    if let Err(e) = compile_stdlib() {
+        eprintln!("Warning: {}", e);
+    }
+
     println!("Compiling {}...", config.package.name);
 
     // Load all .dream files in src/ directory with package context
@@ -356,6 +361,11 @@ fn build_standalone_file(source_file: &Path, target: &str, output: Option<&Path>
             if let Err(e) = fs::create_dir_all(&build_dir) {
                 eprintln!("Error creating build directory: {}", e);
                 return ExitCode::from(1);
+            }
+
+            // Compile stdlib first
+            if let Err(e) = compile_stdlib() {
+                eprintln!("Warning: {}", e);
             }
 
             println!("Compiling {}...", config.package.name);
@@ -708,6 +718,11 @@ fn compile_modules_with_registry(
         }
     }
 
+    // Expand quote expressions in all modules (quote { ... } -> tuple construction)
+    for module in &mut modules {
+        expand_quotes(module);
+    }
+
     // Resolve stdlib method calls (e.g., s.trim() -> string::trim(s))
     for module in &mut modules {
         resolve_stdlib_methods(module);
@@ -1038,6 +1053,11 @@ fn compile_modules_with_registry_and_options(
             }
             return ExitCode::from(1);
         }
+    }
+
+    // Expand quote expressions in all modules (quote { ... } -> tuple construction)
+    for module in &mut modules {
+        expand_quotes(module);
     }
 
     // Resolve stdlib method calls (e.g., s.trim() -> string::trim(s))
@@ -2107,8 +2127,8 @@ fn compile_module_to_beam(
         return Err(format!("erlc failed for {}", beam_module_name));
     }
 
-    // Clean up .core file
-    let _ = fs::remove_file(&core_file);
+    // Clean up .core file (temporarily disabled for debugging)
+    // let _ = fs::remove_file(&core_file);
 
     let beam_file = build_dir.join(format!("{}.beam", &beam_module_name));
     Ok(beam_file)

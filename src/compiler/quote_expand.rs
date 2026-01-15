@@ -147,6 +147,12 @@ fn expand_expr_quotes(expr: Expr) -> Expr {
         Expr::Return(inner) => {
             Expr::Return(inner.map(|e| Box::new(expand_expr_quotes(*e))))
         }
+        // ExternCall: recursively expand quotes in arguments
+        Expr::ExternCall { module, function, args } => Expr::ExternCall {
+            module,
+            function,
+            args: args.into_iter().map(expand_expr_quotes).collect(),
+        },
         // Pass through other expressions unchanged
         other => other,
     }
@@ -161,6 +167,12 @@ fn quote_expr_to_tuple(expr: &Expr) -> Expr {
     match expr {
         // Unquote: #ident interpolates the variable
         Expr::Unquote(inner) => *inner.clone(),
+
+        // UnquoteAtom: :#var creates an atom from the unquoted value
+        // The variable should be an atom at runtime, and we wrap it in {:atom, value}
+        Expr::UnquoteAtom(inner) => {
+            make_tuple(vec![make_atom("atom"), *inner.clone()])
+        }
 
         // Literals
         Expr::Int(n) => make_tuple(vec![make_atom("int"), Expr::Int(*n)]),
@@ -226,6 +238,14 @@ fn quote_expr_to_tuple(expr: &Expr) -> Expr {
             make_atom("field_access"),
             quote_expr_to_tuple(expr),
             make_atom(field),
+        ]),
+
+        // Dynamic field access inside quote: expr.#field_var
+        // The field expression is evaluated and used as the field name
+        Expr::UnquoteFieldAccess { expr, field_expr } => make_tuple(vec![
+            make_atom("field_access"),
+            quote_expr_to_tuple(expr),
+            *field_expr.clone(),
         ]),
 
         // Tuple
@@ -552,7 +572,7 @@ fn find_unquoted_vars(expr: &Expr) -> Vec<String> {
 
 fn find_unquoted_vars_recursive(expr: &Expr, vars: &mut Vec<String>) {
     match expr {
-        Expr::Unquote(inner) => {
+        Expr::Unquote(inner) | Expr::UnquoteAtom(inner) => {
             if let Expr::Ident(name) = inner.as_ref() {
                 if !vars.contains(name) {
                     vars.push(name.clone());
@@ -588,6 +608,10 @@ fn find_unquoted_vars_recursive(expr: &Expr, vars: &mut Vec<String>) {
         }
         Expr::FieldAccess { expr, .. } => {
             find_unquoted_vars_recursive(expr, vars);
+        }
+        Expr::UnquoteFieldAccess { expr, field_expr } => {
+            find_unquoted_vars_recursive(expr, vars);
+            find_unquoted_vars_recursive(field_expr, vars);
         }
         Expr::Tuple(elems) | Expr::List(elems) => {
             for elem in elems {
@@ -626,6 +650,15 @@ fn substitute_var_in_expr(expr: &Expr, var_name: &str, replacement: &str) -> Exp
             }
             Expr::Unquote(Box::new(substitute_var_in_expr(inner, var_name, replacement)))
         }
+        Expr::UnquoteAtom(inner) => {
+            if let Expr::Ident(name) = inner.as_ref() {
+                if name == var_name {
+                    // Replace with new variable reference
+                    return Expr::UnquoteAtom(Box::new(Expr::Ident(replacement.to_string())));
+                }
+            }
+            Expr::UnquoteAtom(Box::new(substitute_var_in_expr(inner, var_name, replacement)))
+        }
         Expr::Ident(name) => {
             // Check for $UNQUOTE: marker
             if let Some(var) = name.strip_prefix("$UNQUOTE:") {
@@ -661,6 +694,10 @@ fn substitute_var_in_expr(expr: &Expr, var_name: &str, replacement: &str) -> Exp
         Expr::FieldAccess { expr: inner, field } => Expr::FieldAccess {
             expr: Box::new(substitute_var_in_expr(inner, var_name, replacement)),
             field: field.clone(),
+        },
+        Expr::UnquoteFieldAccess { expr: inner, field_expr } => Expr::UnquoteFieldAccess {
+            expr: Box::new(substitute_var_in_expr(inner, var_name, replacement)),
+            field_expr: Box::new(substitute_var_in_expr(field_expr, var_name, replacement)),
         },
         Expr::Tuple(elems) => {
             Expr::Tuple(elems.iter().map(|e| substitute_var_in_expr(e, var_name, replacement)).collect())

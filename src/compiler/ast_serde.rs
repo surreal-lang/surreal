@@ -227,6 +227,14 @@ pub fn expr_to_erlang_term(expr: &Expr) -> String {
             format!("{{unquote_splice, {}}}", expr_to_erlang_term(inner))
         }
 
+        Expr::UnquoteAtom(inner) => {
+            format!("{{unquote_atom, {}}}", expr_to_erlang_term(inner))
+        }
+
+        Expr::UnquoteFieldAccess { expr, field_expr } => {
+            format!("{{unquote_field_access, {}, {}}}", expr_to_erlang_term(expr), expr_to_erlang_term(field_expr))
+        }
+
         Expr::QuoteItem(item) => {
             // For now, just note it's a quote item - full serialization could be added later
             format!("{{quote_item, {}}}", item_to_erlang_term(item))
@@ -676,6 +684,11 @@ pub fn item_to_token_stream(item: &Item) -> Option<String> {
     }
 }
 
+/// Helper to create a punctuation token with binary string.
+fn punct_token(s: &str) -> String {
+    format!("{{punct, <<\"{}\">>}}", escape_binary_string(s))
+}
+
 /// Convert a struct definition to TokenStream format.
 pub fn struct_to_token_stream(s: &StructDef) -> String {
     let mut tokens = Vec::new();
@@ -696,15 +709,15 @@ pub fn struct_to_token_stream(s: &StructDef) -> String {
             .flat_map(|(i, tp)| {
                 let mut param_tokens = Vec::new();
                 if i > 0 {
-                    param_tokens.push("{punct, \",\"}".to_string());
+                    param_tokens.push(punct_token(","));
                 }
                 param_tokens.push(format!("{{type_ident, '{}'}}", escape_atom(&tp.name)));
                 // Add bounds if present
                 for (j, bound) in tp.bounds.iter().enumerate() {
                     if j == 0 {
-                        param_tokens.push("{punct, \":\"}".to_string());
+                        param_tokens.push(punct_token(":"));
                     } else {
-                        param_tokens.push("{punct, \"+\"}".to_string());
+                        param_tokens.push(punct_token("+"));
                     }
                     param_tokens.push(format!("{{type_ident, '{}'}}", escape_atom(bound)));
                 }
@@ -720,10 +733,10 @@ pub fn struct_to_token_stream(s: &StructDef) -> String {
         .flat_map(|(i, (name, ty))| {
             let mut field_tokens = Vec::new();
             if i > 0 {
-                field_tokens.push("{punct, \",\"}".to_string());
+                field_tokens.push(punct_token(","));
             }
             field_tokens.push(format!("{{ident, '{}'}}", escape_atom(name)));
-            field_tokens.push("{punct, \":\"}".to_string());
+            field_tokens.push(punct_token(":"));
             field_tokens.extend(type_to_tokens(ty));
             field_tokens
         })
@@ -754,7 +767,7 @@ pub fn enum_to_token_stream(e: &EnumDef) -> String {
             .flat_map(|(i, tp)| {
                 let mut param_tokens = Vec::new();
                 if i > 0 {
-                    param_tokens.push("{punct, \",\"}".to_string());
+                    param_tokens.push(punct_token(","));
                 }
                 param_tokens.push(format!("{{type_ident, '{}'}}", escape_atom(&tp.name)));
                 param_tokens
@@ -769,7 +782,7 @@ pub fn enum_to_token_stream(e: &EnumDef) -> String {
         .flat_map(|(i, v)| {
             let mut variant_tokens = Vec::new();
             if i > 0 {
-                variant_tokens.push("{punct, \",\"}".to_string());
+                variant_tokens.push(punct_token(","));
             }
             variant_tokens.push(format!("{{type_ident, '{}'}}", escape_atom(&v.name)));
 
@@ -781,7 +794,7 @@ pub fn enum_to_token_stream(e: &EnumDef) -> String {
                         .flat_map(|(j, ty)| {
                             let mut toks = Vec::new();
                             if j > 0 {
-                                toks.push("{punct, \",\"}".to_string());
+                                toks.push(punct_token(","));
                             }
                             toks.extend(type_to_tokens(ty));
                             toks
@@ -795,10 +808,10 @@ pub fn enum_to_token_stream(e: &EnumDef) -> String {
                         .flat_map(|(j, (name, ty))| {
                             let mut ftoks = Vec::new();
                             if j > 0 {
-                                ftoks.push("{punct, \",\"}".to_string());
+                                ftoks.push(punct_token(","));
                             }
                             ftoks.push(format!("{{ident, '{}'}}", escape_atom(name)));
-                            ftoks.push("{punct, \":\"}".to_string());
+                            ftoks.push(punct_token(":"));
                             ftoks.extend(type_to_tokens(ty));
                             ftoks
                         })
@@ -823,7 +836,7 @@ fn type_to_tokens(ty: &Type) -> Vec<String> {
         Type::String => vec!["{keyword, string}".to_string()],
         Type::Atom => vec!["{keyword, atom}".to_string()],
         Type::Bool => vec!["{keyword, bool}".to_string()],
-        Type::Unit => vec!["{punct, \"()\"}".to_string()],
+        Type::Unit => vec![punct_token("()")],
         Type::Pid => vec!["{keyword, pid}".to_string()],
         Type::Ref => vec!["{keyword, ref}".to_string()],
         Type::Binary => vec!["{keyword, binary}".to_string()],
@@ -837,7 +850,7 @@ fn type_to_tokens(ty: &Type) -> Vec<String> {
                     .flat_map(|(i, t)| {
                         let mut arg_toks = Vec::new();
                         if i > 0 {
-                            arg_toks.push("{punct, \",\"}".to_string());
+                            arg_toks.push(punct_token(","));
                         }
                         arg_toks.extend(type_to_tokens(t));
                         arg_toks
@@ -848,9 +861,9 @@ fn type_to_tokens(ty: &Type) -> Vec<String> {
             tokens
         }
         Type::List(inner) => {
-            let mut tokens = vec!["{punct, \"[\"}".to_string()];
+            let mut tokens = vec![punct_token("[")];
             tokens.extend(type_to_tokens(inner));
-            tokens.push("{punct, \"]\"}".to_string());
+            tokens.push(punct_token("]"));
             tokens
         }
         Type::Tuple(types) => {
@@ -859,7 +872,7 @@ fn type_to_tokens(ty: &Type) -> Vec<String> {
                 .flat_map(|(i, t)| {
                     let mut toks = Vec::new();
                     if i > 0 {
-                        toks.push("{punct, \",\"}".to_string());
+                        toks.push(punct_token(","));
                     }
                     toks.extend(type_to_tokens(t));
                     toks
@@ -875,14 +888,14 @@ fn type_to_tokens(ty: &Type) -> Vec<String> {
                 .flat_map(|(i, t)| {
                     let mut toks = Vec::new();
                     if i > 0 {
-                        toks.push("{punct, \",\"}".to_string());
+                        toks.push(punct_token(","));
                     }
                     toks.extend(type_to_tokens(t));
                     toks
                 })
                 .collect();
             tokens.push(format!("{{group, paren, [{}]}}", param_tokens.join(", ")));
-            tokens.push("{punct, \"->\"}".to_string());
+            tokens.push(punct_token("->"));
             tokens.extend(type_to_tokens(ret));
             tokens
         }

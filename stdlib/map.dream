@@ -17,12 +17,12 @@ pub struct Map {
 
 impl Map {
     /// Create an empty map
-    pub fn new<K, V>() -> Map {
+    pub fn new<K, V>() -> Self {
         Map { data: :maps::new() }
     }
 
     /// Create a map from a list of key-value pairs
-    pub fn from_list<K, V>(pairs: [(K, V)]) -> Map {
+    pub fn from_list<K, V>(pairs: [(K, V)]) -> Self {
         Map { data: :maps::from_list(pairs) }
     }
 
@@ -55,12 +55,12 @@ impl Map {
     }
 
     /// Insert or update a key-value pair
-    pub fn put<K, V>(self, key: K, value: V) -> Map {
+    pub fn put<K, V>(self, key: K, value: V) -> Self {
         Map { data: :maps::put(key, value, self.data) }
     }
 
     /// Remove a key (returns same map if key doesn't exist)
-    pub fn delete<K>(self, key: K) -> Map {
+    pub fn delete<K>(self, key: K) -> Self {
         if :maps::is_key(key, self.data) {
             Map { data: :maps::remove(key, self.data) }
         } else {
@@ -69,7 +69,7 @@ impl Map {
     }
 
     /// Merge two maps (values from other win on conflict)
-    pub fn merge(self, other: Map) -> Map {
+    pub fn merge(self, other: Self) -> Self {
         Map { data: :maps::merge(self.data, other.data) }
     }
 
