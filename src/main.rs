@@ -1908,12 +1908,12 @@ fn run_application(
     cmd.arg("-noshell").arg("-eval").arg(&eval_expr);
 
     // Save terminal state before running erl
-    let saved_term = save_terminal_state();
+    save_terminal_state();
 
     let status = cmd.status();
 
     // Restore terminal state after erl exits
-    restore_terminal_state(saved_term);
+    restore_terminal_state();
 
     match status {
         Ok(s) if s.success() => ExitCode::SUCCESS,
@@ -1978,12 +1978,12 @@ fn run_function(
     cmd.arg("-noshell").arg("-eval").arg(&eval_expr);
 
     // Save terminal state before running erl
-    let saved_term = save_terminal_state();
+    save_terminal_state();
 
     let status = cmd.status();
 
     // Restore terminal state after erl exits
-    restore_terminal_state(saved_term);
+    restore_terminal_state();
 
     match status {
         Ok(s) if s.success() => ExitCode::SUCCESS,
@@ -1999,51 +1999,29 @@ fn run_function(
 /// This is necessary after running erl because it may leave the terminal in raw mode
 /// if interrupted with Ctrl+C, causing arrow keys and other control sequences to
 /// print garbage instead of working properly.
-/// Save terminal state before running external commands that might modify it.
-/// Returns the saved state as a string on Unix, None on other platforms.
-#[cfg(unix)]
-fn save_terminal_state() -> Option<String> {
-    let output = std::process::Command::new("stty")
-        .arg("-g")
-        .stdin(std::process::Stdio::inherit())
-        .output()
-        .ok()?;
-    if output.status.success() {
-        Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
-    } else {
-        None
+/// Save terminal state using crossterm.
+/// By briefly enabling raw mode, crossterm captures the current terminal state internally.
+fn save_terminal_state() {
+    // Enable raw mode briefly to make crossterm save the current "good" terminal state
+    // Then immediately disable it - we don't actually want raw mode
+    if crossterm::terminal::enable_raw_mode().is_ok() {
+        let _ = crossterm::terminal::disable_raw_mode();
     }
 }
 
-#[cfg(not(unix))]
-fn save_terminal_state() -> Option<String> {
-    None
-}
+/// Restore terminal state using crossterm.
+fn restore_terminal_state() {
+    // Disable raw mode - this restores to the state crossterm saved
+    let _ = crossterm::terminal::disable_raw_mode();
 
-/// Restore terminal state from a previously saved state.
-#[cfg(unix)]
-fn restore_terminal_state(saved: Option<String>) {
-    if let Some(state) = saved {
-        let _ = std::process::Command::new("stty")
-            .arg(&state)
-            .stdin(std::process::Stdio::inherit())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
-    }
+    // Show cursor in case it was hidden
+    let _ = crossterm::execute!(io::stdout(), crossterm::cursor::Show);
 
     // Drain any pending input that accumulated during the subprocess
     while crossterm::event::poll(std::time::Duration::ZERO).unwrap_or(false) {
         let _ = crossterm::event::read();
     }
 
-    let _ = io::stdout().flush();
-}
-
-#[cfg(not(unix))]
-fn restore_terminal_state(_saved: Option<String>) {
-    let _ = crossterm::terminal::disable_raw_mode();
-    let _ = crossterm::execute!(io::stdout(), crossterm::cursor::Show);
     let _ = io::stdout().flush();
 }
 
