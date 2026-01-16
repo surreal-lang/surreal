@@ -295,10 +295,6 @@ pub enum Token {
     Integer,
     #[token("float")]
     Float,
-    #[token("binary")]
-    BinaryKw,
-    #[token("bytes")]
-    Bytes,
     #[token("utf8")]
     Utf8,
 
@@ -426,8 +422,6 @@ impl std::fmt::Display for Token {
             Token::Unsigned => write!(f, "unsigned"),
             Token::Integer => write!(f, "integer"),
             Token::Float => write!(f, "float"),
-            Token::BinaryKw => write!(f, "binary"),
-            Token::Bytes => write!(f, "bytes"),
             Token::Utf8 => write!(f, "utf8"),
             Token::LtLt => write!(f, "<<"),
             Token::GtGt => write!(f, ">>"),

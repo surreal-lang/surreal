@@ -2345,7 +2345,7 @@ impl<'source> Parser<'source> {
                     self.advance();
                     segment.segment_type = BitSegmentType::Float;
                 }
-                Some(Token::BinaryKw) | Some(Token::Bytes) => {
+                Some(Token::Ident(s)) if s == "binary" || s == "bytes" => {
                     self.advance();
                     segment.segment_type = BitSegmentType::Binary;
                 }
@@ -3266,10 +3266,12 @@ impl<'source> Parser<'source> {
             }
         }
 
-        // Binary keyword as type (since "binary" is tokenized as BinaryKw, not Ident)
-        if self.check(&Token::BinaryKw) {
-            self.advance();
-            return Ok(Type::Binary);
+        // Binary as type (lowercase identifier for backward compatibility)
+        if let Some(Token::Ident(s)) = self.peek() {
+            if s == "binary" {
+                self.advance();
+                return Ok(Type::Binary);
+            }
         }
 
         // Named type (uppercase identifier) with optional type arguments
@@ -3550,10 +3552,9 @@ impl<'source> Parser<'source> {
             Some(Token::Type) => "type".to_string(),
             Some(Token::True) => "true".to_string(),
             Some(Token::False) => "false".to_string(),
-            // Binary segment type keywords that might be function names
+            // Bit segment type keywords that might be function names
             Some(Token::Float) => "float".to_string(),
             Some(Token::Integer) => "integer".to_string(),
-            Some(Token::BinaryKw) => "binary".to_string(),
             None => return Err(ParseError::unexpected_eof("identifier")),
             _ => {
                 let span = self.current_span();

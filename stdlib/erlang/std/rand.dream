@@ -18,12 +18,10 @@ extern mod rand {
     fn uniform_s(n: int, state: any) -> (int, any);
 
     /// Get random bytes.
-    #[name = "bytes"]
-    fn random_bytes(n: int) -> binary;
+    fn bytes(n: int) -> binary;
 
     /// Get random bytes with state.
-    #[name = "bytes_s"]
-    fn random_bytes_s(n: int, state: any) -> (binary, any);
+    fn bytes_s(n: int, state: any) -> (binary, any);
 
     /// Seed the generator.
     fn seed(alg: atom) -> any;
