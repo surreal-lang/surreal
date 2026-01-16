@@ -98,6 +98,7 @@ pub fn cwd() -> Result<String, Any> {
     match erl_file::get_cwd() {
         Ok(dir) => Ok(erl::list_to_binary(dir)),
         Err(e) => Err(e),
+        _ => Err(:unknown),
     }
 }
 

@@ -64,7 +64,8 @@ pub trait Application {
 pub fn get_env(key: Atom) -> Option<Any> {
     match erl_app::get_application() {
         Ok(app) => get_env_for(app, key),
-        Err(_) => None
+        Err(_) => None,
+        _ => None,
     }
 }
 
@@ -72,7 +73,8 @@ pub fn get_env(key: Atom) -> Option<Any> {
 pub fn get_env_for(app: Atom, key: Atom) -> Option<Any> {
     match erl_app::get_env(app, key) {
         Ok(value) => Some(value),
-        Err(_) => None
+        Err(_) => None,
+        _ => None,
     }
 }
 
@@ -80,7 +82,8 @@ pub fn get_env_for(app: Atom, key: Atom) -> Option<Any> {
 pub fn get_env_default(key: Atom, default: Any) -> Any {
     match get_env(key) {
         Some(value) => value,
-        None => default
+        None => default,
+        _ => default,
     }
 }
 
@@ -88,7 +91,8 @@ pub fn get_env_default(key: Atom, default: Any) -> Any {
 pub fn get_env_for_default(app: Atom, key: Atom, default: Any) -> Any {
     match get_env_for(app, key) {
         Some(value) => value,
-        None => default
+        None => default,
+        _ => default,
     }
 }
 
@@ -96,7 +100,8 @@ pub fn get_env_for_default(app: Atom, key: Atom, default: Any) -> Any {
 pub fn fetch_env(key: Atom) -> Any {
     match get_env(key) {
         Some(value) => value,
-        None => erl::error((:missing_env, key))
+        None => erl::error((:missing_env, key)),
+        _ => erl::error((:missing_env, key)),
     }
 }
 
@@ -104,7 +109,8 @@ pub fn fetch_env(key: Atom) -> Any {
 pub fn fetch_env_for(app: Atom, key: Atom) -> Any {
     match get_env_for(app, key) {
         Some(value) => value,
-        None => erl::error((:missing_env, app, key))
+        None => erl::error((:missing_env, app, key)),
+        _ => erl::error((:missing_env, app, key)),
     }
 }
 
@@ -112,7 +118,8 @@ pub fn fetch_env_for(app: Atom, key: Atom) -> Any {
 pub fn put_env(key: Atom, value: Any) -> Atom {
     match erl_app::get_application() {
         Ok(app) => put_env_for(app, key, value),
-        Err(_) => :error
+        Err(_) => :error,
+        _ => :error,
     }
 }
 
@@ -125,7 +132,8 @@ pub fn put_env_for(app: Atom, key: Atom, value: Any) -> Atom {
 pub fn get_all_env() -> [(Atom, Any)] {
     match erl_app::get_application() {
         Ok(app) => get_all_env_for(app),
-        Err(_) => []
+        Err(_) => [],
+        _ => [],
     }
 }
 
@@ -157,7 +165,8 @@ pub fn ensure_started(app: Atom) -> Result<[Atom], Any> {
 pub fn ensure_started_simple(app: Atom) -> Atom {
     match ensure_started(app) {
         Ok(_) => :ok,
-        Err(reason) => erl::error(reason)
+        Err(reason) => erl::error(reason),
+        _ => erl::error(:unknown),
     }
 }
 
@@ -175,6 +184,7 @@ pub fn which_applications() -> [(Atom, Any, Any)] {
 pub fn get_application() -> Option<Atom> {
     match erl_app::get_application() {
         Ok(app) => Some(app),
-        Err(_) => None
+        Err(_) => None,
+        _ => None,
     }
 }

@@ -111,7 +111,7 @@ impl ModuleLoader {
     }
 
     /// Add a directory to search for bindings (e.g., _build/bindings/).
-    /// Files in bindings directories can use .dream or .dreamt extensions.
+    /// Bindings files use .dream extension (also supports legacy .dreamt).
     pub fn add_bindings_dir(&mut self, dir: PathBuf) {
         if dir.exists() {
             self.bindings_dirs.push(dir);
@@ -121,7 +121,7 @@ impl ModuleLoader {
     /// Derive the full module name from a file path.
     /// For Rust-style projects: `src/users/auth.dream` -> `my_app::users::auth`
     /// For lib.dream at src root: `src/lib.dream` -> `my_app`
-    /// For bindings files: `_build/bindings/cowboy.dreamt` -> `cowboy`
+    /// For bindings files: `_build/bindings/cowboy.dream` -> `cowboy`
     /// For standalone files (no package): uses just the filename stem
     fn derive_module_name(&self, path: &Path) -> String {
         // Check if this is a bindings file - use just the filename
@@ -227,7 +227,7 @@ impl ModuleLoader {
             }
             searched.push(binding_path);
 
-            // Try <bindings>/<name>.dreamt (generated bindings)
+            // Try <bindings>/<name>.dreamt (legacy extension, for backwards compatibility)
             let dreamt_path = bindings_dir.join(format!("{}.dreamt", name));
             if dreamt_path.exists() {
                 return Ok(dreamt_path);
@@ -466,7 +466,7 @@ impl ModuleLoader {
             if path.is_dir() {
                 Self::find_dream_files_recursive(&path, files)?;
             } else if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
-                // Support both .dream and .dreamt (generated bindings)
+                // Support both .dream and .dreamt (legacy extension)
                 if ext == "dream" || ext == "dreamt" {
                     files.push(path);
                 }

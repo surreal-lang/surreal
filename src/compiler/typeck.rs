@@ -626,9 +626,16 @@ impl TypeEnv {
         self.extern_imports.get(name)
     }
 
-    /// Register a module alias: `use erlang::std::application as erl_app`
-    /// Maps alias "erl_app" -> "application" (the registered extern module name)
+    /// Register a module alias: `use erlang::std::erlang as erl`
+    /// Maps alias -> full module path in extern_module_aliases
+    /// Also adds alias -> BEAM name mapping for code generation
     pub fn add_module_alias(&mut self, alias: String, module_path: String) {
+        // First, get the BEAM module name for the aliased module
+        // If the module has a #[name = "..."] attribute, use that; otherwise use the module path
+        if let Some(beam_name) = self.extern_module_names.get(&module_path).cloned() {
+            // Also register the alias -> BEAM name mapping for code generation
+            self.extern_module_names.insert(alias.clone(), beam_name);
+        }
         self.extern_module_aliases.insert(alias, module_path);
     }
 
@@ -1476,15 +1483,40 @@ impl TypeChecker {
     fn collect_use_decl(&mut self, use_decl: &UseDecl) {
         match &use_decl.tree {
             UseTree::Path { module, name, rename } => {
-                // Check if this is a module alias: `use erlang::std::application as erl_app`
-                // In this case, `name` is an extern module and we're aliasing it
-                if self.env.is_extern_module(name) {
+                // Check if this is a module alias: `use erlang::std::erlang as erl`
+                // Build the full path from module.segments + name
+                let full_path = if module.segments.is_empty() {
+                    name.clone()
+                } else {
+                    let mut parts = module.segments.clone();
+                    parts.push(name.clone());
+                    parts.join("::")
+                };
+
+                // Check if the full path refers to an extern module
+                if self.env.is_extern_module(&full_path) {
                     if let Some(alias) = rename {
-                        // Register the module alias: alias -> extern_module_name
-                        self.env.add_module_alias(alias.clone(), name.clone());
+                        // Register the module alias: alias -> full extern module path
+                        self.env.add_module_alias(alias.clone(), full_path.clone());
                     }
                     // If no rename, it's not really useful as a module alias
                     // (you can just use the module name directly)
+                    return;
+                }
+
+                // Check if just the name (last segment) is an extern module
+                // This handles cases like `use erlang::std::erlang as erl` where the
+                // extern module is registered as "erlang" but referenced via full path
+                if self.env.is_extern_module(name) {
+                    if let Some(alias) = rename {
+                        // Register the module alias: alias -> extern module name (e.g., "erl" -> "erlang")
+                        // NOT the full path - we want to resolve to the actual extern module name
+                        self.env.extern_module_aliases.insert(alias.clone(), name.clone());
+                        // Also add to extern_module_names if there's a BEAM name mapping
+                        if let Some(beam_name) = self.env.extern_module_names.get(name).cloned() {
+                            self.env.extern_module_names.insert(alias.clone(), beam_name);
+                        }
+                    }
                     return;
                 }
 
@@ -3403,6 +3435,9 @@ impl TypeChecker {
                         let func_name = &segments[1];
 
                         if self.env.is_extern_module(module) {
+                            // Resolve module alias to full path for code generation
+                            let resolved_module = self.env.resolve_module_alias(module).to_string();
+
                             // Transform to ExternCall with Result wrapping if needed
                             let arity = args.len();
                             if let Some(info) = self.env.get_extern_function(module, func_name, arity).cloned() {
@@ -3410,17 +3445,17 @@ impl TypeChecker {
                                 if let Ty::Named { name, args: type_args, .. } = &info.ret {
                                     if name == "Result" && type_args.len() == 2 {
                                         let is_unit_ok = matches!(&type_args[0], Ty::Unit);
-                                        return self.transform_extern_to_result(module, func_name, annotated_args, is_unit_ok);
+                                        return self.transform_extern_to_result(&resolved_module, func_name, annotated_args, is_unit_ok);
                                     }
                                     if name == "Option" && type_args.len() == 1 {
-                                        return self.transform_extern_to_option(module, func_name, annotated_args);
+                                        return self.transform_extern_to_option(&resolved_module, func_name, annotated_args);
                                     }
                                 }
                             }
 
                             // Plain extern call without Result/Option transformation
                             return Expr::ExternCall {
-                                module: module.clone(),
+                                module: resolved_module,
                                 function: func_name.clone(),
                                 args: annotated_args,
                             };

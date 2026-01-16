@@ -329,17 +329,19 @@ fn server_loop(module: Atom, state: Any) -> Atom {
 
 /// Call handle_info if exported, otherwise use default (ignore message).
 fn call_handle_info(module: Atom, msg: Any, state: Any) -> (Atom, Any) {
-    match erl::function_exported(module, :handle_info, 2) {
-        true => erl::apply(module, :handle_info, [msg, state]),
-        false => (:noreply, state)  // Default: ignore message
+    if erl::function_exported(module, :handle_info, 2) {
+        erl::apply(module, :handle_info, [msg, state])
+    } else {
+        (:noreply, state)  // Default: ignore message
     }
 }
 
 /// Call terminate if exported, otherwise use default (do nothing).
 fn call_terminate(module: Atom, reason: Atom, state: Any) -> Atom {
-    match erl::function_exported(module, :terminate, 2) {
-        true => erl::apply(module, :terminate, [reason, state]),
-        false => :ok  // Default: do nothing
+    if erl::function_exported(module, :terminate, 2) {
+        erl::apply(module, :terminate, [reason, state])
+    } else {
+        :ok  // Default: do nothing
     }
 }
 
