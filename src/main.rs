@@ -1907,10 +1907,13 @@ fn run_application(
 
     cmd.arg("-noshell").arg("-eval").arg(&eval_expr);
 
+    // Save terminal state before running erl
+    let saved_term = save_terminal_state();
+
     let status = cmd.status();
 
-    // Reset terminal in case erl left it in raw mode (e.g., after Ctrl+C)
-    reset_terminal();
+    // Restore terminal state after erl exits
+    restore_terminal_state(saved_term);
 
     match status {
         Ok(s) if s.success() => ExitCode::SUCCESS,
@@ -1974,10 +1977,13 @@ fn run_function(
 
     cmd.arg("-noshell").arg("-eval").arg(&eval_expr);
 
+    // Save terminal state before running erl
+    let saved_term = save_terminal_state();
+
     let status = cmd.status();
 
-    // Reset terminal in case erl left it in raw mode (e.g., after Ctrl+C)
-    reset_terminal();
+    // Restore terminal state after erl exits
+    restore_terminal_state(saved_term);
 
     match status {
         Ok(s) if s.success() => ExitCode::SUCCESS,
@@ -1993,32 +1999,51 @@ fn run_function(
 /// This is necessary after running erl because it may leave the terminal in raw mode
 /// if interrupted with Ctrl+C, causing arrow keys and other control sequences to
 /// print garbage instead of working properly.
-fn reset_terminal() {
-    // Use crossterm to reset terminal state in a cross-platform way
-    let _ = crossterm::terminal::disable_raw_mode();
+/// Save terminal state before running external commands that might modify it.
+/// Returns the saved state as a string on Unix, None on other platforms.
+#[cfg(unix)]
+fn save_terminal_state() -> Option<String> {
+    let output = std::process::Command::new("stty")
+        .arg("-g")
+        .stdin(std::process::Stdio::inherit())
+        .output()
+        .ok()?;
+    if output.status.success() {
+        Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    } else {
+        None
+    }
+}
 
-    // Also show cursor in case it was hidden
-    let _ = crossterm::execute!(io::stdout(), crossterm::cursor::Show);
+#[cfg(not(unix))]
+fn save_terminal_state() -> Option<String> {
+    None
+}
 
-    // On Unix, also use stty sane as a fallback since erl may have changed
-    // terminal settings in ways crossterm doesn't track
-    #[cfg(unix)]
-    {
+/// Restore terminal state from a previously saved state.
+#[cfg(unix)]
+fn restore_terminal_state(saved: Option<String>) {
+    if let Some(state) = saved {
         let _ = std::process::Command::new("stty")
-            .arg("sane")
+            .arg(&state)
             .stdin(std::process::Stdio::inherit())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status();
     }
 
-    // Drain any pending input events that might interfere with the shell
-    // This handles key presses during shutdown that would otherwise print garbage
+    // Drain any pending input that accumulated during the subprocess
     while crossterm::event::poll(std::time::Duration::ZERO).unwrap_or(false) {
         let _ = crossterm::event::read();
     }
 
-    // Flush stdout to ensure any pending output is written
+    let _ = io::stdout().flush();
+}
+
+#[cfg(not(unix))]
+fn restore_terminal_state(_saved: Option<String>) {
+    let _ = crossterm::terminal::disable_raw_mode();
+    let _ = crossterm::execute!(io::stdout(), crossterm::cursor::Show);
     let _ = io::stdout().flush();
 }
 
