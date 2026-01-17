@@ -4,7 +4,7 @@
 use crate::models::user::User;
 
 #[test]
-pub fn test_user_serialize() -> atom {
+pub fn test_user_serialize() -> Atom {
     // Test cross-module method call with Serialize trait
     let user = User { id: 42, name: "Alice" };
     let json = user.serialize();
@@ -25,7 +25,7 @@ pub fn test_user_serialize() -> atom {
 }
 
 #[test]
-pub fn test_map_to_json_compatible() -> atom {
+pub fn test_map_to_json_compatible() -> Atom {
     // Test that serialize returns a map compatible with JSON encoding
     let user = User { id: 1, name: "Bob" };
     let map = user.serialize();
@@ -42,7 +42,7 @@ pub fn test_map_to_json_compatible() -> atom {
 }
 
 #[test]
-pub fn test_addition() -> atom {
+pub fn test_addition() -> Atom {
     let result = 1 + 1;
     if result != 2 {
         :erlang::error(:assertion_failed)
@@ -52,7 +52,7 @@ pub fn test_addition() -> atom {
 }
 
 #[test]
-pub fn test_list_operations() -> atom {
+pub fn test_list_operations() -> Atom {
     let list = [1, 2, 3];
     let len = :erlang::length(list);
     if len != 3 {
@@ -63,7 +63,7 @@ pub fn test_list_operations() -> atom {
 }
 
 #[test]
-pub fn test_map_operations() -> atom {
+pub fn test_map_operations() -> Atom {
     let map = :maps::new();
     let map = :maps::put(:key, "value", map);
     match :maps::get(:key, map) {

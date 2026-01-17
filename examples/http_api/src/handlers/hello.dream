@@ -1,11 +1,11 @@
 // Handler for GET /api/hello
 
 /// Convert a string (charlist) to binary for JSON encoding
-fn to_binary(s: string) -> any {
+fn to_binary(s: String) -> Any {
     :erlang::iolist_to_binary([s])
 }
 
-pub fn init(req: any, state: any) -> (atom, any, any) {
+pub fn init(req: Any, state: Any) -> (Atom, Any, Any) {
     // Build a map for JSON response
     let message = to_binary("Hello from Dream!");
     let data = {message: message};

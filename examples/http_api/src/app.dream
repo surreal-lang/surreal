@@ -7,7 +7,7 @@ use io::println;
 impl Application {
     /// OTP Application start callback
     /// Called automatically when the application starts
-    pub fn start(_type: atom, _args: any) -> Result<pid, any> {
+    pub fn start(_type: Atom, _args: Any) -> Result<Pid, Any> {
         let dispatch = compile_routes();
 
         // Build the options map using maps::put
@@ -32,14 +32,14 @@ impl Application {
     }
 
     /// OTP Application stop callback
-    pub fn stop(_state: pid) -> atom {
+    pub fn stop(_state: Pid) -> Atom {
         :cowboy::stop_listener(:http_listener);
         :ok
     }
 }
 
 /// Compile cowboy routes
-fn compile_routes() -> any {
+fn compile_routes() -> Any {
     // Reference handler modules by their full BEAM module names
     let hello = :"dream::http_api::handlers::hello";
     let users = :"dream::http_api::handlers::users";

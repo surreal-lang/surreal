@@ -5,7 +5,7 @@
 use crate::models::user::User;
 use serde::serialize::serialize_value;
 
-pub fn init(req: any, state: any) -> (atom, any, any) {
+pub fn init(req: Any, state: Any) -> (Atom, Any, Any) {
     // Create users using a for comprehension with filter
     // Only include users with id > 1 (filters out Alice)
     let user_data = [(1, "Alice"), (2, "Bob"), (3, "Charlie")];
