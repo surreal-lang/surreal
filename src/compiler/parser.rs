@@ -1880,6 +1880,66 @@ impl<'source> Parser<'source> {
             return Ok(Expr::Ident(name));
         }
 
+        // In quote mode, allow #ident { ... } for unquote in struct literal position
+        // We need to check ahead to distinguish from repetition syntax like #(
+        // peek() is current (#), peek_next() is one ahead (should be ident)
+        if self.in_quote && self.check(&Token::Hash) {
+            // Check if next token is an identifier
+            if let Some(Token::Ident(_)) = self.peek_next() {
+                // Save position for potential backtrack
+                let saved_pos = self.pos;
+                self.advance(); // consume #
+                let var_name = self.expect_ident()?;
+
+                // Check if followed by {
+                if self.check(&Token::LBrace) {
+                    let name = format!("$UNQUOTE:{}", var_name);
+
+                    // Parse struct init: #name { ... } with field shorthand support
+                    self.advance(); // consume {
+                    let mut fields = Vec::new();
+                    let mut base = None;
+                    while !self.check(&Token::RBrace) && !self.is_at_end() {
+                        // Check for struct update syntax: ..base
+                        if self.check(&Token::DotDot) {
+                            self.advance();
+                            base = Some(Box::new(self.parse_expr()?));
+                            // After ..base, only } is allowed
+                            break;
+                        }
+
+                        // In quote mode, allow #ident for unquote in field name position
+                        let field_name = if self.in_quote && self.check(&Token::Hash) {
+                            self.advance(); // consume #
+                            let field_var_name = self.expect_ident()?;
+                            format!("$UNQUOTE:{}", field_var_name)
+                        } else {
+                            self.expect_ident()?
+                        };
+                        // Support shorthand: `{ x }` is equivalent to `{ x: x }`
+                        let field_value = if self.check(&Token::Colon) {
+                            self.advance();
+                            self.parse_expr()?
+                        } else {
+                            Expr::Ident(field_name.clone())
+                        };
+                        fields.push((field_name, field_value));
+
+                        if self.check(&Token::Comma) {
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                    self.expect(&Token::RBrace)?;
+                    return Ok(Expr::StructInit { name, fields, base });
+                } else {
+                    // Not a struct init, restore position and let other parsing handle it
+                    self.pos = saved_pos;
+                }
+            }
+        }
+
         if let Some(Token::TypeIdent(name)) = self.peek().cloned() {
             self.advance();
 
