@@ -2007,6 +2007,15 @@ fn sanitize_identifier(name: &str) -> String {
     result
 }
 
+/// Capitalize the first letter of a string (for struct names).
+fn capitalize_first(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+    }
+}
+
 /// Check if a name is a Dream keyword that conflicts with function names.
 /// Type names (atom, string, int, etc.) are NOT included because the parser
 /// can distinguish `atom` (type) from `atom(...)` (function call).
@@ -2095,31 +2104,27 @@ fn generate_dreamt(modules: &HashMap<String, ModuleInfo>) -> String {
     for module_name in &module_names {
         let info = &modules[*module_name];
 
-        // Generate commented extern types for Erlang records
+        // Generate struct definitions for Erlang records with #[record] attribute
         for record in &info.records {
-            let type_name = sanitize_identifier(&record.name);
+            let type_name = capitalize_first(&sanitize_identifier(&record.name));
             if generated_types.contains(&type_name) {
                 continue;
             }
 
-            if !has_type_comments {
-                output.push_str("// Type declarations (for documentation - extern type not yet supported):\n");
-                has_type_comments = true;
-            }
-
-            output.push_str(&format!("// Record from: {}\n", module_name));
-            output.push_str(&format!("// extern type {} = struct {{\n", type_name));
+            // Generate struct with #[record = "name"] attribute
+            output.push_str(&format!("#[record = \"{}\"]\n", record.name));
+            output.push_str(&format!("pub struct {} {{\n", type_name));
 
             for (field_name, field_type) in &record.fields {
                 let safe_field = sanitize_identifier(field_name);
                 output.push_str(&format!(
-                    "//     {}: {},\n",
+                    "    {}: {},\n",
                     safe_field,
                     erlang_type_to_dream(field_type)
                 ));
             }
 
-            output.push_str("// };\n\n");
+            output.push_str("}\n\n");
             generated_types.insert(type_name);
         }
 
@@ -2749,12 +2754,14 @@ mod tests {
         });
 
         let output = generate_dreamt(&modules);
-        // Types are generated as comments since extern type isn't supported yet
-        assert!(output.contains("// extern type person = struct {"),
-            "Expected commented extern type declaration, got:\n{}", output);
-        assert!(output.contains("//     name: String,"),
+        // Records are now generated as actual structs with #[record] attribute
+        assert!(output.contains("#[record = \"person\"]"),
+            "Expected #[record] attribute, got:\n{}", output);
+        assert!(output.contains("pub struct Person {"),
+            "Expected struct declaration with capitalized name, got:\n{}", output);
+        assert!(output.contains("name: String,"),
             "Expected name field, got:\n{}", output);
-        assert!(output.contains("//     age: int,"),
+        assert!(output.contains("age: int,"),
             "Expected age field (int stays lowercase), got:\n{}", output);
     }
 

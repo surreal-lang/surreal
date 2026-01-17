@@ -934,12 +934,17 @@ impl DepsManager {
 
             let pkg_dir = entry.path();
 
-            // Find .erl files in src/ directory
+            // Find .erl files in src/ directory and .hrl files in include/ directory
             let erl_files = Self::find_erl_files(&pkg_dir.join("src"));
+            let hrl_files = Self::find_hrl_files(&pkg_dir.join("include"));
 
-            if !erl_files.is_empty() {
+            // Combine both - process .hrl files first for record definitions
+            let mut all_files = hrl_files;
+            all_files.extend(erl_files);
+
+            if !all_files.is_empty() {
                 // Generate bindings for this dependency
-                if let Err(e) = self.generate_dep_bindings(&pkg_name, &erl_files, &bindings_dir) {
+                if let Err(e) = self.generate_dep_bindings(&pkg_name, &all_files, &bindings_dir) {
                     eprintln!("  Warning: Failed to generate bindings for {}: {}", pkg_name, e);
                 } else {
                     generated_count += 1;
@@ -1091,6 +1096,28 @@ extern mod {} {{
                 if path.is_dir() {
                     files.extend(Self::find_erl_files(&path));
                 } else if path.extension().map_or(false, |ext| ext == "erl") {
+                    files.push(path);
+                }
+            }
+        }
+
+        files
+    }
+
+    /// Find all .hrl files in a directory recursively.
+    fn find_hrl_files(dir: &Path) -> Vec<PathBuf> {
+        let mut files = Vec::new();
+
+        if !dir.exists() {
+            return files;
+        }
+
+        if let Ok(entries) = fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    files.extend(Self::find_hrl_files(&path));
+                } else if path.extension().map_or(false, |ext| ext == "hrl") {
                     files.push(path);
                 }
             }
