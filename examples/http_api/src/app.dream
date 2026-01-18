@@ -2,19 +2,14 @@
 // Implements OTP application behavior using the Application trait
 
 use application::Application;
+use crate::bindings::cowboy;
 
 impl Application {
     /// OTP Application start callback
     /// Called automatically when the application starts
     pub fn start(_type: Atom, _args: Any) -> Result<Pid, Any> {
         // Configure logger with clean single-line format
-        :logger::set_primary_config(:level, :info);
-        let formatter_config = :maps::from_list([
-            (:single_line, true),
-            (:legacy_header, false),
-            (:template, [:time, " [", :level, "] ", :msg, "\n"])
-        ]);
-        :logger::update_handler_config(:default, :formatter, (:logger_formatter, formatter_config));
+        logger::setup();
 
         let opts = {
             env: {
@@ -23,26 +18,19 @@ impl Application {
         };
 
         // Start cowboy HTTP listener
-        match :cowboy::start_clear(:http_listener, [(:port, 8080)], opts) {
-            (:ok, pid) => {
-                :logger::info("Server started on http://localhost:8080");
-                :logger::info("Try: curl http://localhost:8080/api/hello");
-                :logger::info("     curl http://localhost:8080/api/users");
+        let pid = cowboy::start_clear(:http_listener, [(:port, 8080)], opts)?;
 
-                Ok(pid)
-            },
-            (:error, reason) => {
-                :logger::error("Failed to start server");
-                Err(reason)
-            },
-            _ => Err(:unknown_error)
-        }
+        logger::info("Server started on http://localhost:8080");
+        logger::info("Try: curl http://localhost:8080/api/hello");
+        logger::info("     curl http://localhost:8080/api/users");
+
+        Ok(pid)
     }
 
     /// OTP Application stop callback
     pub fn stop(_state: Pid) -> Atom {
-        :logger::info("Stopping HTTP listener");
-        :cowboy::stop_listener(:http_listener);
+        logger::info("Stopping HTTP listener");
+        cowboy::stop_listener(:http_listener);
         :ok
     }
 }
