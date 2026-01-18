@@ -430,6 +430,11 @@ fn build_standalone_file(source_file: &Path, target: &str, output: Option<&Path>
         }
     }
 
+    // Compile stdlib first (even for standalone files)
+    if let Err(e) = compile_stdlib() {
+        eprintln!("Warning: {}", e);
+    }
+
     // Default output directory is current directory
     let build_dir = output
         .map(|p| p.to_path_buf())
@@ -1667,17 +1672,16 @@ fn compile_stdlib() -> Result<PathBuf, String> {
     fs::create_dir_all(&output_dir)
         .map_err(|e| format!("Failed to create stdlib output directory: {}", e))?;
 
-    // Check if any stdlib files need recompilation
-    let entries = fs::read_dir(&stdlib_dir)
-        .map_err(|e| format!("Failed to read stdlib directory: {}", e))?;
+    // Recursively collect all .dream files in stdlib
+    let dream_files = collect_dream_files_recursive(&stdlib_dir);
 
+    // Check if any stdlib files need recompilation
     let mut needs_compile = false;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) == Some("dream") {
-            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-            // Stdlib modules are named dream::<stem>, beam files use the full name
-            let beam_file = output_dir.join(format!("dream::{}.beam", stem));
+    for path in &dream_files {
+        // Compute module name from path relative to stdlib_dir
+        // e.g., stdlib/erlang/std/logger.dream -> dream::erlang::std::logger
+        if let Some(module_name) = stdlib_path_to_module_name(&stdlib_dir, path) {
+            let beam_file = output_dir.join(format!("{}.beam", module_name));
 
             if !beam_file.exists() {
                 needs_compile = true;
@@ -1711,6 +1715,35 @@ fn compile_stdlib() -> Result<PathBuf, String> {
     }
 
     Ok(output_dir)
+}
+
+/// Recursively collect all .dream files in a directory.
+fn collect_dream_files_recursive(dir: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                files.extend(collect_dream_files_recursive(&path));
+            } else if path.extension().and_then(|s| s.to_str()) == Some("dream") {
+                files.push(path);
+            }
+        }
+    }
+    files
+}
+
+/// Convert a stdlib file path to its module name.
+/// e.g., stdlib/erlang/std/logger.dream -> dream::erlang::std::logger
+fn stdlib_path_to_module_name(stdlib_dir: &Path, path: &Path) -> Option<String> {
+    let relative = path.strip_prefix(stdlib_dir).ok()?;
+    let stem = relative.with_extension("");
+    let module_path = stem
+        .components()
+        .filter_map(|c| c.as_os_str().to_str())
+        .collect::<Vec<_>>()
+        .join("::");
+    Some(format!("dream::{}", module_path))
 }
 
 /// Extract the module name(s) from a Dream source file.
