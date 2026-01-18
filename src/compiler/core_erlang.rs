@@ -269,7 +269,7 @@ impl CoreErlangEmitter {
     const STDLIB_MODULES: &'static [&'static str] = &[
         "io", "list", "enumerable", "iterator", "option", "result",
         "string", "map", "file", "timer", "display", "convert",
-        "process", "genserver", "supervisor", "application",
+        "process", "genserver", "supervisor", "application", "logger",
     ];
 
     /// Resolve a simple module name string, adding dream:: prefix for Dream modules.
@@ -2911,6 +2911,17 @@ impl CoreErlangEmitter {
                                         "call '{}':'{}'",
                                         Self::beam_module_name(&module.to_lowercase()),
                                         mangled_name
+                                    ));
+                                    self.emit("(");
+                                    self.emit_args(args)?;
+                                    self.emit(")");
+                                } else if Self::STDLIB_MODULES.contains(&first.as_str()) {
+                                    // Stdlib module call: io::println -> dream::io::println
+                                    // These take precedence over extern modules with the same name
+                                    self.emit(&format!(
+                                        "call '{}':'{}'",
+                                        Self::beam_module_name(first),
+                                        second
                                     ));
                                     self.emit("(");
                                     self.emit_args(args)?;
@@ -5914,6 +5925,85 @@ mod tests {
         assert!(
             result.contains("A") && result.contains("B"),
             "Expected both A and B variables, got:\n{}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_stdlib_module_call_gets_dream_prefix() {
+        // Stdlib modules like io, logger should be prefixed with dream::
+        // NOT treated as extern calls to Erlang's io/logger modules.
+        // This tests that io::println compiles to 'dream::io':'println'
+        // rather than 'io':'println' (which would fail at runtime).
+        let source = r#"
+            mod test {
+                pub fn log_message(msg: String) -> Atom {
+                    io::println(msg)
+                }
+            }
+        "#;
+
+        let result = emit_core_erlang(source).unwrap();
+
+        // Should call dream::io, NOT bare io
+        assert!(
+            result.contains("call 'dream::io':'println'"),
+            "Expected 'dream::io':'println' but got:\n{}",
+            result
+        );
+        // Make sure it's NOT calling the bare Erlang io module
+        assert!(
+            !result.contains("call 'io':'println'"),
+            "Should NOT call bare 'io':'println', got:\n{}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_stdlib_logger_call_gets_dream_prefix() {
+        // Logger is also a stdlib module that should get the dream:: prefix
+        let source = r#"
+            mod test {
+                pub fn log_info(msg: String) -> Atom {
+                    logger::info(msg)
+                }
+            }
+        "#;
+
+        let result = emit_core_erlang(source).unwrap();
+
+        // Should call dream::logger, NOT bare logger
+        assert!(
+            result.contains("call 'dream::logger':'info'"),
+            "Expected 'dream::logger':'info' but got:\n{}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_extern_call_with_colon_prefix_bypasses_stdlib() {
+        // Direct extern calls with : prefix should call Erlang directly
+        // :logger::info should call 'logger':'info', not 'dream::logger':'info'
+        let source = r#"
+            mod test {
+                pub fn direct_log(msg: String) -> Atom {
+                    :logger::info(msg)
+                }
+            }
+        "#;
+
+        let result = emit_core_erlang(source).unwrap();
+
+        // Should call logger directly (Erlang's logger module)
+        assert!(
+            result.contains("call 'logger':'info'"),
+            "Expected direct 'logger':'info' call but got:\n{}",
+            result
+        );
+        // Should NOT have dream:: prefix for direct extern calls
+        assert!(
+            !result.contains("call 'dream::logger':'info'"),
+            "Direct extern call should NOT have dream:: prefix, got:\n{}",
             result
         );
     }

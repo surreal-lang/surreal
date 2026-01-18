@@ -131,6 +131,124 @@ let json = :"Elixir.Jason"::encode(data);
 
 ---
 
+# Compiler Internals
+
+## Module Resolution: Stdlib vs Extern
+
+Dream has two types of module calls that look similar but compile differently:
+
+1. **Stdlib module calls** (`io::println`, `logger::info`) - Compile to `'dream::io':'println'`
+2. **Direct extern calls** (`:io::format`, `:logger::info`) - Compile to `'io':'format'` (Erlang directly)
+
+### How It Works
+
+The typechecker's `annotate_expr` function (in `typeck.rs`) transforms calls based on these rules:
+
+```
+module::func(args)    →  If module is in STDLIB_MODULES: stays as Path, gets dream:: prefix
+                         If module is extern mod: transforms to ExternCall
+
+:module::func(args)   →  Always ExternCall (direct Erlang/Elixir call)
+```
+
+### The STDLIB_MODULES List
+
+Both `typeck.rs` and `core_erlang.rs` have a `STDLIB_MODULES` constant that lists Dream stdlib modules:
+
+```rust
+const STDLIB_MODULES: &'static [&'static str] = &[
+    "io", "list", "enumerable", "iterator", "option", "result",
+    "string", "map", "file", "timer", "display", "convert",
+    "process", "genserver", "supervisor", "application", "logger",
+];
+```
+
+**When adding a new stdlib module**, update BOTH files.
+
+### Common Bug Pattern
+
+If a stdlib module also has an extern binding (e.g., `stdlib/erlang/std/io.dream` defines `extern mod io`), the typechecker might incorrectly treat `io::println` as an extern call. The fix is to check `is_stdlib_module()` BEFORE checking `is_extern_module()`.
+
+### Debugging Module Resolution
+
+1. Build with `--target core` to see generated Core Erlang:
+   ```bash
+   dream build project --target core
+   ```
+
+2. Check the output for correct module prefixes:
+   - `call 'dream::io':'println'` ✓ (stdlib call)
+   - `call 'io':'println'` ✗ (wrong - would fail at runtime)
+
+3. Add debug output to `core_erlang.rs` emit functions to trace code paths.
+
+## Testing Compiler Changes
+
+Tests for code generation live in `src/compiler/core_erlang.rs` in the `mod tests` section:
+
+```rust
+#[test]
+fn test_stdlib_module_call_gets_dream_prefix() {
+    let source = r#"
+        mod test {
+            pub fn log(msg: String) -> Atom {
+                io::println(msg)
+            }
+        }
+    "#;
+    let result = emit_core_erlang(source).unwrap();
+    assert!(result.contains("call 'dream::io':'println'"));
+}
+```
+
+Use `emit_core_erlang()` for simple tests, `emit_core_erlang_with_typecheck()` when you need type information.
+
+## Stdlib Build Artifacts
+
+The stdlib is precompiled to `target/stdlib/` when the compiler is built. **These files can become stale** if you modify stdlib source files.
+
+### Key Points
+
+1. **Macro expander uses `target/stdlib/`**: When derive macros run, they load modules like `dream::syn` from `target/stdlib/`. If these .beam files are stale, macros will malfunction.
+
+2. **Building standalone stdlib files outputs to current directory**: Running `dream build stdlib/syn.dream` creates `dream::syn.beam` in the *current directory*, NOT in `target/stdlib/`.
+
+3. **After modifying stdlib, manually copy .beam files**:
+   ```bash
+   dream build stdlib/syn.dream
+   cp "dream::syn.beam" target/stdlib/
+   ```
+
+### Symptoms of Stale Stdlib
+
+- Derive macros return unexpected values (e.g., `unknown` instead of struct name)
+- Runtime errors from stdlib functions that should work
+- Debug output in stdlib code doesn't appear (old .beam doesn't have it)
+
+### Debugging Stale Stdlib Issues
+
+1. Check timestamps:
+   ```bash
+   ls -la target/stdlib/dream::syn.beam stdlib/syn.dream
+   ```
+
+2. Force rebuild and copy:
+   ```bash
+   touch stdlib/syn.dream
+   dream build stdlib/syn.dream
+   cp "dream::syn.beam" target/stdlib/
+   ```
+
+3. Test directly with erl:
+   ```bash
+   erl -noshell -pa target/stdlib -eval "
+   {module, _} = code:load_file('dream::syn'),
+   % test your function
+   halt()."
+   ```
+
+---
+
 # Agent Instructions
 
 This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.

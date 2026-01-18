@@ -1485,7 +1485,7 @@ impl TypeChecker {
     const STDLIB_MODULES: &'static [&'static str] = &[
         "io", "list", "enumerable", "iterator", "option", "result",
         "string", "map", "file", "timer", "display", "convert",
-        "process", "genserver", "supervisor", "application",
+        "process", "genserver", "supervisor", "application", "logger",
     ];
 
     /// Check if a module name is a Dream stdlib module.
@@ -3463,7 +3463,9 @@ impl TypeChecker {
                         let module = &segments[0];
                         let func_name = &segments[1];
 
-                        if self.env.is_extern_module(module) {
+                        // Only transform to ExternCall if it's an extern module but NOT a stdlib module.
+                        // Stdlib modules (io, logger, etc.) have Dream wrapper implementations that should be called.
+                        if self.env.is_extern_module(module) && !Self::is_stdlib_module(module) {
                             // Resolve module alias to full path for code generation
                             let resolved_module = self.env.resolve_module_alias(module).to_string();
 
