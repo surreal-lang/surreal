@@ -9,9 +9,10 @@ use std::sync::{Arc, RwLock};
 use crate::compiler::ast::{
     self, Attribute, AttributeArgs, BinOp, Block, EnumPatternFields, EnumVariantArgs, Expr,
     ExternItem, ExternMod, ForClause, Function, ImplBlock, Item, MatchArm, Module, PathPrefix,
-    Pattern, Stmt, StringPart, TypeParam, UnaryOp, UseDecl, UseTree, VariantKind,
+    Pattern, SpannedExpr, Stmt, StringPart, TypeParam, UnaryOp, UseDecl, UseTree, VariantKind,
 };
 use crate::compiler::error::{TypeError, TypeResult, Warning};
+use crate::compiler::lexer::Span;
 
 /// Extract Erlang record name from #[record = "name"] attribute.
 fn get_record_name(attrs: &[Attribute]) -> Option<String> {
@@ -2703,11 +2704,11 @@ impl TypeChecker {
     /// Infer type of a function call.
     fn infer_call(
         &mut self,
-        func: &Expr,
+        func: &SpannedExpr,
         type_args: &[ast::Type],
-        args: &[Expr],
+        args: &[SpannedExpr],
     ) -> TypeResult<Ty> {
-        match func {
+        match func.inner() {
             Expr::Ident(name) => {
                 // First try local module's qualified name, then fall back to simple name
                 let local_qualified = self.current_module.as_ref()
@@ -3033,7 +3034,7 @@ impl TypeChecker {
     }
 
     /// Infer type of a method call.
-    fn infer_method_call(&mut self, recv_ty: &Ty, method: &str, args: &[Expr]) -> TypeResult<Ty> {
+    fn infer_method_call(&mut self, recv_ty: &Ty, method: &str, args: &[SpannedExpr]) -> TypeResult<Ty> {
         if let Ty::Named { name, .. } = recv_ty {
             if let Some(info) = self.env.get_method(name, method).cloned() {
                 // Instantiate generic method with fresh inference variables
@@ -3702,6 +3703,7 @@ impl TypeChecker {
         ImplBlock {
             type_name: impl_block.type_name.clone(),
             methods: impl_block.methods.iter().map(|m| self.annotate_function(m)).collect(),
+            span: impl_block.span.clone(),
         }
     }
 
@@ -3709,6 +3711,7 @@ impl TypeChecker {
         Block {
             stmts: block.stmts.iter().map(|s| self.annotate_stmt(s)).collect(),
             expr: block.expr.as_ref().map(|e| Box::new(self.annotate_expr(e))),
+            span: block.span.clone(),
         }
     }
 
@@ -3724,13 +3727,14 @@ impl TypeChecker {
         }
     }
 
-    fn annotate_expr(&mut self, expr: &Expr) -> Expr {
-        match expr {
+    fn annotate_expr(&mut self, expr: &SpannedExpr) -> SpannedExpr {
+        let span = expr.span.clone();
+        let inner = match expr.inner() {
             Expr::Call { func, type_args, args, .. } => {
-                let annotated_args: Vec<Expr> = args.iter().map(|a| self.annotate_expr(a)).collect();
+                let annotated_args: Vec<SpannedExpr> = args.iter().map(|a| self.annotate_expr(a)).collect();
 
                 // Check if this is a call to an extern module: module::func(args)
-                if let Expr::Path { segments } = func.as_ref() {
+                if let Expr::Path { segments } = func.inner() {
                     if segments.len() == 2 {
                         let module = &segments[0];
                         let func_name = &segments[1];
@@ -3748,39 +3752,39 @@ impl TypeChecker {
                                 if let Ty::Named { name, args: type_args, .. } = &info.ret {
                                     if name == "Result" && type_args.len() == 2 {
                                         let is_unit_ok = matches!(&type_args[0], Ty::Unit);
-                                        return self.transform_extern_to_result(&resolved_module, func_name, annotated_args, is_unit_ok);
+                                        return self.transform_extern_to_result(&resolved_module, func_name, annotated_args, is_unit_ok, span.clone());
                                     }
                                     if name == "Option" && type_args.len() == 1 {
-                                        return self.transform_extern_to_option(&resolved_module, func_name, annotated_args);
+                                        return self.transform_extern_to_option(&resolved_module, func_name, annotated_args, span.clone());
                                     }
                                 }
                             }
 
                             // Plain extern call without Result/Option transformation
-                            return Expr::ExternCall {
+                            return SpannedExpr::new(Expr::ExternCall {
                                 module: resolved_module,
                                 function: func_name.clone(),
                                 args: annotated_args,
-                            };
+                            }, span.clone());
                         }
                     }
                 }
 
                 // Check if this is an imported function: `use logger::info; info(msg)`
                 // or `use jason::encode; encode(data)`
-                if let Expr::Ident(name) = func.as_ref() {
+                if let Expr::Ident(name) = func.inner() {
                     if let Some((module, func_name)) = self.env.get_extern_import(name).cloned() {
                         // If this is a stdlib module import, transform to Path call
                         // so it gets the dream:: prefix in codegen
                         if Self::is_stdlib_module(&module) {
-                            return Expr::Call {
-                                func: Box::new(Expr::Path {
+                            return SpannedExpr::new(Expr::Call {
+                                func: SpannedExpr::boxed(Expr::Path {
                                     segments: vec![module, func_name],
                                 }),
                                 type_args: type_args.clone(),
                                 inferred_type_args: vec![],
                                 args: annotated_args,
-                            };
+                            }, span.clone());
                         }
 
                         // Transform to ExternCall with Result wrapping if needed
@@ -3790,20 +3794,20 @@ impl TypeChecker {
                             if let Ty::Named { name: type_name, args: type_args, .. } = &info.ret {
                                 if type_name == "Result" && type_args.len() == 2 {
                                     let is_unit_ok = matches!(&type_args[0], Ty::Unit);
-                                    return self.transform_extern_to_result(&module, &func_name, annotated_args, is_unit_ok);
+                                    return self.transform_extern_to_result(&module, &func_name, annotated_args, is_unit_ok, span.clone());
                                 }
                                 if type_name == "Option" && type_args.len() == 1 {
-                                    return self.transform_extern_to_option(&module, &func_name, annotated_args);
+                                    return self.transform_extern_to_option(&module, &func_name, annotated_args, span.clone());
                                 }
                             }
                         }
 
                         // Plain extern call without Result/Option transformation
-                        return Expr::ExternCall {
+                        return SpannedExpr::new(Expr::ExternCall {
                             module,
                             function: func_name,
                             args: annotated_args,
-                        };
+                        }, span.clone());
                     }
                 }
 
@@ -3811,12 +3815,12 @@ impl TypeChecker {
 
                 // If explicit type_args provided, no need to infer
                 if !type_args.is_empty() {
-                    return Expr::Call {
+                    return SpannedExpr::new(Expr::Call {
                         func: annotated_func,
                         type_args: type_args.clone(),
                         inferred_type_args: vec![],
                         args: annotated_args,
-                    };
+                    }, span.clone());
                 }
 
                 // Try to infer type args for generic functions
@@ -3832,7 +3836,7 @@ impl TypeChecker {
 
             Expr::MethodCall { receiver, method, type_args, args, resolved_module, .. } => {
                 let annotated_receiver = Box::new(self.annotate_expr(receiver));
-                let annotated_args: Vec<Expr> = args.iter().map(|a| self.annotate_expr(a)).collect();
+                let annotated_args: Vec<SpannedExpr> = args.iter().map(|a| self.annotate_expr(a)).collect();
 
                 // If explicit type_args provided, no need to infer
                 let inferred = if type_args.is_empty() {
@@ -3876,6 +3880,7 @@ impl TypeChecker {
                     pattern: arm.pattern.clone(),
                     guard: arm.guard.as_ref().map(|g| Box::new(self.annotate_expr(g))),
                     body: self.annotate_expr(&arm.body),
+                    span: arm.span.clone(),
                 }).collect(),
             },
 
@@ -3939,6 +3944,7 @@ impl TypeChecker {
                     pattern: arm.pattern.clone(),
                     guard: arm.guard.as_ref().map(|g| Box::new(self.annotate_expr(g))),
                     body: self.annotate_expr(&arm.body),
+                    span: arm.span.clone(),
                 }).collect(),
                 timeout: timeout.as_ref().map(|(t, b)| (Box::new(self.annotate_expr(t)), self.annotate_block(b))),
             },
@@ -3953,7 +3959,7 @@ impl TypeChecker {
             },
 
             Expr::ExternCall { module, function, args } => {
-                let annotated_args: Vec<Expr> = args.iter().map(|a| self.annotate_expr(a)).collect();
+                let annotated_args: Vec<SpannedExpr> = args.iter().map(|a| self.annotate_expr(a)).collect();
 
                 // Check if the extern function returns Result<T, E> or Option<T>
                 // If so, transform to a match expression that wraps the Erlang tuple
@@ -3964,11 +3970,11 @@ impl TypeChecker {
                         if name == "Result" && type_args.len() == 2 {
                             // Check if Ok type is Unit - Erlang returns just 'ok' for Result<(), E>
                             let is_unit_ok = matches!(&type_args[0], Ty::Unit);
-                            return self.transform_extern_to_result(module, function, annotated_args, is_unit_ok);
+                            return self.transform_extern_to_result(module, function, annotated_args, is_unit_ok, span.clone());
                         }
                         if name == "Option" && type_args.len() == 1 {
                             // Transform: :mod::func(args) => match :mod::func(args) { :undefined => None, v => Some(v) }
-                            return self.transform_extern_to_option(module, function, annotated_args);
+                            return self.transform_extern_to_option(module, function, annotated_args, span.clone());
                         }
                     }
                 }
@@ -3984,7 +3990,7 @@ impl TypeChecker {
             Expr::BitString(segments) => Expr::BitString(
                 segments.iter().map(|seg| ast::BitStringSegment {
                     value: Box::new(self.annotate_expr(&seg.value)),
-                    size: seg.size.as_ref().map(|s| Box::new(self.annotate_expr(s))),
+                    size: seg.size.clone(), // size is Box<Expr>, not SpannedExpr - just clone it
                     segment_type: seg.segment_type.clone(),
                     endianness: seg.endianness.clone(),
                     signedness: seg.signedness.clone(),
@@ -3995,7 +4001,7 @@ impl TypeChecker {
 
             // Simple expressions that don't need annotation
             Expr::Int(_) | Expr::String(_) | Expr::Charlist(_) | Expr::Atom(_)
-            | Expr::Bool(_) | Expr::Unit | Expr::Ident(_) | Expr::Path { .. } => expr.clone(),
+            | Expr::Bool(_) | Expr::Unit | Expr::Ident(_) | Expr::Path { .. } => expr.expr.clone(),
 
             Expr::StringInterpolation(parts) => {
                 let annotated_parts = parts.iter().map(|part| {
@@ -4042,7 +4048,7 @@ impl TypeChecker {
                             source: self.annotate_expr(source),
                             style: *style,
                         },
-                        ForClause::When(expr) => ForClause::When(self.annotate_expr(expr)),
+                        ForClause::When(e) => ForClause::When(self.annotate_expr(e)),
                     })
                     .collect();
                 Expr::For {
@@ -4051,7 +4057,8 @@ impl TypeChecker {
                     is_comprehension: *is_comprehension,
                 }
             }
-        }
+        };
+        SpannedExpr::new(inner, span)
     }
 
     /// Transform an extern call with Result<T, E> return type.
@@ -4062,26 +4069,26 @@ impl TypeChecker {
     ///
     /// For Result<(), E>, Erlang returns just 'ok' atom, which is also compatible
     /// with Dream's `Ok(())` (both compile to just `'ok'`).
-    fn transform_extern_to_result(&mut self, module: &str, function: &str, args: Vec<Expr>, _is_unit_ok: bool) -> Expr {
+    fn transform_extern_to_result(&mut self, module: &str, function: &str, args: Vec<SpannedExpr>, _is_unit_ok: bool, span: Span) -> SpannedExpr {
         // Erlang's {ok, V} / {error, E} is already compatible with Dream's Result type.
         // No transformation needed - just return the raw extern call.
-        Expr::ExternCall {
+        SpannedExpr::new(Expr::ExternCall {
             module: module.to_string(),
             function: function.to_string(),
             args,
-        }
+        }, span)
     }
 
     /// Transform an extern call with Option<T> return type into a match expression.
     /// Converts: :mod::func(args)
     /// Into: match :mod::func(args) { :undefined => None, v => Some(v) }
-    fn transform_extern_to_option(&mut self, module: &str, function: &str, args: Vec<Expr>) -> Expr {
+    fn transform_extern_to_option(&mut self, module: &str, function: &str, args: Vec<SpannedExpr>, span: Span) -> SpannedExpr {
         // Create the raw extern call
-        let extern_call = Expr::ExternCall {
+        let extern_call = SpannedExpr::unspanned(Expr::ExternCall {
             module: module.to_string(),
             function: function.to_string(),
             args,
-        };
+        });
 
         // Create match arms:
         // :undefined => None
@@ -4089,33 +4096,35 @@ impl TypeChecker {
         let none_arm = MatchArm {
             pattern: Pattern::Atom("undefined".to_string()),
             guard: None,
-            body: Expr::EnumVariant {
+            body: SpannedExpr::unspanned(Expr::EnumVariant {
                 type_name: Some("Option".to_string()),
                 variant: "None".to_string(),
                 args: EnumVariantArgs::Unit,
-            },
+            }),
+            span: 0..0,
         };
 
         let some_arm = MatchArm {
             pattern: Pattern::Ident("__ffi_val".to_string()),
             guard: None,
-            body: Expr::EnumVariant {
+            body: SpannedExpr::unspanned(Expr::EnumVariant {
                 type_name: Some("Option".to_string()),
                 variant: "Some".to_string(),
-                args: EnumVariantArgs::Tuple(vec![Expr::Ident("__ffi_val".to_string())]),
-            },
+                args: EnumVariantArgs::Tuple(vec![SpannedExpr::unspanned(Expr::Ident("__ffi_val".to_string()))]),
+            }),
+            span: 0..0,
         };
 
-        Expr::Match {
+        SpannedExpr::new(Expr::Match {
             expr: Box::new(extern_call),
             arms: vec![none_arm, some_arm],
-        }
+        }, span)
     }
 
     /// Infer type arguments for a generic function call.
-    fn infer_type_args_for_call(&mut self, func: &Expr, args: &[Expr]) -> Vec<ast::Type> {
+    fn infer_type_args_for_call(&mut self, func: &SpannedExpr, args: &[SpannedExpr]) -> Vec<ast::Type> {
         // Get function info - prefer local module's qualified name first
-        let fn_info = match func {
+        let fn_info = match func.inner() {
             Expr::Ident(name) => {
                 // First try local module's qualified name, then fall back to simple name
                 let local_qualified = self.current_module.as_ref()
@@ -4185,9 +4194,9 @@ impl TypeChecker {
     /// Similar to infer_type_args_for_call but handles method lookup based on receiver type.
     fn infer_type_args_for_method_call(
         &mut self,
-        receiver: &Expr,
+        receiver: &SpannedExpr,
         method: &str,
-        args: &[Expr],
+        args: &[SpannedExpr],
         resolved_module: &Option<String>,
     ) -> Vec<ast::Type> {
         // Get the receiver type
@@ -4760,8 +4769,8 @@ impl MethodResolver {
 
     /// Simple type inference for the resolver.
     /// Only needs to determine primitive types for UFCS resolution.
-    fn infer_expr_type(&self, expr: &Expr) -> Ty {
-        match expr {
+    fn infer_expr_type(&self, expr: &SpannedExpr) -> Ty {
+        match expr.inner() {
             Expr::String(_) => Ty::String,
             Expr::Charlist(_) => Ty::String,
             Expr::StringInterpolation(_) => Ty::String,
@@ -4827,7 +4836,7 @@ impl MethodResolver {
                 // Infer return type from first arm's body
                 if let Some(arm) = arms.first() {
                     // Check if arm body is an EnumVariant (e.g., Ok(v) or Err(e))
-                    if let Expr::EnumVariant { type_name: Some(type_name), .. } = &arm.body {
+                    if let Expr::EnumVariant { type_name: Some(type_name), .. } = arm.body.inner() {
                         // Return the enum type (e.g., Result, Option)
                         Ty::Named {
                             name: type_name.clone(),

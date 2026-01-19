@@ -722,6 +722,7 @@ fn generate_struct_derive(struct_def: &StructDef, kind: DeriveKind) -> Option<Im
     Some(ImplBlock {
         type_name: struct_def.name.clone(),
         methods: vec![method],
+        span: 0..0,
     })
 }
 
@@ -738,6 +739,7 @@ fn generate_enum_derive(enum_def: &EnumDef, kind: DeriveKind) -> Option<ImplBloc
     Some(ImplBlock {
         type_name: enum_def.name.clone(),
         methods: vec![method],
+        span: 0..0,
     })
 }
 
@@ -765,12 +767,12 @@ fn generate_struct_debug(struct_def: &StructDef) -> Function {
     let format_string = format!("{} {{ {} }}", name, format_parts.join(", "));
 
     // Build args list: [self.x, self.y]
-    let args: Vec<Expr> = fields
+    let args: Vec<SpannedExpr> = fields
         .iter()
-        .map(|(field_name, _)| Expr::FieldAccess {
-            expr: Box::new(Expr::Ident("self".to_string())),
+        .map(|(field_name, _)| SpannedExpr::unspanned(Expr::FieldAccess {
+            expr: SpannedExpr::boxed(Expr::Ident("self".to_string())),
             field: field_name.clone(),
-        })
+        }))
         .collect();
 
     // :io_lib::format("Point { x: ~p, y: ~p }", [self.x, self.y])
@@ -778,8 +780,8 @@ fn generate_struct_debug(struct_def: &StructDef) -> Function {
         module: "io_lib".to_string(),
         function: "format".to_string(),
         args: vec![
-            Expr::Charlist(format_string),
-            Expr::List(args),
+            SpannedExpr::unspanned(Expr::Charlist(format_string)),
+            SpannedExpr::unspanned(Expr::List(args)),
         ],
     };
 
@@ -787,7 +789,7 @@ fn generate_struct_debug(struct_def: &StructDef) -> Function {
     let body_expr = Expr::ExternCall {
         module: "erlang".to_string(),
         function: "iolist_to_binary".to_string(),
-        args: vec![io_lib_format],
+        args: vec![SpannedExpr::unspanned(io_lib_format)],
     };
 
     make_method(
@@ -811,15 +813,15 @@ fn generate_enum_debug(enum_def: &EnumDef) -> Function {
         module: "io_lib".to_string(),
         function: "format".to_string(),
         args: vec![
-            Expr::Charlist(format!("{}::~p", name)),
-            Expr::List(vec![Expr::Ident("self".to_string())]),
+            SpannedExpr::unspanned(Expr::Charlist(format!("{}::~p", name))),
+            SpannedExpr::unspanned(Expr::List(vec![SpannedExpr::unspanned(Expr::Ident("self".to_string()))])),
         ],
     };
 
     let body_expr = Expr::ExternCall {
         module: "erlang".to_string(),
         function: "iolist_to_binary".to_string(),
-        args: vec![io_lib_format],
+        args: vec![SpannedExpr::unspanned(io_lib_format)],
     };
 
     make_method(
@@ -847,15 +849,15 @@ fn generate_struct_clone(struct_def: &StructDef) -> Function {
     let fields = &struct_def.fields;
 
     // Build struct init with field accesses
-    let field_inits: Vec<(String, Expr)> = fields
+    let field_inits: Vec<(String, SpannedExpr)> = fields
         .iter()
         .map(|(field_name, _)| {
             (
                 field_name.clone(),
-                Expr::FieldAccess {
-                    expr: Box::new(Expr::Ident("self".to_string())),
+                SpannedExpr::unspanned(Expr::FieldAccess {
+                    expr: SpannedExpr::boxed(Expr::Ident("self".to_string())),
                     field: field_name.clone(),
-                },
+                }),
             )
         })
         .collect();
@@ -918,10 +920,10 @@ fn generate_struct_default(struct_def: &StructDef) -> Function {
     let fields = &struct_def.fields;
 
     // Build struct init with default values for each field
-    let field_inits: Vec<(String, Expr)> = fields
+    let field_inits: Vec<(String, SpannedExpr)> = fields
         .iter()
         .map(|(field_name, field_type)| {
-            (field_name.clone(), default_value_for_type(field_type))
+            (field_name.clone(), SpannedExpr::unspanned(default_value_for_type(field_type)))
         })
         .collect();
 
@@ -984,7 +986,7 @@ fn default_value_for_type(ty: &Type) -> Expr {
         }
         // For other named types, try to call their default()
         Type::Named { name, .. } => Expr::Call {
-            func: Box::new(Expr::Path {
+            func: SpannedExpr::boxed(Expr::Path {
                 segments: vec![name.clone(), "default".to_string()],
             }),
             type_args: vec![],
@@ -1022,12 +1024,12 @@ fn generate_struct_eq(struct_def: &StructDef) -> Function {
             .map(|(field_name, _)| {
                 Expr::Binary {
                     op: BinOp::Eq,
-                    left: Box::new(Expr::FieldAccess {
-                        expr: Box::new(Expr::Ident("self".to_string())),
+                    left: SpannedExpr::boxed(Expr::FieldAccess {
+                        expr: SpannedExpr::boxed(Expr::Ident("self".to_string())),
                         field: field_name.clone(),
                     }),
-                    right: Box::new(Expr::FieldAccess {
-                        expr: Box::new(Expr::Ident("other".to_string())),
+                    right: SpannedExpr::boxed(Expr::FieldAccess {
+                        expr: SpannedExpr::boxed(Expr::Ident("other".to_string())),
                         field: field_name.clone(),
                     }),
                 }
@@ -1039,8 +1041,8 @@ fn generate_struct_eq(struct_def: &StructDef) -> Function {
             .into_iter()
             .reduce(|acc, cmp| Expr::Binary {
                 op: BinOp::And,
-                left: Box::new(acc),
-                right: Box::new(cmp),
+                left: SpannedExpr::boxed(acc),
+                right: SpannedExpr::boxed(cmp),
             })
             .unwrap_or(Expr::Bool(true))
     };
@@ -1067,8 +1069,8 @@ fn generate_enum_eq(enum_def: &EnumDef) -> Function {
     // Use Erlang's == operator for structural equality
     let body_expr = Expr::Binary {
         op: BinOp::Eq,
-        left: Box::new(Expr::Ident("self".to_string())),
-        right: Box::new(Expr::Ident("other".to_string())),
+        left: SpannedExpr::boxed(Expr::Ident("self".to_string())),
+        right: SpannedExpr::boxed(Expr::Ident("other".to_string())),
     };
 
     let other_type = Type::Named {
@@ -1100,7 +1102,7 @@ fn generate_hash() -> Function {
     let body_expr = Expr::ExternCall {
         module: "erlang".to_string(),
         function: "phash2".to_string(),
-        args: vec![Expr::Ident("self".to_string())],
+        args: vec![SpannedExpr::unspanned(Expr::Ident("self".to_string()))],
     };
 
     make_method(
@@ -1131,7 +1133,8 @@ fn make_method(
         return_type,
         body: Block {
             stmts: vec![],
-            expr: Some(Box::new(body_expr)),
+            expr: Some(SpannedExpr::boxed(body_expr)),
+            span: 0..0,
         },
         is_pub: true,
         span: Span::default(),
@@ -1176,6 +1179,7 @@ mod tests {
                 .map(|(n, t)| (n.to_string(), t))
                 .collect(),
             is_pub: true,
+            span: 0..0,
         }
     }
 
@@ -1291,6 +1295,7 @@ mod tests {
             type_params: vec![],
             fields: vec![],
             is_pub: true,
+            span: 0..0,
         };
 
         let result = generate_struct_derives(&struct_def, None);

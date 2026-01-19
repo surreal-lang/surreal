@@ -280,6 +280,72 @@ impl<T> Spanned<T> {
     }
 }
 
+// =============================================================================
+// SpannedExpr - Expression with source location
+// =============================================================================
+
+/// An expression with its span in the source code.
+/// This is used throughout the AST to enable LSP features like hover,
+/// go-to-definition, and find-references.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpannedExpr {
+    pub expr: Expr,
+    pub span: Span,
+}
+
+impl SpannedExpr {
+    /// Create a new spanned expression.
+    pub fn new(expr: Expr, span: Span) -> Self {
+        Self { expr, span }
+    }
+
+    /// Create a spanned expression with a dummy span.
+    /// Used during AST transformations or when span is not available.
+    pub fn unspanned(expr: Expr) -> Self {
+        Self { expr, span: 0..0 }
+    }
+
+    /// Create a boxed spanned expression with a dummy span.
+    pub fn boxed(expr: Expr) -> Box<Self> {
+        Box::new(Self::unspanned(expr))
+    }
+
+    /// Create a boxed spanned expression with a span.
+    pub fn boxed_with_span(expr: Expr, span: Span) -> Box<Self> {
+        Box::new(Self::new(expr, span))
+    }
+
+    /// Get the inner expression.
+    pub fn inner(&self) -> &Expr {
+        &self.expr
+    }
+
+    /// Get the inner expression mutably.
+    pub fn inner_mut(&mut self) -> &mut Expr {
+        &mut self.expr
+    }
+
+    /// Convert into the inner expression, discarding the span.
+    pub fn into_inner(self) -> Expr {
+        self.expr
+    }
+}
+
+// Implement Deref to allow using SpannedExpr like Expr in most contexts
+impl std::ops::Deref for SpannedExpr {
+    type Target = Expr;
+
+    fn deref(&self) -> &Self::Target {
+        &self.expr
+    }
+}
+
+impl std::ops::DerefMut for SpannedExpr {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.expr
+    }
+}
+
 /// A module declaration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Module {
@@ -384,6 +450,8 @@ pub struct ExternType {
 pub struct ImplBlock {
     pub type_name: String,
     pub methods: Vec<Function>,
+    /// Source span for LSP features
+    pub span: Span,
 }
 
 /// Trait definition.
@@ -395,6 +463,8 @@ pub struct TraitDef {
     /// Associated types declared in the trait (e.g., `type State;`)
     pub associated_types: Vec<String>,
     pub methods: Vec<TraitMethod>,
+    /// Source span for LSP features
+    pub span: Span,
 }
 
 /// Trait method signature with optional default implementation.
@@ -428,6 +498,8 @@ pub struct TraitImpl {
     /// Associated type bindings (e.g., `type State = int;`)
     pub type_bindings: Vec<(String, Type)>,
     pub methods: Vec<Function>,
+    /// Source span for LSP features
+    pub span: Span,
 }
 
 /// Module-level trait declaration.
@@ -492,7 +564,7 @@ pub struct Function {
     pub type_params: Vec<TypeParam>,
     pub params: Vec<Param>,
     /// Guard clause: `when <expr>`
-    pub guard: Option<Box<Expr>>,
+    pub guard: Option<Box<SpannedExpr>>,
     pub return_type: Option<Type>,
     pub body: Block,
     pub is_pub: bool,
@@ -511,7 +583,9 @@ pub struct Param {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Block {
     pub stmts: Vec<Stmt>,
-    pub expr: Option<Box<Expr>>,
+    pub expr: Option<Box<SpannedExpr>>,
+    /// Source span for LSP features
+    pub span: Span,
 }
 
 /// Statements.
@@ -521,13 +595,13 @@ pub enum Stmt {
     Let {
         pattern: Pattern,
         ty: Option<Type>,
-        value: Expr,
+        value: SpannedExpr,
         /// Optional else block for `let else` syntax (must diverge)
         else_block: Option<Block>,
     },
     /// Expression statement (with semicolon).
     Expr {
-        expr: Expr,
+        expr: SpannedExpr,
         /// Source span for diagnostics
         span: Option<Span>,
     },
@@ -539,7 +613,7 @@ pub enum StringPart {
     /// Literal string segment.
     Literal(String),
     /// Interpolated expression.
-    Expr(Box<Expr>),
+    Expr(Box<SpannedExpr>),
 }
 
 /// Expressions.
@@ -564,27 +638,27 @@ pub enum Expr {
     /// Binary operation.
     Binary {
         op: BinOp,
-        left: Box<Expr>,
-        right: Box<Expr>,
+        left: Box<SpannedExpr>,
+        right: Box<SpannedExpr>,
     },
     /// Unary operation.
-    Unary { op: UnaryOp, expr: Box<Expr> },
+    Unary { op: UnaryOp, expr: Box<SpannedExpr> },
     /// Function call with optional turbofish type arguments: `func::<T>(args)`.
     Call {
-        func: Box<Expr>,
+        func: Box<SpannedExpr>,
         /// Explicit type arguments from turbofish syntax (e.g., `::<Counter>`)
         type_args: Vec<Type>,
         /// Inferred type arguments (filled in by type checker for generic functions)
         inferred_type_args: Vec<Type>,
-        args: Vec<Expr>,
+        args: Vec<SpannedExpr>,
     },
     /// Method call: `expr.method(args)` or `expr.method::<T>(args)`.
     MethodCall {
-        receiver: Box<Expr>,
+        receiver: Box<SpannedExpr>,
         method: String,
         /// Explicit type arguments from turbofish syntax (e.g., `.into::<Wrapper>()`)
         type_args: Vec<Type>,
-        args: Vec<Expr>,
+        args: Vec<SpannedExpr>,
         /// Module for UFCS dispatch, filled by resolution pass.
         /// When set, `x.foo(args)` becomes `module::foo(x, args)`.
         /// Currently used for stdlib primitives; extensible to UDTs.
@@ -594,28 +668,28 @@ pub enum Expr {
     },
     /// If expression.
     If {
-        cond: Box<Expr>,
+        cond: Box<SpannedExpr>,
         then_block: Block,
         else_block: Option<Block>,
     },
     /// Match expression.
     Match {
-        expr: Box<Expr>,
+        expr: Box<SpannedExpr>,
         arms: Vec<MatchArm>,
     },
     /// Block expression.
     Block(Block),
     /// Tuple expression.
-    Tuple(Vec<Expr>),
+    Tuple(Vec<SpannedExpr>),
     /// List expression.
-    List(Vec<Expr>),
+    List(Vec<SpannedExpr>),
     /// Struct initialization with optional base for update syntax.
     /// `Point { x: 1, y: 2 }` or `Point { x: 1, ..base }`
     StructInit {
         name: String,
-        fields: Vec<(String, Expr)>,
+        fields: Vec<(String, SpannedExpr)>,
         /// Optional base expression for struct update syntax `..base`
-        base: Option<Box<Expr>>,
+        base: Option<Box<SpannedExpr>>,
     },
     /// Enum variant construction: `Some(42)` or `Option::Some(42)` or `Move { x: 1, y: 2 }`.
     EnumVariant {
@@ -627,16 +701,16 @@ pub enum Expr {
         args: EnumVariantArgs,
     },
     /// Field access: `expr.field`.
-    FieldAccess { expr: Box<Expr>, field: String },
+    FieldAccess { expr: Box<SpannedExpr>, field: String },
     /// Dynamic field access inside quote: `expr.#field_var`.
     /// The field name is determined at macro expansion time.
-    UnquoteFieldAccess { expr: Box<Expr>, field_expr: Box<Expr> },
+    UnquoteFieldAccess { expr: Box<SpannedExpr>, field_expr: Box<SpannedExpr> },
     /// Try operator: `expr?` - early return on Err/None.
-    Try { expr: Box<Expr> },
+    Try { expr: Box<SpannedExpr> },
     /// Module path access: `Module::item`.
     Path { segments: Vec<String> },
     /// Spawn expression.
-    Spawn(Box<Expr>),
+    Spawn(Box<SpannedExpr>),
     /// Closure for spawn: `spawn || { ... }`.
     SpawnClosure(Block),
     /// Anonymous function / closure: `fn(x, y) { x + y }`.
@@ -645,20 +719,20 @@ pub enum Expr {
         body: Block,
     },
     /// Message send: `pid ! message`.
-    Send { to: Box<Expr>, msg: Box<Expr> },
+    Send { to: Box<SpannedExpr>, msg: Box<SpannedExpr> },
     /// Pipe expression: `expr |> func(args)` transforms to `func(expr, args)`.
-    Pipe { left: Box<Expr>, right: Box<Expr> },
+    Pipe { left: Box<SpannedExpr>, right: Box<SpannedExpr> },
     /// Receive expression.
     Receive {
         arms: Vec<MatchArm>,
-        timeout: Option<(Box<Expr>, Block)>,
+        timeout: Option<(Box<SpannedExpr>, Block)>,
     },
     /// Return expression.
-    Return(Option<Box<Expr>>),
+    Return(Option<Box<SpannedExpr>>),
     /// Unit expression: `()`.
     Unit,
     /// Bit string / binary expression: `<<1, 2, X:16/little>>`.
-    BitString(Vec<BitStringSegment<Box<Expr>>>),
+    BitString(Vec<BitStringSegment<Box<SpannedExpr>>>),
     /// External function call: `:erlang::abs(-5)` → erlang:abs(-5) in Core Erlang.
     ExternCall {
         /// The module atom (e.g., "erlang", "lists", "Elixir.Enum")
@@ -666,26 +740,26 @@ pub enum Expr {
         /// The function name
         function: String,
         /// Arguments to the function
-        args: Vec<Expr>,
+        args: Vec<SpannedExpr>,
     },
     /// Quote expression: `quote { expr }`.
     /// Captures the inner expression as AST data for macro processing.
-    Quote(Box<Expr>),
+    Quote(Box<SpannedExpr>),
     /// Unquote expression: `#ident` inside a quote block.
     /// Interpolates the value of the expression into the quoted AST.
-    Unquote(Box<Expr>),
+    Unquote(Box<SpannedExpr>),
     /// Unquote-splicing: `#..list` inside a quote block.
     /// Splices a list of AST nodes into the quoted AST.
-    UnquoteSplice(Box<Expr>),
+    UnquoteSplice(Box<SpannedExpr>),
     /// Unquote-to-atom: `:#var` inside a quote block.
     /// Creates an atom from the unquoted value at expansion time.
-    UnquoteAtom(Box<Expr>),
+    UnquoteAtom(Box<SpannedExpr>),
     /// Quote repetition: `#(pattern)*` or `#(pattern),*` inside a quote block.
     /// Iterates over a collection and generates AST for each element.
     /// Similar to Rust's `#(#item)*` in proc_macro.
     QuoteRepetition {
         /// The pattern to repeat (contains #var references)
-        pattern: Box<Expr>,
+        pattern: Box<SpannedExpr>,
         /// Optional separator token (e.g., "," for `#(#items),*`)
         separator: Option<String>,
     },
@@ -695,12 +769,12 @@ pub enum Expr {
     /// List cons expression: `[head | tail]`.
     /// Constructs a list by prepending head to tail.
     ListCons {
-        head: Box<Expr>,
-        tail: Box<Expr>,
+        head: Box<SpannedExpr>,
+        tail: Box<SpannedExpr>,
     },
     /// Map literal: `%{key => value, ...}`.
     /// Creates an Erlang map at runtime.
-    MapLiteral(Vec<(Expr, Expr)>),
+    MapLiteral(Vec<(SpannedExpr, SpannedExpr)>),
     /// For loop expression - handles both styles.
     /// Side-effect loop: `for x in iter { body }` returns `:ok`.
     /// List comprehension: `for x <- list, when cond { expr }` returns `[T]`.
@@ -708,7 +782,7 @@ pub enum Expr {
         /// Clauses: generators (pattern <- expr) and filters (when expr)
         clauses: Vec<ForClause>,
         /// Loop body expression
-        body: Box<Expr>,
+        body: Box<SpannedExpr>,
         /// Whether this is a comprehension (returns list) or side-effect loop (returns :ok)
         is_comprehension: bool,
     },
@@ -718,8 +792,10 @@ pub enum Expr {
 #[derive(Debug, Clone, PartialEq)]
 pub struct MatchArm {
     pub pattern: Pattern,
-    pub guard: Option<Box<Expr>>,
-    pub body: Expr,
+    pub guard: Option<Box<SpannedExpr>>,
+    pub body: SpannedExpr,
+    /// Source span for LSP features
+    pub span: Span,
 }
 
 /// A clause in a for loop expression.
@@ -728,11 +804,11 @@ pub enum ForClause {
     /// Generator: pattern <- source or pattern in source
     Generator {
         pattern: Pattern,
-        source: Expr,
+        source: SpannedExpr,
         style: GeneratorStyle,
     },
     /// Filter: when expr (guard condition)
-    When(Expr),
+    When(SpannedExpr),
 }
 
 /// Style of generator in a for loop.
@@ -981,6 +1057,8 @@ pub struct StructDef {
     pub type_params: Vec<TypeParam>,
     pub fields: Vec<(String, Type)>,
     pub is_pub: bool,
+    /// Source span for LSP features
+    pub span: Span,
 }
 
 /// Enum definition.
@@ -993,6 +1071,8 @@ pub struct EnumDef {
     pub type_params: Vec<TypeParam>,
     pub variants: Vec<EnumVariant>,
     pub is_pub: bool,
+    /// Source span for LSP features
+    pub span: Span,
 }
 
 /// The kind of an enum variant.
@@ -1012,9 +1092,9 @@ pub enum EnumVariantArgs {
     /// Unit variant: `None`
     Unit,
     /// Tuple variant: `Some(42)`
-    Tuple(Vec<Expr>),
+    Tuple(Vec<SpannedExpr>),
     /// Struct variant: `Move { x: 10, y: 20 }`
-    Struct(Vec<(String, Expr)>),
+    Struct(Vec<(String, SpannedExpr)>),
 }
 
 /// Fields for enum variant patterns.

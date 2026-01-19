@@ -410,6 +410,7 @@ mod tests {
                 ("y".to_string(), Type::Int),
             ],
             attrs: vec![],
+            span: 0..0,
         };
 
         // Serialize to Erlang term

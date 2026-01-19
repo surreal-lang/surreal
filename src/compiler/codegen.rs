@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use crate::compiler::ast::{
     BinOp, BitEndianness, BitSegmentType, BitSignedness, BitStringSegment, Block,
     EnumPatternFields, EnumVariantArgs, Expr, Function, Item, Module as AstModule,
-    Pattern as AstPattern, Stmt, UnaryOp, UseDecl, UseTree,
+    Pattern as AstPattern, SpannedExpr, Stmt, UnaryOp, UseDecl, UseTree,
 };
 use crate::instruction::{Instruction, Operand, Pattern as VmPattern, Register, Source};
 use crate::Module;
@@ -392,8 +392,8 @@ impl Codegen {
     }
 
     /// Compile an expression, returning the register containing the result.
-    fn compile_expr(&mut self, expr: &Expr) -> CodegenResult<Register> {
-        match expr {
+    fn compile_expr(&mut self, expr: &SpannedExpr) -> CodegenResult<Register> {
+        match expr.inner() {
             Expr::Int(n) => {
                 let dest = self.regs.alloc();
                 self.emit(Instruction::LoadInt { value: *n, dest });
@@ -1016,7 +1016,7 @@ impl Codegen {
                 }
 
                 // Determine call target
-                match func.as_ref() {
+                match func.inner() {
                     Expr::Ident(name) => {
                         // Check if it's an imported function
                         if let Some((module, original_name)) = self.imports.get(name) {
@@ -1148,7 +1148,7 @@ impl Codegen {
                 // First pass: compile patterns and calculate targets
                 // We'll emit a placeholder ReceiveMatch, then compile bodies
                 let timeout_val = timeout.as_ref().map(|(t, _)| {
-                    if let Expr::Int(n) = t.as_ref() {
+                    if let Expr::Int(n) = t.inner() {
                         *n as u32
                     } else {
                         1000
@@ -1220,7 +1220,7 @@ impl Codegen {
 
             Expr::Spawn(expr) => {
                 // Spawn a function call
-                match expr.as_ref() {
+                match expr.inner() {
                     Expr::Call { func, args, .. } => {
                         // Compile arguments
                         for (i, arg) in args.iter().enumerate() {
@@ -1235,7 +1235,7 @@ impl Codegen {
 
                         let dest = self.regs.alloc();
 
-                        match func.as_ref() {
+                        match func.inner() {
                             Expr::Ident(name) => {
                                 // Check if it's an imported function
                                 if let Some((module, original_name)) = self.imports.get(name) {
@@ -1386,7 +1386,7 @@ impl Codegen {
                 // Transform `left |> right` where right is typically a call expression.
                 // `a |> f(b, c)` becomes `f(a, b, c)`
                 // `a |> f` becomes `f(a)`
-                match right.as_ref() {
+                match right.inner() {
                     Expr::Call {
                         func,
                         type_args,
@@ -1402,29 +1402,29 @@ impl Codegen {
                             inferred_type_args: inferred_type_args.clone(),
                             args: new_args,
                         };
-                        self.compile_expr(&new_call)
+                        self.compile_expr(&SpannedExpr::unspanned(new_call))
                     }
                     Expr::Ident(name) => {
                         // Bare function: `a |> f` becomes `f(a)`
                         let new_call = Expr::Call {
-                            func: Box::new(Expr::Ident(name.clone())),
+                            func: SpannedExpr::boxed(Expr::Ident(name.clone())),
                             type_args: vec![],
                             inferred_type_args: vec![],
                             args: vec![left.as_ref().clone()],
                         };
-                        self.compile_expr(&new_call)
+                        self.compile_expr(&SpannedExpr::unspanned(new_call))
                     }
                     Expr::Path { segments } => {
                         // Path without call: `a |> Module::func` becomes `Module::func(a)`
                         let new_call = Expr::Call {
-                            func: Box::new(Expr::Path {
+                            func: SpannedExpr::boxed(Expr::Path {
                                 segments: segments.clone(),
                             }),
                             type_args: vec![],
                             inferred_type_args: vec![],
                             args: vec![left.as_ref().clone()],
                         };
-                        self.compile_expr(&new_call)
+                        self.compile_expr(&SpannedExpr::unspanned(new_call))
                     }
                     _ => Err(CodegenError::new(
                         "pipe right-hand side must be a function call or identifier",

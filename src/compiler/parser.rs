@@ -157,14 +157,14 @@ impl<'source> Parser<'source> {
                 // Check if followed by semicolon (statement) or not (trailing expr)
                 if self.check(&Token::Semi) {
                     self.advance();
-                    stmts.push(Stmt::Expr { expr: e, span: Some(span) });
+                    stmts.push(Stmt::Expr { expr: SpannedExpr::unspanned(e), span: Some(span) });
                 } else if self.is_at_end() {
                     // Trailing expression (final result)
-                    expr = Some(Box::new(e));
+                    expr = Some(SpannedExpr::boxed(e));
                 } else {
                     // Expression statements that don't need semicolons
                     if Self::is_block_expr(&e) {
-                        stmts.push(Stmt::Expr { expr: e, span: Some(span) });
+                        stmts.push(Stmt::Expr { expr: SpannedExpr::unspanned(e), span: Some(span) });
                     } else {
                         let span = self.current_span();
                         return Err(ParseError::new("expected `;` or end of file", span));
@@ -182,7 +182,7 @@ impl<'source> Parser<'source> {
             params: vec![],
             guard: None,
             return_type: Some(Type::Any),
-            body: Block { stmts, expr },
+            body: Block { stmts, expr, span: start_span.start..self.current_span().end },
             is_pub: true,
             span: Span {
                 start: start_span.start,
@@ -612,6 +612,7 @@ impl<'source> Parser<'source> {
                 type_name,
                 type_bindings,
                 methods,
+                span: 0..0,
             }))
         } else {
             // Could be:
@@ -668,6 +669,7 @@ impl<'source> Parser<'source> {
                 Ok(Item::Impl(ImplBlock {
                     type_name: first_name,
                     methods,
+                    span: 0..0,
                 }))
             }
         }
@@ -719,7 +721,7 @@ impl<'source> Parser<'source> {
 
         self.expect(&Token::RBrace)?;
 
-        Ok(Item::Trait(TraitDef { name, type_params, associated_types, methods }))
+        Ok(Item::Trait(TraitDef { name, type_params, associated_types, methods, span: 0..0 }))
     }
 
     /// Parse an associated type declaration in a trait: `type Name;`
@@ -992,7 +994,7 @@ impl<'source> Parser<'source> {
         // Parse optional guard clause: `when <expr>`
         let guard = if self.check(&Token::When) {
             self.advance();
-            Some(Box::new(self.parse_expr()?))
+            Some(SpannedExpr::boxed(self.parse_expr()?))
         } else {
             None
         };
@@ -1141,6 +1143,7 @@ impl<'source> Parser<'source> {
             type_params,
             fields,
             is_pub,
+            span: 0..0,
         })
     }
 
@@ -1215,6 +1218,7 @@ impl<'source> Parser<'source> {
             type_params,
             variants,
             is_pub,
+            span: 0..0,
         })
     }
 
@@ -1250,15 +1254,15 @@ impl<'source> Parser<'source> {
                 // Check if followed by semicolon (statement) or not (trailing expr)
                 if self.check(&Token::Semi) {
                     self.advance();
-                    stmts.push(Stmt::Expr { expr: e, span: Some(span) });
+                    stmts.push(Stmt::Expr { expr: SpannedExpr::unspanned(e), span: Some(span) });
                 } else if self.check(&Token::RBrace) {
                     // Trailing expression
-                    expr = Some(Box::new(e));
+                    expr = Some(SpannedExpr::boxed(e));
                 } else {
                     // Expression statements that don't need semicolons
                     // (if, match, block, etc.)
                     if Self::is_block_expr(&e) {
-                        stmts.push(Stmt::Expr { expr: e, span: Some(span) });
+                        stmts.push(Stmt::Expr { expr: SpannedExpr::unspanned(e), span: Some(span) });
                     } else {
                         let span = self.current_span();
                         return Err(ParseError::new("expected `;` or `}`", span));
@@ -1267,7 +1271,7 @@ impl<'source> Parser<'source> {
             }
         }
 
-        Ok(Block { stmts, expr })
+        Ok(Block { stmts, expr, span: 0..0 })
     }
 
     /// Parse block contents when we've already parsed the first expression.
@@ -1279,12 +1283,12 @@ impl<'source> Parser<'source> {
         // Handle the first expression we already parsed (no span available)
         if self.check(&Token::Semi) {
             self.advance();
-            stmts.push(Stmt::Expr { expr: first, span: None });
+            stmts.push(Stmt::Expr { expr: SpannedExpr::unspanned(first), span: None });
         } else if self.check(&Token::RBrace) {
             // It's the trailing expression
-            return Ok(Block { stmts, expr: Some(Box::new(first)) });
+            return Ok(Block { stmts, expr: Some(SpannedExpr::boxed(first)), span: 0..0 });
         } else if Self::is_block_expr(&first) {
-            stmts.push(Stmt::Expr { expr: first, span: None });
+            stmts.push(Stmt::Expr { expr: SpannedExpr::unspanned(first), span: None });
         } else {
             let span = self.current_span();
             return Err(ParseError::new("expected `;` or `}`", span));
@@ -1307,11 +1311,11 @@ impl<'source> Parser<'source> {
 
                 if self.check(&Token::Semi) {
                     self.advance();
-                    stmts.push(Stmt::Expr { expr: e, span: Some(span) });
+                    stmts.push(Stmt::Expr { expr: SpannedExpr::unspanned(e), span: Some(span) });
                 } else if self.check(&Token::RBrace) {
-                    expr = Some(Box::new(e));
+                    expr = Some(SpannedExpr::boxed(e));
                 } else if Self::is_block_expr(&e) {
-                    stmts.push(Stmt::Expr { expr: e, span: Some(span) });
+                    stmts.push(Stmt::Expr { expr: SpannedExpr::unspanned(e), span: Some(span) });
                 } else {
                     let span = self.current_span();
                     return Err(ParseError::new("expected `;` or `}`", span));
@@ -1319,7 +1323,7 @@ impl<'source> Parser<'source> {
             }
         }
 
-        Ok(Block { stmts, expr })
+        Ok(Block { stmts, expr, span: 0..0 })
     }
 
     /// Check if an expression is a "block expression" that doesn't need a semicolon.
@@ -1389,7 +1393,7 @@ impl<'source> Parser<'source> {
         };
 
         self.expect(&Token::Eq)?;
-        let value = self.parse_expr()?;
+        let value = SpannedExpr::unspanned(self.parse_expr()?);
 
         // Check for `else` block (let-else syntax)
         let else_block = if self.check(&Token::Else) {
@@ -1418,8 +1422,8 @@ impl<'source> Parser<'source> {
             self.advance();
             let right = self.parse_or_expr()?;
             left = Expr::Pipe {
-                left: Box::new(left),
-                right: Box::new(right),
+                left: SpannedExpr::boxed(left),
+                right: SpannedExpr::boxed(right),
             };
         }
 
@@ -1435,8 +1439,8 @@ impl<'source> Parser<'source> {
             let right = self.parse_and_expr()?;
             left = Expr::Binary {
                 op: BinOp::Or,
-                left: Box::new(left),
-                right: Box::new(right),
+                left: SpannedExpr::boxed(left),
+                right: SpannedExpr::boxed(right),
             };
         }
 
@@ -1452,8 +1456,8 @@ impl<'source> Parser<'source> {
             let right = self.parse_cmp_expr()?;
             left = Expr::Binary {
                 op: BinOp::And,
-                left: Box::new(left),
-                right: Box::new(right),
+                left: SpannedExpr::boxed(left),
+                right: SpannedExpr::boxed(right),
             };
         }
 
@@ -1485,8 +1489,8 @@ impl<'source> Parser<'source> {
             let right = self.parse_add_expr()?;
             Ok(Expr::Binary {
                 op,
-                left: Box::new(left),
-                right: Box::new(right),
+                left: SpannedExpr::boxed(left),
+                right: SpannedExpr::boxed(right),
             })
         } else {
             Ok(left)
@@ -1510,8 +1514,8 @@ impl<'source> Parser<'source> {
             let right = self.parse_mul_expr()?;
             left = Expr::Binary {
                 op,
-                left: Box::new(left),
-                right: Box::new(right),
+                left: SpannedExpr::boxed(left),
+                right: SpannedExpr::boxed(right),
             };
         }
 
@@ -1537,8 +1541,8 @@ impl<'source> Parser<'source> {
             let right = self.parse_unary_expr()?;
             left = Expr::Binary {
                 op,
-                left: Box::new(left),
-                right: Box::new(right),
+                left: SpannedExpr::boxed(left),
+                right: SpannedExpr::boxed(right),
             };
         }
 
@@ -1552,7 +1556,7 @@ impl<'source> Parser<'source> {
             let expr = self.parse_unary_expr()?;
             return Ok(Expr::Unary {
                 op: UnaryOp::Not,
-                expr: Box::new(expr),
+                expr: SpannedExpr::boxed(expr),
             });
         }
 
@@ -1561,7 +1565,7 @@ impl<'source> Parser<'source> {
             let expr = self.parse_unary_expr()?;
             return Ok(Expr::Unary {
                 op: UnaryOp::Neg,
-                expr: Box::new(expr),
+                expr: SpannedExpr::boxed(expr),
             });
         }
 
@@ -1587,7 +1591,7 @@ impl<'source> Parser<'source> {
                 let mut args = Vec::new();
                 if !self.check(&Token::RParen) {
                     loop {
-                        args.push(self.parse_expr()?);
+                        args.push(SpannedExpr::unspanned(self.parse_expr()?));
                         if !self.check(&Token::Comma) {
                             break;
                         }
@@ -1596,7 +1600,7 @@ impl<'source> Parser<'source> {
                 }
                 self.expect(&Token::RParen)?;
                 expr = Expr::Call {
-                    func: Box::new(expr),
+                    func: SpannedExpr::boxed(expr),
                     type_args,
                     inferred_type_args: vec![],
                     args,
@@ -1614,8 +1618,8 @@ impl<'source> Parser<'source> {
                     self.advance(); // consume #
                     let field_expr = self.parse_primary()?;
                     expr = Expr::UnquoteFieldAccess {
-                        expr: Box::new(expr),
-                        field_expr: Box::new(field_expr),
+                        expr: SpannedExpr::boxed(expr),
+                        field_expr: SpannedExpr::boxed(field_expr),
                     };
                     continue;
                 }
@@ -1641,7 +1645,7 @@ impl<'source> Parser<'source> {
                     let mut args = Vec::new();
                     if !self.check(&Token::RParen) {
                         loop {
-                            args.push(self.parse_expr()?);
+                            args.push(SpannedExpr::unspanned(self.parse_expr()?));
                             if !self.check(&Token::Comma) {
                                 break;
                             }
@@ -1650,7 +1654,7 @@ impl<'source> Parser<'source> {
                     }
                     self.expect(&Token::RParen)?;
                     expr = Expr::MethodCall {
-                        receiver: Box::new(expr),
+                        receiver: SpannedExpr::boxed(expr),
                         method: field,
                         type_args,
                         args,
@@ -1663,7 +1667,7 @@ impl<'source> Parser<'source> {
                     return Err(ParseError::new("expected '(' after turbofish type arguments", span));
                 } else {
                     expr = Expr::FieldAccess {
-                        expr: Box::new(expr),
+                        expr: SpannedExpr::boxed(expr),
                         field,
                     };
                 }
@@ -1699,7 +1703,7 @@ impl<'source> Parser<'source> {
                             // Check for struct update syntax: ..base
                             if self.check(&Token::DotDot) {
                                 self.advance();
-                                base = Some(Box::new(self.parse_expr()?));
+                                base = Some(SpannedExpr::boxed(self.parse_expr()?));
                                 // After ..base, only } is allowed
                                 break;
                             }
@@ -1708,9 +1712,9 @@ impl<'source> Parser<'source> {
                             // Support shorthand: `{ x }` is equivalent to `{ x: x }`
                             let field_value = if self.check(&Token::Colon) {
                                 self.advance();
-                                self.parse_expr()?
+                                SpannedExpr::unspanned(self.parse_expr()?)
                             } else {
-                                Expr::Ident(field_name.clone())
+                                SpannedExpr::unspanned(Expr::Ident(field_name.clone()))
                             };
                             fields.push((field_name, field_value));
 
@@ -1746,7 +1750,7 @@ impl<'source> Parser<'source> {
                                     let mut args = Vec::new();
                                     if !self.check(&Token::RParen) {
                                         loop {
-                                            args.push(self.parse_expr()?);
+                                            args.push(SpannedExpr::unspanned(self.parse_expr()?));
                                             if !self.check(&Token::Comma) {
                                                 break;
                                             }
@@ -1765,9 +1769,9 @@ impl<'source> Parser<'source> {
                                             // Support shorthand: `{ x }` is equivalent to `{ x: x }`
                                             let field_value = if self.check(&Token::Colon) {
                                                 self.advance();
-                                                self.parse_expr()?
+                                                SpannedExpr::unspanned(self.parse_expr()?)
                                             } else {
-                                                Expr::Ident(field_name.clone())
+                                                SpannedExpr::unspanned(Expr::Ident(field_name.clone()))
                                             };
                                             fields.push((field_name, field_value));
                                             if !self.check(&Token::Comma) {
@@ -1795,7 +1799,7 @@ impl<'source> Parser<'source> {
                 // Try operator: expr?
                 self.advance();
                 expr = Expr::Try {
-                    expr: Box::new(expr),
+                    expr: SpannedExpr::boxed(expr),
                 };
             } else {
                 break;
@@ -1854,7 +1858,7 @@ impl<'source> Parser<'source> {
                 self.advance(); // consume :
                 self.advance(); // consume #
                 let var_expr = self.parse_primary()?;
-                return Ok(Expr::UnquoteAtom(Box::new(var_expr)));
+                return Ok(Expr::UnquoteAtom(SpannedExpr::boxed(var_expr)));
             }
         }
 
@@ -1866,10 +1870,10 @@ impl<'source> Parser<'source> {
                 self.expect(&Token::LParen)?;
                 let mut args = Vec::new();
                 if !self.check(&Token::RParen) {
-                    args.push(self.parse_expr()?);
+                    args.push(SpannedExpr::unspanned(self.parse_expr()?));
                     while self.check(&Token::Comma) {
                         self.advance();
-                        args.push(self.parse_expr()?);
+                        args.push(SpannedExpr::unspanned(self.parse_expr()?));
                     }
                 }
                 self.expect(&Token::RParen)?;
@@ -1927,7 +1931,7 @@ impl<'source> Parser<'source> {
                         // Check for struct update syntax: ..base
                         if self.check(&Token::DotDot) {
                             self.advance();
-                            base = Some(Box::new(self.parse_expr()?));
+                            base = Some(SpannedExpr::boxed(self.parse_expr()?));
                             // After ..base, only } is allowed
                             break;
                         }
@@ -1943,9 +1947,9 @@ impl<'source> Parser<'source> {
                         // Support shorthand: `{ x }` is equivalent to `{ x: x }`
                         let field_value = if self.check(&Token::Colon) {
                             self.advance();
-                            self.parse_expr()?
+                            SpannedExpr::unspanned(self.parse_expr()?)
                         } else {
-                            Expr::Ident(field_name.clone())
+                            SpannedExpr::unspanned(Expr::Ident(field_name.clone()))
                         };
                         fields.push((field_name, field_value));
 
@@ -1976,7 +1980,7 @@ impl<'source> Parser<'source> {
                     // Check for struct update syntax: ..base
                     if self.check(&Token::DotDot) {
                         self.advance();
-                        base = Some(Box::new(self.parse_expr()?));
+                        base = Some(SpannedExpr::boxed(self.parse_expr()?));
                         // After ..base, only } is allowed
                         break;
                     }
@@ -1985,9 +1989,9 @@ impl<'source> Parser<'source> {
                     // Support shorthand: `{ x }` is equivalent to `{ x: x }`
                     let field_value = if self.check(&Token::Colon) {
                         self.advance();
-                        self.parse_expr()?
+                        SpannedExpr::unspanned(self.parse_expr()?)
                     } else {
-                        Expr::Ident(field_name.clone())
+                        SpannedExpr::unspanned(Expr::Ident(field_name.clone()))
                     };
                     fields.push((field_name, field_value));
 
@@ -2015,7 +2019,7 @@ impl<'source> Parser<'source> {
                         let mut args = Vec::new();
                         if !self.check(&Token::RParen) {
                             loop {
-                                args.push(self.parse_expr()?);
+                                args.push(SpannedExpr::unspanned(self.parse_expr()?));
                                 if !self.check(&Token::Comma) {
                                     break;
                                 }
@@ -2040,10 +2044,10 @@ impl<'source> Parser<'source> {
                                 // Support shorthand: `{ x }` is equivalent to `{ x: x }`
                                 let field_value = if self.check(&Token::Colon) {
                                     self.advance();
-                                    self.parse_expr()?
+                                    SpannedExpr::unspanned(self.parse_expr()?)
                                 } else {
                                     // Shorthand: field name becomes the value (identifier)
-                                    Expr::Ident(field_name.clone())
+                                    SpannedExpr::unspanned(Expr::Ident(field_name.clone()))
                                 };
                                 fields.push((field_name, field_value));
                                 if !self.check(&Token::Comma) {
@@ -2087,7 +2091,7 @@ impl<'source> Parser<'source> {
                 let mut args = Vec::new();
                 if !self.check(&Token::RParen) {
                     loop {
-                        args.push(self.parse_expr()?);
+                        args.push(SpannedExpr::unspanned(self.parse_expr()?));
                         if !self.check(&Token::Comma) {
                             break;
                         }
@@ -2123,13 +2127,13 @@ impl<'source> Parser<'source> {
 
             if self.check(&Token::Comma) {
                 // Tuple
-                let mut elements = vec![first];
+                let mut elements = vec![SpannedExpr::unspanned(first)];
                 while self.check(&Token::Comma) {
                     self.advance();
                     if self.check(&Token::RParen) {
                         break;
                     }
-                    elements.push(self.parse_expr()?);
+                    elements.push(SpannedExpr::unspanned(self.parse_expr()?));
                 }
                 self.expect(&Token::RParen)?;
                 return Ok(Expr::Tuple(elements));
@@ -2157,19 +2161,19 @@ impl<'source> Parser<'source> {
                 let tail = self.parse_expr()?;
                 self.expect(&Token::RBracket)?;
                 return Ok(Expr::ListCons {
-                    head: Box::new(first),
-                    tail: Box::new(tail),
+                    head: SpannedExpr::boxed(first),
+                    tail: SpannedExpr::boxed(tail),
                 });
             }
 
             // Regular list with remaining elements
-            let mut elements = vec![first];
+            let mut elements = vec![SpannedExpr::unspanned(first)];
             while self.check(&Token::Comma) {
                 self.advance();
                 if self.check(&Token::RBracket) {
                     break;
                 }
-                elements.push(self.parse_expr()?);
+                elements.push(SpannedExpr::unspanned(self.parse_expr()?));
             }
             self.expect(&Token::RBracket)?;
             return Ok(Expr::List(elements));
@@ -2203,7 +2207,7 @@ impl<'source> Parser<'source> {
                 if is_shorthand {
                     // It's a map with shorthand syntax
                     let value = self.parse_expr()?;
-                    let mut pairs = vec![(key_expr, value)];
+                    let mut pairs = vec![(SpannedExpr::unspanned(key_expr), SpannedExpr::unspanned(value))];
 
                     while self.check(&Token::Comma) {
                         self.advance();
@@ -2211,7 +2215,7 @@ impl<'source> Parser<'source> {
                             break;
                         }
                         let (key, value) = self.parse_map_entry()?;
-                        pairs.push((key, value));
+                        pairs.push((SpannedExpr::unspanned(key), SpannedExpr::unspanned(value)));
                     }
                     self.expect(&Token::RBrace)?;
                     return Ok(Expr::MapLiteral(pairs));
@@ -2226,7 +2230,7 @@ impl<'source> Parser<'source> {
                 // It's a map literal with => syntax
                 self.advance(); // consume '=>'
                 let value = self.parse_expr()?;
-                let mut pairs = vec![(first, value)];
+                let mut pairs = vec![(SpannedExpr::unspanned(first), SpannedExpr::unspanned(value))];
 
                 while self.check(&Token::Comma) {
                     self.advance();
@@ -2234,7 +2238,7 @@ impl<'source> Parser<'source> {
                         break;
                     }
                     let (key, value) = self.parse_map_entry()?;
-                    pairs.push((key, value));
+                    pairs.push((SpannedExpr::unspanned(key), SpannedExpr::unspanned(value)));
                 }
                 self.expect(&Token::RBrace)?;
                 return Ok(Expr::MapLiteral(pairs));
@@ -2290,10 +2294,10 @@ impl<'source> Parser<'source> {
             if self.check(&Token::DotDot) {
                 self.advance();
                 let expr = self.parse_primary()?;
-                return Ok(Expr::UnquoteSplice(Box::new(expr)));
+                return Ok(Expr::UnquoteSplice(SpannedExpr::boxed(expr)));
             }
             let expr = self.parse_primary()?;
-            return Ok(Expr::Unquote(Box::new(expr)));
+            return Ok(Expr::Unquote(SpannedExpr::boxed(expr)));
         }
 
         // Return expression
@@ -2305,7 +2309,7 @@ impl<'source> Parser<'source> {
             {
                 None
             } else {
-                Some(Box::new(self.parse_expr()?))
+                Some(SpannedExpr::boxed(self.parse_expr()?))
             };
             return Ok(Expr::Return(value));
         }
@@ -2380,9 +2384,9 @@ impl<'source> Parser<'source> {
     }
 
     /// Parse a single bit string segment: `value:size/specifiers`
-    fn parse_bitstring_segment_expr(&mut self) -> ParseResult<BitStringSegment<Box<Expr>>> {
+    fn parse_bitstring_segment_expr(&mut self) -> ParseResult<BitStringSegment<Box<SpannedExpr>>> {
         // Parse the value expression
-        let value = Box::new(self.parse_unary_expr()?);
+        let value = SpannedExpr::boxed(self.parse_unary_expr()?);
 
         let mut segment = BitStringSegment::new(value);
 
@@ -2477,7 +2481,7 @@ impl<'source> Parser<'source> {
             // Parse as a quoted block expression
             let block = self.parse_block_contents()?;
             self.expect(&Token::RBrace)?;
-            Ok(Expr::Quote(Box::new(Expr::Block(block))))
+            Ok(Expr::Quote(SpannedExpr::boxed(Expr::Block(block))))
         };
 
         // Restore quote mode
@@ -2517,7 +2521,7 @@ impl<'source> Parser<'source> {
         self.expect(&Token::Star)?;
 
         Ok(Expr::QuoteRepetition {
-            pattern: Box::new(pattern),
+            pattern: SpannedExpr::boxed(pattern),
             separator,
         })
     }
@@ -2542,7 +2546,8 @@ impl<'source> Parser<'source> {
                 let else_if = self.parse_if_expr()?;
                 Some(Block {
                     stmts: Vec::new(),
-                    expr: Some(Box::new(else_if)),
+                    expr: Some(SpannedExpr::boxed(else_if)),
+                    span: 0..0,
                 })
             } else {
                 Some(self.parse_block()?)
@@ -2552,7 +2557,7 @@ impl<'source> Parser<'source> {
         };
 
         Ok(Expr::If {
-            cond: Box::new(cond),
+            cond: SpannedExpr::boxed(cond),
             then_block,
             else_block,
         })
@@ -2571,7 +2576,8 @@ impl<'source> Parser<'source> {
         let then_arm = MatchArm {
             pattern,
             guard: None,
-            body: Expr::Block(then_block),
+            body: SpannedExpr::unspanned(Expr::Block(then_block)),
+            span: 0..0,
         };
 
         // Build the else arm (wildcard pattern)
@@ -2586,19 +2592,21 @@ impl<'source> Parser<'source> {
             MatchArm {
                 pattern: Pattern::Wildcard,
                 guard: None,
-                body: else_body,
+                body: SpannedExpr::unspanned(else_body),
+                span: 0..0,
             }
         } else {
             // No else block - return unit (empty tuple)
             MatchArm {
                 pattern: Pattern::Wildcard,
                 guard: None,
-                body: Expr::Tuple(vec![]),
+                body: SpannedExpr::unspanned(Expr::Tuple(vec![])),
+                span: 0..0,
             }
         };
 
         Ok(Expr::Match {
-            expr: Box::new(expr),
+            expr: SpannedExpr::boxed(expr),
             arms: vec![then_arm, else_arm],
         })
     }
@@ -2621,7 +2629,7 @@ impl<'source> Parser<'source> {
 
         self.expect(&Token::RBrace)?;
         Ok(Expr::Match {
-            expr: Box::new(expr),
+            expr: SpannedExpr::boxed(expr),
             arms,
         })
     }
@@ -2641,7 +2649,7 @@ impl<'source> Parser<'source> {
                 let timeout_expr = self.parse_expr()?;
                 self.expect(&Token::FatArrow)?;
                 let timeout_block = self.parse_block()?;
-                timeout = Some((Box::new(timeout_expr), timeout_block));
+                timeout = Some((SpannedExpr::boxed(timeout_expr), timeout_block));
                 break;
             }
 
@@ -2690,11 +2698,11 @@ impl<'source> Parser<'source> {
             self.expect(&Token::LBrace)?;
             let expr = self.parse_expr()?;
             self.expect(&Token::RBrace)?;
-            Box::new(expr)
+            SpannedExpr::boxed(expr)
         } else {
             // Side-effect loop: block
             let block = self.parse_block()?;
-            Box::new(Expr::Block(block))
+            SpannedExpr::boxed(Expr::Block(block))
         };
 
         Ok(Expr::For {
@@ -2711,7 +2719,7 @@ impl<'source> Parser<'source> {
         if self.check(&Token::When) {
             self.advance();
             let condition = self.parse_expr()?;
-            return Ok(ForClause::When(condition));
+            return Ok(ForClause::When(SpannedExpr::unspanned(condition)));
         }
 
         // Otherwise parse a generator
@@ -2723,7 +2731,7 @@ impl<'source> Parser<'source> {
             let source = self.parse_expr()?;
             Ok(ForClause::Generator {
                 pattern,
-                source,
+                source: SpannedExpr::unspanned(source),
                 style: GeneratorStyle::In,
             })
         } else if self.check(&Token::LArrow) {
@@ -2732,7 +2740,7 @@ impl<'source> Parser<'source> {
             let source = self.parse_expr()?;
             Ok(ForClause::Generator {
                 pattern,
-                source,
+                source: SpannedExpr::unspanned(source),
                 style: GeneratorStyle::Arrow,
             })
         } else {
@@ -2757,7 +2765,7 @@ impl<'source> Parser<'source> {
 
         // Otherwise it's spawn expr
         let expr = self.parse_postfix_expr()?;
-        Ok(Expr::Spawn(Box::new(expr)))
+        Ok(Expr::Spawn(SpannedExpr::boxed(expr)))
     }
 
     /// Parse a match arm.
@@ -2766,7 +2774,7 @@ impl<'source> Parser<'source> {
 
         let guard = if self.check(&Token::If) {
             self.advance();
-            Some(Box::new(self.parse_expr()?))
+            Some(SpannedExpr::boxed(self.parse_expr()?))
         } else {
             None
         };
@@ -2777,7 +2785,8 @@ impl<'source> Parser<'source> {
         Ok(MatchArm {
             pattern,
             guard,
-            body,
+            body: SpannedExpr::unspanned(body),
+            span: 0..0,
         })
     }
 
@@ -3672,7 +3681,7 @@ impl<'source> Parser<'source> {
                         ));
                     }
 
-                    result.push(StringPart::Expr(Box::new(expr)));
+                    result.push(StringPart::Expr(SpannedExpr::boxed(expr)));
                 }
             }
         }
@@ -3893,7 +3902,7 @@ mod tests {
 
         // Check the let statement
         if let Some(Stmt::Let { pattern: _, ty: _, value: init, .. }) = func.body.stmts.first() {
-            if let Expr::EnumVariant { type_name, variant, args } = init {
+            if let Expr::EnumVariant { type_name, variant, args } = &**init {
                 assert_eq!(type_name.as_deref(), Some("Message"));
                 assert_eq!(variant, "Move");
                 if let EnumVariantArgs::Struct(fields) = args {
@@ -3937,14 +3946,14 @@ mod tests {
 
         // Check the third let statement (let pt = ...)
         if let Some(Stmt::Let { value: init, .. }) = func.body.stmts.get(2) {
-            if let Expr::EnumVariant { args, .. } = init {
+            if let Expr::EnumVariant { args, .. } = &**init {
                 if let EnumVariantArgs::Struct(fields) = args {
                     assert_eq!(fields.len(), 2);
                     // Check that shorthand expanded to Ident
                     assert_eq!(fields[0].0, "x");
-                    assert!(matches!(&fields[0].1, Expr::Ident(n) if n == "x"));
+                    assert!(matches!(&*fields[0].1, Expr::Ident(n) if n == "x"));
                     assert_eq!(fields[1].0, "y");
-                    assert!(matches!(&fields[1].1, Expr::Ident(n) if n == "y"));
+                    assert!(matches!(&*fields[1].1, Expr::Ident(n) if n == "y"));
                 } else {
                     panic!("expected struct variant args");
                 }
@@ -3983,14 +3992,14 @@ mod tests {
 
         // Check the third let statement (let pt = ...)
         if let Some(Stmt::Let { value: init, .. }) = func.body.stmts.get(2) {
-            if let Expr::StructInit { name, fields, .. } = init {
+            if let Expr::StructInit { name, fields, .. } = &**init {
                 assert_eq!(name, "Point");
                 assert_eq!(fields.len(), 2);
                 // Check that shorthand expanded to Ident
                 assert_eq!(fields[0].0, "x");
-                assert!(matches!(&fields[0].1, Expr::Ident(n) if n == "x"));
+                assert!(matches!(&*fields[0].1, Expr::Ident(n) if n == "x"));
                 assert_eq!(fields[1].0, "y");
-                assert!(matches!(&fields[1].1, Expr::Ident(n) if n == "y"));
+                assert!(matches!(&*fields[1].1, Expr::Ident(n) if n == "y"));
             } else {
                 panic!("expected StructInit expression");
             }
@@ -4024,7 +4033,7 @@ mod tests {
 
         // Check the match expression
         if let Some(expr) = &func.body.expr {
-            if let Expr::Match { arms, .. } = expr.as_ref() {
+            if let Expr::Match { arms, .. } = &**expr.as_ref() {
                 let arm = &arms[0];
                 if let Pattern::Enum { name, variant, fields } = &arm.pattern {
                     assert_eq!(name, "Message");
@@ -4088,7 +4097,7 @@ mod tests {
         let module = parser.parse_module().unwrap();
 
         if let Item::Function(f) = first_user_item(&module) {
-            if let Some(Expr::Match { arms, .. }) = f.body.expr.as_deref() {
+            if let Some(Expr::Match { arms, .. }) = f.body.expr.as_deref().map(|e| e.inner()) {
                 assert_eq!(arms.len(), 2);
             } else {
                 panic!("expected match expr");
@@ -4116,7 +4125,7 @@ mod tests {
         let module = parser.parse_module().unwrap();
 
         if let Item::Function(f) = first_user_item(&module) {
-            if let Some(Expr::Receive { arms, timeout }) = f.body.expr.as_deref() {
+            if let Some(Expr::Receive { arms, timeout }) = f.body.expr.as_deref().map(|e| e.inner()) {
                 assert_eq!(arms.len(), 1);
                 assert!(timeout.is_some());
             } else {
@@ -4142,7 +4151,7 @@ mod tests {
         let module = parser.parse_module().unwrap();
 
         if let Item::Function(f) = first_user_item(&module) {
-            if let Some(Expr::SpawnClosure(_)) = f.body.expr.as_deref() {
+            if let Some(Expr::SpawnClosure(_)) = f.body.expr.as_deref().map(|e| e.inner()) {
                 // ok
             } else {
                 panic!("expected spawn closure");
@@ -4168,7 +4177,7 @@ mod tests {
         let module = parser.parse_module().unwrap();
 
         if let Item::Function(f) = first_user_item(&module) {
-            if let Some(Expr::Match { arms, .. }) = f.body.expr.as_deref() {
+            if let Some(Expr::Match { arms, .. }) = f.body.expr.as_deref().map(|e| e.inner()) {
                 if let Pattern::ListCons { .. } = &arms[0].pattern {
                     // ok
                 } else {
@@ -4199,7 +4208,7 @@ mod tests {
         let module = parser.parse_module().unwrap();
 
         if let Item::Function(f) = &user_items(&module)[1] {
-            if let Some(Expr::Match { arms, .. }) = f.body.expr.as_deref() {
+            if let Some(Expr::Match { arms, .. }) = f.body.expr.as_deref().map(|e| e.inner()) {
                 if let Pattern::Struct { name, fields } = &arms[0].pattern {
                     assert_eq!(name, "Point");
                     assert_eq!(fields.len(), 2);
@@ -4242,7 +4251,7 @@ mod tests {
         let module = parser.parse_module().unwrap();
 
         if let Item::Function(f) = &user_items(&module)[1] {
-            if let Some(Expr::Match { arms, .. }) = f.body.expr.as_deref() {
+            if let Some(Expr::Match { arms, .. }) = f.body.expr.as_deref().map(|e| e.inner()) {
                 if let Pattern::Struct { name, fields } = &arms[0].pattern {
                     assert_eq!(name, "Point");
                     // Only x is captured, .. ignores y and z
@@ -4448,9 +4457,9 @@ mod tests {
             if let Stmt::Let { value, .. } = &f.body.stmts[0] {
                 if let Expr::Call {
                     func, type_args, ..
-                } = value
+                } = value.inner()
                 {
-                    if let Expr::Ident(name) = func.as_ref() {
+                    if let Expr::Ident(name) = func.inner() {
                         assert_eq!(name, "start");
                     } else {
                         panic!("expected ident");
@@ -4466,7 +4475,7 @@ mod tests {
 
             // Check second statement: let y = call::<int, String>(x);
             if let Stmt::Let { value, .. } = &f.body.stmts[1] {
-                if let Expr::Call { type_args, .. } = value {
+                if let Expr::Call { type_args, .. } = value.inner() {
                     assert_eq!(type_args.len(), 2);
                 }
             }
@@ -4548,10 +4557,10 @@ mod tests {
 
         if let Item::Function(f) = first_user_item(&module) {
             if let Stmt::Let { value, .. } = &f.body.stmts[0] {
-                if let Expr::BitString(segments) = value {
+                if let Expr::BitString(segments) = value.inner() {
                     assert_eq!(segments.len(), 3);
                     // First segment should be Int(1)
-                    if let Expr::Int(1) = segments[0].value.as_ref() {
+                    if let Expr::Int(1) = segments[0].value.inner() {
                         // ok
                     } else {
                         panic!("expected Int(1)");
@@ -4582,7 +4591,7 @@ mod tests {
 
         if let Item::Function(f) = first_user_item(&module) {
             if let Stmt::Let { value, .. } = &f.body.stmts[0] {
-                if let Expr::BitString(segments) = value {
+                if let Expr::BitString(segments) = value.inner() {
                     assert_eq!(segments.len(), 1);
                     // Check that size is 16
                     if let Some(size) = &segments[0].size {
@@ -4620,7 +4629,7 @@ mod tests {
 
         if let Item::Function(f) = first_user_item(&module) {
             if let Stmt::Let { value, .. } = &f.body.stmts[0] {
-                if let Expr::BitString(segments) = value {
+                if let Expr::BitString(segments) = value.inner() {
                     assert_eq!(segments.len(), 1);
                     assert_eq!(segments[0].endianness, BitEndianness::Little);
                     assert_eq!(segments[0].signedness, BitSignedness::Signed);
@@ -4656,7 +4665,7 @@ mod tests {
         let Some(ref expr) = f.body.expr else {
             panic!("expected expression");
         };
-        let Expr::Match { arms, .. } = expr.as_ref() else {
+        let Expr::Match { arms, .. } = expr.inner() else {
             panic!("expected Match");
         };
         let Pattern::BitString(segments) = &arms[0].pattern else {
@@ -4694,7 +4703,7 @@ mod tests {
 
         if let Item::Function(f) = first_user_item(&module) {
             if let Stmt::Let { value, .. } = &f.body.stmts[0] {
-                if let Expr::BitString(segments) = value {
+                if let Expr::BitString(segments) = value.inner() {
                     assert_eq!(segments.len(), 0);
                 } else {
                     panic!("expected BitString");
@@ -5636,9 +5645,9 @@ mod repl_edit {
         let module = parser.parse_module().unwrap();
 
         if let Item::Function(f) = first_user_item(&module) {
-            if let Some(Expr::Quote(inner)) = f.body.expr.as_deref() {
+            if let Some(Expr::Quote(inner)) = f.body.expr.as_deref().map(|e| e.inner()) {
                 // The quote contains a block
-                if let Expr::Block(block) = inner.as_ref() {
+                if let Expr::Block(block) = inner.inner() {
                     assert_eq!(block.stmts.len(), 1); // let val = #x
                     // The block expression should be the addition
                     assert!(block.expr.is_some());
@@ -5668,7 +5677,7 @@ mod repl_edit {
         let module = parser.parse_module().unwrap();
 
         if let Item::Function(f) = first_user_item(&module) {
-            if let Some(Expr::Quote(_)) = f.body.expr.as_deref() {
+            if let Some(Expr::Quote(_)) = f.body.expr.as_deref().map(|e| e.inner()) {
                 // Just verify it parses - the inner structure is complex
             } else {
                 panic!("expected quote expr");
@@ -5694,7 +5703,7 @@ mod repl_edit {
         let module = parser.parse_module().unwrap();
 
         if let Item::Function(f) = first_user_item(&module) {
-            if let Some(Expr::QuoteItem(item)) = f.body.expr.as_deref() {
+            if let Some(Expr::QuoteItem(item)) = f.body.expr.as_deref().map(|e| e.inner()) {
                 if let Item::Function(quoted_func) = item.as_ref() {
                     // The function name should be the unquote marker
                     assert_eq!(quoted_func.name, "$UNQUOTE:func_name");
@@ -5727,7 +5736,7 @@ mod repl_edit {
         let module = parser.parse_module().unwrap();
 
         if let Item::Function(f) = first_user_item(&module) {
-            if let Some(Expr::QuoteItem(item)) = f.body.expr.as_deref() {
+            if let Some(Expr::QuoteItem(item)) = f.body.expr.as_deref().map(|e| e.inner()) {
                 if let Item::Struct(s) = item.as_ref() {
                     // The struct name should be the unquote marker
                     assert_eq!(s.name, "$UNQUOTE:name");
@@ -5760,7 +5769,7 @@ mod repl_edit {
         let module = parser.parse_module().unwrap();
 
         if let Item::Function(f) = first_user_item(&module) {
-            if let Some(Expr::QuoteItem(item)) = f.body.expr.as_deref() {
+            if let Some(Expr::QuoteItem(item)) = f.body.expr.as_deref().map(|e| e.inner()) {
                 if let Item::Struct(s) = item.as_ref() {
                     // The first field name should be the unquote marker
                     assert_eq!(s.fields[0].0, "$UNQUOTE:field_name");
@@ -5792,7 +5801,7 @@ mod repl_edit {
         let module = parser.parse_module().unwrap();
 
         if let Item::Function(f) = first_user_item(&module) {
-            if let Some(Expr::QuoteItem(item)) = f.body.expr.as_deref() {
+            if let Some(Expr::QuoteItem(item)) = f.body.expr.as_deref().map(|e| e.inner()) {
                 if let Item::Function(quoted_func) = item.as_ref() {
                     // The return type should be an unquote marker
                     if let Some(Type::Named { name, .. }) = &quoted_func.return_type {
@@ -5825,9 +5834,9 @@ mod repl_edit {
         let module = parser.parse_module().unwrap();
 
         if let Item::Function(f) = first_user_item(&module) {
-            if let Some(Expr::ListCons { head, tail }) = f.body.expr.as_deref() {
-                assert!(matches!(head.as_ref(), Expr::Ident(n) if n == "x"));
-                assert!(matches!(tail.as_ref(), Expr::Ident(n) if n == "xs"));
+            if let Some(Expr::ListCons { head, tail }) = f.body.expr.as_deref().map(|e| e.inner()) {
+                assert!(matches!(head.inner(), Expr::Ident(n) if n == "x"));
+                assert!(matches!(tail.inner(), Expr::Ident(n) if n == "xs"));
             } else {
                 panic!("expected list cons expr, got {:?}", f.body.expr);
             }
@@ -5850,14 +5859,14 @@ mod repl_edit {
         let module = parser.parse_module().unwrap();
 
         if let Item::Function(f) = first_user_item(&module) {
-            if let Some(Expr::MapLiteral(pairs)) = f.body.expr.as_deref() {
+            if let Some(Expr::MapLiteral(pairs)) = f.body.expr.as_deref().map(|e| e.inner()) {
                 assert_eq!(pairs.len(), 2);
                 // First pair: :foo => 1
-                assert!(matches!(&pairs[0].0, Expr::Atom(a) if a == "foo"));
-                assert!(matches!(&pairs[0].1, Expr::Int(1)));
+                assert!(matches!(pairs[0].0.inner(), Expr::Atom(a) if a == "foo"));
+                assert!(matches!(pairs[0].1.inner(), Expr::Int(1)));
                 // Second pair: :bar => 2
-                assert!(matches!(&pairs[1].0, Expr::Atom(a) if a == "bar"));
-                assert!(matches!(&pairs[1].1, Expr::Int(2)));
+                assert!(matches!(pairs[1].0.inner(), Expr::Atom(a) if a == "bar"));
+                assert!(matches!(pairs[1].1.inner(), Expr::Int(2)));
             } else {
                 panic!("expected map literal, got {:?}", f.body.expr);
             }
@@ -5880,7 +5889,7 @@ mod repl_edit {
         let module = parser.parse_module().unwrap();
 
         if let Item::Function(f) = first_user_item(&module) {
-            if let Some(Expr::MapLiteral(pairs)) = f.body.expr.as_deref() {
+            if let Some(Expr::MapLiteral(pairs)) = f.body.expr.as_deref().map(|e| e.inner()) {
                 assert!(pairs.is_empty());
             } else {
                 panic!("expected empty map literal, got {:?}", f.body.expr);
@@ -5910,7 +5919,7 @@ mod repl_edit {
                 clauses,
                 is_comprehension,
                 ..
-            }) = f.body.expr.as_deref()
+            }) = f.body.expr.as_deref().map(|e| e.inner())
             {
                 assert_eq!(clauses.len(), 1);
                 assert!(!is_comprehension);
@@ -5950,10 +5959,10 @@ mod repl_edit {
                 clauses,
                 is_comprehension,
                 body,
-            }) = f.body.expr.as_deref()
+            }) = f.body.expr.as_deref().map(|e| e.inner())
             {
                 assert_eq!(clauses.len(), 1);
-                assert!(is_comprehension);
+                assert!(*is_comprehension);
                 if let ForClause::Generator {
                     pattern: Pattern::Ident(name),
                     style: GeneratorStyle::Arrow,
@@ -5965,7 +5974,7 @@ mod repl_edit {
                     panic!("expected generator with Arrow style");
                 }
                 // Check body is a binary expression
-                if let Expr::Binary { op: BinOp::Mul, .. } = body.as_ref() {
+                if let Expr::Binary { op: BinOp::Mul, .. } = body.inner() {
                     // ok
                 } else {
                     panic!("expected multiplication in body");
@@ -5996,7 +6005,7 @@ mod repl_edit {
                 clauses,
                 is_comprehension,
                 ..
-            }) = f.body.expr.as_deref()
+            }) = f.body.expr.as_deref().map(|e| e.inner())
             {
                 assert_eq!(clauses.len(), 2);
                 assert!(is_comprehension);
@@ -6038,7 +6047,7 @@ mod repl_edit {
                 clauses,
                 is_comprehension,
                 ..
-            }) = f.body.expr.as_deref()
+            }) = f.body.expr.as_deref().map(|e| e.inner())
             {
                 assert_eq!(clauses.len(), 2);
                 assert!(is_comprehension);

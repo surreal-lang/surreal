@@ -69,7 +69,7 @@ pub type SharedGenericRegistry = Arc<RwLock<GenericFunctionRegistry>>;
 use crate::compiler::ast::{
     BinOp, BitEndianness, BitSegmentType, BitSignedness, BitStringSegment, Block,
     EnumPatternFields, EnumVariant, EnumVariantArgs, Expr, ForClause, Function, Item, MatchArm,
-    Module, ModuleContext, ModulePath, PathPrefix, Pattern, Stmt, StringPart, TraitDef, TraitImpl,
+    Module, ModuleContext, ModulePath, PathPrefix, Pattern, SpannedExpr, Stmt, StringPart, TraitDef, TraitImpl,
     Type, UnaryOp, UseDecl, UseTree, VariantKind,
 };
 use crate::compiler::typeck::StructInfo;
@@ -474,7 +474,7 @@ impl CoreErlangEmitter {
                     || else_block.as_ref().is_some_and(|b| Self::block_contains_return(b))
             }
             Expr::Match { arms, .. } => {
-                arms.iter().any(|arm| Self::contains_return(&arm.body))
+                arms.iter().any(|arm| Self::contains_return(arm.body.inner()))
             }
             Expr::Block(block) => Self::block_contains_return(block),
             _ => false,
@@ -484,9 +484,9 @@ impl CoreErlangEmitter {
     /// Check if a block contains a return statement.
     fn block_contains_return(block: &Block) -> bool {
         block.stmts.iter().any(|stmt| match stmt {
-            Stmt::Expr { expr: e, .. } => Self::contains_return(e),
-            Stmt::Let { value, .. } => Self::contains_return(value),
-        }) || block.expr.as_ref().is_some_and(|e| Self::contains_return(e))
+            Stmt::Expr { expr: e, .. } => Self::contains_return(e.inner()),
+            Stmt::Let { value, .. } => Self::contains_return(value.inner()),
+        }) || block.expr.as_ref().is_some_and(|e| Self::contains_return(e.inner()))
     }
 
 
@@ -724,7 +724,7 @@ impl CoreErlangEmitter {
         &mut self,
         trait_name: &str,
         method_name: &str,
-        args: &[Expr],
+        args: &[SpannedExpr],
     ) -> CoreErlangResult<()> {
         if args.is_empty() {
             return Err(CoreErlangError::new(format!(
@@ -874,7 +874,7 @@ impl CoreErlangEmitter {
         method_name: &str,
         tag_var: &str,
         receiver_var: &str,
-        args: &[Expr],
+        args: &[SpannedExpr],
     ) -> CoreErlangResult<()> {
         // The struct tag is an atom like 'dream::module::Type'
         // We need to parse it at runtime to get the module and type
@@ -950,8 +950,8 @@ impl CoreErlangEmitter {
     fn emit_method_dispatch(
         &mut self,
         method_name: &str,
-        receiver: &Expr,
-        args: &[Expr],
+        receiver: &SpannedExpr,
+        args: &[SpannedExpr],
         impl_types: &[(String, String)],
     ) -> CoreErlangResult<()> {
         // Total arity includes receiver
@@ -1030,8 +1030,8 @@ impl CoreErlangEmitter {
     fn emit_dynamic_method_dispatch(
         &mut self,
         method_name: &str,
-        receiver: &Expr,
-        args: &[Expr],
+        receiver: &SpannedExpr,
+        args: &[SpannedExpr],
     ) -> CoreErlangResult<()> {
         // Bind the receiver to a variable for dispatch
         let receiver_var = self.fresh_var();
@@ -2196,7 +2196,7 @@ impl CoreErlangEmitter {
     fn emit_block_inner(
         &mut self,
         stmts: &[Stmt],
-        final_expr: &Option<Box<Expr>>,
+        final_expr: &Option<Box<SpannedExpr>>,
     ) -> CoreErlangResult<()> {
         if stmts.is_empty() {
             // No more statements, emit the final expression
@@ -2217,7 +2217,7 @@ impl CoreErlangEmitter {
                 self.collect_pattern_vars(pattern);
 
                 // Track variable type for record field access
-                if let (Pattern::Ident(var_name), Expr::StructInit { name: struct_name, .. }) = (pattern, value) {
+                if let (Pattern::Ident(var_name), Expr::StructInit { name: struct_name, .. }) = (pattern, value.inner()) {
                     self.variable_types.insert(var_name.clone(), struct_name.clone());
                 }
 
@@ -2279,7 +2279,7 @@ impl CoreErlangEmitter {
             }
             Stmt::Expr { expr, .. } => {
                 // Check for early return patterns
-                if let Expr::Return(ret_val) = expr {
+                if let Expr::Return(ret_val) = expr.inner() {
                     // Direct return - emit value and stop
                     if let Some(val) = ret_val {
                         self.emit_expr(val)?;
@@ -2291,7 +2291,7 @@ impl CoreErlangEmitter {
                 }
 
                 // Check for if with early return
-                if let Expr::If { cond, then_block, else_block } = expr {
+                if let Expr::If { cond, then_block, else_block } = expr.inner() {
                     let then_returns = Self::block_contains_return(then_block);
                     let else_returns = else_block.as_ref().is_some_and(|b| Self::block_contains_return(b));
 
@@ -2332,11 +2332,11 @@ impl CoreErlangEmitter {
     /// Transforms `if cond { return x; } rest` into `case cond of true -> x; false -> rest end`
     fn emit_if_with_early_return(
         &mut self,
-        cond: &Expr,
+        cond: &SpannedExpr,
         then_block: &Block,
         else_block: Option<&Block>,
         rest_stmts: &[Stmt],
-        final_expr: &Option<Box<Expr>>,
+        final_expr: &Option<Box<SpannedExpr>>,
     ) -> CoreErlangResult<()> {
         self.emit("case ");
         self.emit_expr(cond)?;
@@ -2376,7 +2376,7 @@ impl CoreErlangEmitter {
         &mut self,
         block: &Block,
         rest_stmts: &[Stmt],
-        final_expr: &Option<Box<Expr>>,
+        final_expr: &Option<Box<SpannedExpr>>,
     ) -> CoreErlangResult<()> {
         // Combine block statements with continuation.
         // emit_block_inner will handle early returns properly - paths that return
@@ -2386,7 +2386,7 @@ impl CoreErlangEmitter {
         // If block.expr contains a return, treat it as a statement so emit_block_inner
         // can handle it with the continuation. Otherwise it's the block's final value.
         let combined_final = if let Some(expr) = &block.expr {
-            if Self::contains_return(expr) {
+            if Self::contains_return(expr.inner()) {
                 // Convert the expr to a statement so it gets processed with early return logic
                 all_stmts.push(Stmt::Expr { expr: (**expr).clone(), span: None });
                 final_expr
@@ -2480,15 +2480,15 @@ impl CoreErlangEmitter {
 
     /// Emit a map key expression.
     /// For atoms, emit directly without module resolution.
-    fn emit_map_key(&mut self, expr: &Expr) -> CoreErlangResult<()> {
+    fn emit_map_key(&mut self, expr: &SpannedExpr) -> CoreErlangResult<()> {
         self.emit_data_expr(expr)
     }
 
     /// Emit an expression as data (inside tuples, lists, maps).
     /// For atoms, emit directly without module resolution since atoms in data
     /// contexts are literal values, not module references.
-    fn emit_data_expr(&mut self, expr: &Expr) -> CoreErlangResult<()> {
-        match expr {
+    fn emit_data_expr(&mut self, expr: &SpannedExpr) -> CoreErlangResult<()> {
+        match expr.inner() {
             Expr::Atom(a) => {
                 // Emit atom directly - don't resolve as module reference
                 self.emit(&format!("'{}'", a));
@@ -2527,8 +2527,8 @@ impl CoreErlangEmitter {
     }
 
     /// Emit an expression.
-    fn emit_expr(&mut self, expr: &Expr) -> CoreErlangResult<()> {
-        match expr {
+    fn emit_expr(&mut self, expr: &SpannedExpr) -> CoreErlangResult<()> {
+        match expr.inner() {
             Expr::Int(n) => {
                 self.emit(&n.to_string());
             }
@@ -2637,7 +2637,7 @@ impl CoreErlangEmitter {
                 };
 
                 // Check if it's a local function call or external
-                match func.as_ref() {
+                match func.inner() {
                     Expr::Ident(name) => {
                         // Check if this is a call to a generic function with type args
                         if !effective_type_args.is_empty()
@@ -3379,7 +3379,7 @@ impl CoreErlangEmitter {
                 if is_result {
                     match (variant.as_str(), args) {
                         ("Ok", EnumVariantArgs::Tuple(exprs)) if exprs.len() == 1 => {
-                            if let Expr::Unit = &exprs[0] {
+                            if let Expr::Unit = exprs[0].inner() {
                                 // Ok(()) becomes just 'ok'
                                 self.emit("'ok'");
                             } else {
@@ -3420,7 +3420,7 @@ impl CoreErlangEmitter {
 
             Expr::FieldAccess { expr, field } => {
                 // Check if this is accessing a record type
-                let record_info = if let Expr::Ident(var_name) = expr.as_ref() {
+                let record_info = if let Expr::Ident(var_name) = expr.inner() {
                     // Look up variable type
                     if let Some(struct_name) = self.variable_types.get(var_name) {
                         // Check if the struct is a record
@@ -3554,7 +3554,7 @@ impl CoreErlangEmitter {
                 // Transform `left |> right` where right is typically a call expression.
                 // `a |> f(b, c)` becomes `f(a, b, c)`
                 // `a |> f` becomes `f(a)`
-                match right.as_ref() {
+                match right.inner() {
                     Expr::Call {
                         func,
                         type_args,
@@ -3562,36 +3562,36 @@ impl CoreErlangEmitter {
                         args,
                     } => {
                         // Prepend left as first argument
-                        let mut new_args = vec![left.as_ref().clone()];
+                        let mut new_args = vec![(**left).clone()];
                         new_args.extend(args.iter().cloned());
-                        let new_call = Expr::Call {
+                        let new_call = SpannedExpr::unspanned(Expr::Call {
                             func: func.clone(),
                             type_args: type_args.clone(),
                             inferred_type_args: inferred_type_args.clone(),
                             args: new_args,
-                        };
+                        });
                         self.emit_expr(&new_call)?;
                     }
                     Expr::Ident(name) => {
                         // Bare function: `a |> f` becomes `f(a)`
-                        let new_call = Expr::Call {
-                            func: Box::new(Expr::Ident(name.clone())),
+                        let new_call = SpannedExpr::unspanned(Expr::Call {
+                            func: SpannedExpr::boxed(Expr::Ident(name.clone())),
                             type_args: vec![],
                             inferred_type_args: vec![],
-                            args: vec![left.as_ref().clone()],
-                        };
+                            args: vec![(**left).clone()],
+                        });
                         self.emit_expr(&new_call)?;
                     }
                     Expr::Path { segments } => {
                         // Path without call: `a |> Module::func` becomes `Module::func(a)`
-                        let new_call = Expr::Call {
-                            func: Box::new(Expr::Path {
+                        let new_call = SpannedExpr::unspanned(Expr::Call {
+                            func: SpannedExpr::boxed(Expr::Path {
                                 segments: segments.clone(),
                             }),
                             type_args: vec![],
                             inferred_type_args: vec![],
-                            args: vec![left.as_ref().clone()],
-                        };
+                            args: vec![(**left).clone()],
+                        });
                         self.emit_expr(&new_call)?;
                     }
                     _ => {
@@ -3639,8 +3639,8 @@ impl CoreErlangEmitter {
     ///
     /// Unquote (`#var`) inside a quote inserts the variable's value directly,
     /// allowing runtime values to be spliced into the generated AST.
-    fn emit_quoted_expr(&mut self, expr: &Expr) -> CoreErlangResult<()> {
-        match expr {
+    fn emit_quoted_expr(&mut self, expr: &SpannedExpr) -> CoreErlangResult<()> {
+        match expr.inner() {
             // Unquote: insert the variable's value directly
             Expr::Unquote(inner) => {
                 // The inner expression is evaluated at runtime and its value
@@ -3881,7 +3881,7 @@ impl CoreErlangEmitter {
     }
 
     /// Emit a list of quoted expressions.
-    fn emit_quoted_list(&mut self, exprs: &[Expr]) -> CoreErlangResult<()> {
+    fn emit_quoted_list(&mut self, exprs: &[SpannedExpr]) -> CoreErlangResult<()> {
         self.emit("[");
         for (i, expr) in exprs.iter().enumerate() {
             if i > 0 {
@@ -3894,9 +3894,9 @@ impl CoreErlangEmitter {
     }
 
     /// Emit a list of quoted expressions, handling unquote-splice.
-    fn emit_quoted_list_with_splice(&mut self, exprs: &[Expr]) -> CoreErlangResult<()> {
+    fn emit_quoted_list_with_splice(&mut self, exprs: &[SpannedExpr]) -> CoreErlangResult<()> {
         // Check if any element is an unquote-splice
-        let has_splice = exprs.iter().any(|e| matches!(e, Expr::UnquoteSplice(_)));
+        let has_splice = exprs.iter().any(|e| matches!(e.inner(), Expr::UnquoteSplice(_)));
 
         if !has_splice {
             // Simple case: no splicing
@@ -3913,7 +3913,7 @@ impl CoreErlangEmitter {
             }
             first = false;
 
-            match expr {
+            match expr.inner() {
                 Expr::UnquoteSplice(inner) => {
                     // The spliced value should be a list, insert directly
                     self.emit_expr(inner)?;
@@ -4386,7 +4386,7 @@ impl CoreErlangEmitter {
     }
 
     /// Emit a binary operation.
-    fn emit_binary_op(&mut self, op: BinOp, left: &Expr, right: &Expr) -> CoreErlangResult<()> {
+    fn emit_binary_op(&mut self, op: BinOp, left: &SpannedExpr, right: &SpannedExpr) -> CoreErlangResult<()> {
         let erlang_op = match op {
             BinOp::Add => "+",
             BinOp::Sub => "-",
@@ -4413,7 +4413,7 @@ impl CoreErlangEmitter {
     }
 
     /// Emit function arguments.
-    fn emit_args(&mut self, args: &[Expr]) -> CoreErlangResult<()> {
+    fn emit_args(&mut self, args: &[SpannedExpr]) -> CoreErlangResult<()> {
         for (i, arg) in args.iter().enumerate() {
             if i > 0 {
                 self.emit(", ");
@@ -4433,7 +4433,7 @@ impl CoreErlangEmitter {
     fn emit_for_expr(
         &mut self,
         clauses: &[ForClause],
-        body: &Expr,
+        body: &SpannedExpr,
         is_comprehension: bool,
     ) -> CoreErlangResult<()> {
         // Extract generators and filters
@@ -4467,9 +4467,9 @@ impl CoreErlangEmitter {
     /// Emit a list comprehension using :lists functions.
     fn emit_for_comprehension(
         &mut self,
-        generators: &[(&Pattern, &Expr)],
-        filters: &[&Expr],
-        body: &Expr,
+        generators: &[(&Pattern, &SpannedExpr)],
+        filters: &[&SpannedExpr],
+        body: &SpannedExpr,
     ) -> CoreErlangResult<()> {
         if generators.is_empty() {
             return Err(CoreErlangError::new(
@@ -4613,9 +4613,9 @@ impl CoreErlangEmitter {
     /// Emit nested generators using flatmap/map.
     fn emit_nested_generators(
         &mut self,
-        generators: &[(&Pattern, &Expr)],
-        filters: &[&Expr],
-        body: &Expr,
+        generators: &[(&Pattern, &SpannedExpr)],
+        filters: &[&SpannedExpr],
+        body: &SpannedExpr,
         depth: usize,
     ) -> CoreErlangResult<()> {
         if depth >= generators.len() {
@@ -4703,8 +4703,8 @@ impl CoreErlangEmitter {
     /// Emit a side-effect for loop using letrec.
     fn emit_for_side_effect(
         &mut self,
-        generators: &[(&Pattern, &Expr)],
-        body: &Expr,
+        generators: &[(&Pattern, &SpannedExpr)],
+        body: &SpannedExpr,
     ) -> CoreErlangResult<()> {
         if generators.is_empty() {
             return Err(CoreErlangError::new(
@@ -4823,7 +4823,7 @@ impl CoreErlangEmitter {
     fn emit_receive_primops(
         &mut self,
         arms: &[MatchArm],
-        timeout: Option<&(Box<Expr>, Block)>,
+        timeout: Option<&(Box<SpannedExpr>, Block)>,
     ) -> CoreErlangResult<()> {
         // Generate unique names for this receive
         let recv_loop = self.fresh_var();
@@ -5211,12 +5211,12 @@ impl CoreErlangEmitter {
     /// Emit a bitstring segment in an expression context.
     fn emit_bitstring_segment_expr(
         &mut self,
-        seg: &BitStringSegment<Box<Expr>>,
+        seg: &BitStringSegment<Box<SpannedExpr>>,
     ) -> CoreErlangResult<()> {
         // Special handling for string literals in bitstrings
         // Each character becomes a separate integer segment
         // e.g., <<"hi">> becomes #<104>(8,1,'integer',['unsigned'|['big']]), #<105>(8,1,'integer',['unsigned'|['big']])
-        match seg.value.as_ref() {
+        match seg.value.inner() {
             Expr::String(s) => {
                 let chars: Vec<u32> = s.chars().map(|c| c as u32).collect();
                 for (i, code) in chars.iter().enumerate() {
@@ -5239,7 +5239,9 @@ impl CoreErlangEmitter {
 
         // Size
         if let Some(size) = &seg.size {
-            self.emit_expr(size)?;
+            // size is Option<Box<Expr>>, wrap in SpannedExpr for emit_expr
+            let size_spanned = SpannedExpr::unspanned((**size).clone());
+            self.emit_expr(&size_spanned)?;
         } else {
             self.emit("8"); // default size
         }
@@ -5281,7 +5283,9 @@ impl CoreErlangEmitter {
 
         // Size
         if let Some(size) = &seg.size {
-            self.emit_expr(size)?;
+            // size is Option<Box<Expr>>, wrap in SpannedExpr for emit_expr
+            let size_spanned = SpannedExpr::unspanned((**size).clone());
+            self.emit_expr(&size_spanned)?;
         } else {
             match seg.segment_type {
                 BitSegmentType::Binary => self.emit("'all'"),

@@ -1365,8 +1365,8 @@ pub fn term_to_expr(term: &Term) -> TermParseResult<Expr> {
                     let right = term_to_expr(&elements[3])?;
                     Ok(Expr::Binary {
                         op,
-                        left: Box::new(left),
-                        right: Box::new(right),
+                        left: SpannedExpr::boxed(left),
+                        right: SpannedExpr::boxed(right),
                     })
                 }
                 "unary_op" => {
@@ -1374,17 +1374,17 @@ pub fn term_to_expr(term: &Term) -> TermParseResult<Expr> {
                     let expr = term_to_expr(&elements[2])?;
                     Ok(Expr::Unary {
                         op,
-                        expr: Box::new(expr),
+                        expr: SpannedExpr::boxed(expr),
                     })
                 }
                 "call" => {
                     let func = term_to_expr(&elements[1])?;
                     let args = expect_list(&elements[2])?
                         .iter()
-                        .map(term_to_expr)
+                        .map(|t| term_to_expr(t).map(SpannedExpr::unspanned))
                         .collect::<TermParseResult<Vec<_>>>()?;
                     Ok(Expr::Call {
-                        func: Box::new(func),
+                        func: SpannedExpr::boxed(func),
                         args,
                         type_args: vec![],
                         inferred_type_args: vec![],
@@ -1395,10 +1395,10 @@ pub fn term_to_expr(term: &Term) -> TermParseResult<Expr> {
                     let method = expect_atom(&elements[2])?;
                     let args = expect_list(&elements[3])?
                         .iter()
-                        .map(term_to_expr)
+                        .map(|t| term_to_expr(t).map(SpannedExpr::unspanned))
                         .collect::<TermParseResult<Vec<_>>>()?;
                     Ok(Expr::MethodCall {
-                        receiver: Box::new(receiver),
+                        receiver: SpannedExpr::boxed(receiver),
                         method,
                         args,
                         type_args: vec![],
@@ -1410,21 +1410,21 @@ pub fn term_to_expr(term: &Term) -> TermParseResult<Expr> {
                     let expr = term_to_expr(&elements[1])?;
                     let field = expect_atom(&elements[2])?;
                     Ok(Expr::FieldAccess {
-                        expr: Box::new(expr),
+                        expr: SpannedExpr::boxed(expr),
                         field,
                     })
                 }
                 "tuple" => {
                     let elems = expect_list(&elements[1])?
                         .iter()
-                        .map(term_to_expr)
+                        .map(|t| term_to_expr(t).map(SpannedExpr::unspanned))
                         .collect::<TermParseResult<Vec<_>>>()?;
                     Ok(Expr::Tuple(elems))
                 }
                 "list" => {
                     let elems = expect_list(&elements[1])?
                         .iter()
-                        .map(term_to_expr)
+                        .map(|t| term_to_expr(t).map(SpannedExpr::unspanned))
                         .collect::<TermParseResult<Vec<_>>>()?;
                     Ok(Expr::List(elems))
                 }
@@ -1436,7 +1436,7 @@ pub fn term_to_expr(term: &Term) -> TermParseResult<Expr> {
                             let pair = expect_tuple(t)?;
                             let fname = expect_atom(&pair[0])?;
                             let fexpr = term_to_expr(&pair[1])?;
-                            Ok((fname, fexpr))
+                            Ok((fname, SpannedExpr::unspanned(fexpr)))
                         })
                         .collect::<TermParseResult<Vec<_>>>()?;
                     Ok(Expr::StructInit {
@@ -1454,7 +1454,7 @@ pub fn term_to_expr(term: &Term) -> TermParseResult<Expr> {
                         None
                     };
                     Ok(Expr::If {
-                        cond: Box::new(cond),
+                        cond: SpannedExpr::boxed(cond),
                         then_block,
                         else_block,
                     })
@@ -1467,7 +1467,7 @@ pub fn term_to_expr(term: &Term) -> TermParseResult<Expr> {
                     let inner = if is_none(&elements[1]) {
                         None
                     } else {
-                        Some(Box::new(term_to_expr(&elements[1])?))
+                        Some(SpannedExpr::boxed(term_to_expr(&elements[1])?))
                     };
                     Ok(Expr::Return(inner))
                 }
@@ -1476,40 +1476,40 @@ pub fn term_to_expr(term: &Term) -> TermParseResult<Expr> {
                     let function = expect_atom(&elements[2])?;
                     let args = expect_list(&elements[3])?
                         .iter()
-                        .map(term_to_expr)
+                        .map(|t| term_to_expr(t).map(SpannedExpr::unspanned))
                         .collect::<TermParseResult<Vec<_>>>()?;
                     Ok(Expr::ExternCall { module, function, args })
                 }
                 "quote" => {
                     let inner = term_to_expr(&elements[1])?;
-                    Ok(Expr::Quote(Box::new(inner)))
+                    Ok(Expr::Quote(SpannedExpr::boxed(inner)))
                 }
                 "unquote" => {
                     let inner = term_to_expr(&elements[1])?;
-                    Ok(Expr::Unquote(Box::new(inner)))
+                    Ok(Expr::Unquote(SpannedExpr::boxed(inner)))
                 }
                 "unquote_splice" => {
                     let inner = term_to_expr(&elements[1])?;
-                    Ok(Expr::UnquoteSplice(Box::new(inner)))
+                    Ok(Expr::UnquoteSplice(SpannedExpr::boxed(inner)))
                 }
                 "spawn" => {
                     let inner = term_to_expr(&elements[1])?;
-                    Ok(Expr::Spawn(Box::new(inner)))
+                    Ok(Expr::Spawn(SpannedExpr::boxed(inner)))
                 }
                 "send" => {
                     let to = term_to_expr(&elements[1])?;
                     let msg = term_to_expr(&elements[2])?;
                     Ok(Expr::Send {
-                        to: Box::new(to),
-                        msg: Box::new(msg),
+                        to: SpannedExpr::boxed(to),
+                        msg: SpannedExpr::boxed(msg),
                     })
                 }
                 "pipe" => {
                     let left = term_to_expr(&elements[1])?;
                     let right = term_to_expr(&elements[2])?;
                     Ok(Expr::Pipe {
-                        left: Box::new(left),
-                        right: Box::new(right),
+                        left: SpannedExpr::boxed(left),
+                        right: SpannedExpr::boxed(right),
                     })
                 }
                 _ => Err(TermParseError::new(format!("unknown expression tag: {}", tag), 0)),
@@ -1534,10 +1534,10 @@ fn term_to_block(term: &Term) -> TermParseResult<Block> {
     let expr = if is_none(&tuple[1]) {
         None
     } else {
-        Some(Box::new(term_to_expr(&tuple[1])?))
+        Some(SpannedExpr::boxed(term_to_expr(&tuple[1])?))
     };
 
-    Ok(Block { stmts, expr })
+    Ok(Block { stmts, expr, span: 0..0 })
 }
 
 /// Convert an Erlang term to a Statement.
@@ -1553,7 +1553,7 @@ fn term_to_stmt(term: &Term) -> TermParseResult<Stmt> {
             } else {
                 Some(term_to_type(&tuple[2])?)
             };
-            let value = term_to_expr(&tuple[3])?;
+            let value = SpannedExpr::unspanned(term_to_expr(&tuple[3])?);
             let else_block = if tuple.len() > 4 && !is_none(&tuple[4]) {
                 Some(term_to_block(&tuple[4])?)
             } else {
@@ -1562,7 +1562,7 @@ fn term_to_stmt(term: &Term) -> TermParseResult<Stmt> {
             Ok(Stmt::Let { pattern, ty, value, else_block })
         }
         "expr" => {
-            let expr = term_to_expr(&tuple[1])?;
+            let expr = SpannedExpr::unspanned(term_to_expr(&tuple[1])?);
             Ok(Stmt::Expr { expr, span: None })
         }
         _ => Err(TermParseError::new(format!("unknown statement tag: {}", tag), 0)),
@@ -1751,7 +1751,7 @@ pub fn term_to_impl_block(term: &Term) -> TermParseResult<ImplBlock> {
         .map(term_to_function)
         .collect::<TermParseResult<Vec<_>>>()?;
 
-    Ok(ImplBlock { type_name, methods })
+    Ok(ImplBlock { type_name, methods, span: 0..0 })
 }
 
 /// Convert an Erlang term to a TraitImpl.
@@ -1777,6 +1777,7 @@ pub fn term_to_trait_impl(term: &Term) -> TermParseResult<TraitImpl> {
         type_name,
         type_bindings: vec![],
         methods,
+        span: 0..0,
     })
 }
 
@@ -1943,8 +1944,8 @@ mod tests {
     fn test_expr_binary_op() {
         let expr = Expr::Binary {
             op: BinOp::Add,
-            left: Box::new(Expr::Int(1)),
-            right: Box::new(Expr::Int(2)),
+            left: SpannedExpr::boxed(Expr::Int(1)),
+            right: SpannedExpr::boxed(Expr::Int(2)),
         };
         assert_eq!(
             expr_to_erlang_term(&expr),
@@ -1978,6 +1979,7 @@ mod tests {
                 ("y".to_string(), Type::Int),
             ],
             attrs: vec![],
+            span: 0..0,
         };
         assert_eq!(
             struct_def_to_erlang_term(&s),
@@ -2080,8 +2082,8 @@ mod tests {
         let expr = term_to_expr(&term).unwrap();
         assert_eq!(expr, Expr::Binary {
             op: BinOp::Add,
-            left: Box::new(Expr::Int(1)),
-            right: Box::new(Expr::Int(2)),
+            left: SpannedExpr::boxed(Expr::Int(1)),
+            right: SpannedExpr::boxed(Expr::Int(2)),
         });
     }
 
@@ -2125,8 +2127,8 @@ mod tests {
     fn test_roundtrip_expr_binary_op() {
         let original = Expr::Binary {
             op: BinOp::Add,
-            left: Box::new(Expr::Int(1)),
-            right: Box::new(Expr::Int(2)),
+            left: SpannedExpr::boxed(Expr::Int(1)),
+            right: SpannedExpr::boxed(Expr::Int(2)),
         };
         let term_str = expr_to_erlang_term(&original);
         let term = parse_term(&term_str).unwrap();
@@ -2167,6 +2169,7 @@ mod tests {
                 ("name".to_string(), Type::String),
             ],
             attrs: vec![],
+            span: 0..0,
         };
         let tokens = struct_to_token_stream(&s);
         // Should contain keyword pub, keyword struct, type_ident User, and a group with fields
@@ -2191,6 +2194,7 @@ mod tests {
                 ("value".to_string(), Type::TypeVar("T".to_string())),
             ],
             attrs: vec![],
+            span: 0..0,
         };
         let tokens = struct_to_token_stream(&s);
         // Should contain the type parameter
@@ -2212,6 +2216,7 @@ mod tests {
                 EnumVariant { name: "None".to_string(), kind: VariantKind::Unit },
             ],
             attrs: vec![],
+            span: 0..0,
         };
         let tokens = enum_to_token_stream(&e);
         // Should contain keyword enum, type_ident Option, variants

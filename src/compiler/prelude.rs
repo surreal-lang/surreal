@@ -25,6 +25,7 @@ pub fn prelude_items() -> Vec<Item> {
                 },
             ],
             is_pub: false, // Private - each module gets its own copy
+            span: 0..0,
         }),
         // enum Result<T, E> { Ok(T), Err(E) }
         Item::Enum(EnumDef {
@@ -45,6 +46,7 @@ pub fn prelude_items() -> Vec<Item> {
                 },
             ],
             is_pub: false, // Private - each module gets its own copy
+            span: 0..0,
         }),
     ]
 }
@@ -116,6 +118,7 @@ mod tests {
             type_params: vec![TypeParam { name: "T".to_string(), bounds: vec![] }],
             variants: vec![],
             is_pub: false,
+            span: 0..0,
         })];
 
         let items = prelude_items_for_module(&existing);
