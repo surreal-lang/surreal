@@ -2553,12 +2553,9 @@ impl CoreErlangEmitter {
             }
 
             Expr::Atom(a) => {
-                // Check if this atom references a local module
-                if let Some(resolved) = self.module_context.resolve_local_module(a) {
-                    self.emit(&format!("'{}'", resolved));
-                } else {
-                    self.emit(&format!("'{}'", a));
-                }
+                // Atoms are literal values, not module references.
+                // Always emit them directly without module resolution.
+                self.emit(&format!("'{}'", a));
             }
 
             Expr::Bool(b) => {
