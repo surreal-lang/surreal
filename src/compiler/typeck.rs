@@ -4,6 +4,7 @@
 //! The type checker runs after parsing and before code generation.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, RwLock};
 
 use crate::compiler::ast::{
     self, Attribute, AttributeArgs, BinOp, Block, EnumPatternFields, EnumVariantArgs, Expr,
@@ -26,7 +27,7 @@ fn get_record_name(attrs: &[Attribute]) -> Option<String> {
 
 /// Internal type representation for type checking.
 /// This is separate from ast::Type to allow for inference variables.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Ty {
     /// Primitive types
     Int,
@@ -460,46 +461,48 @@ impl Default for PatternMatrix {
 // ============================================================================
 
 /// Type environment for a scope.
+///
+/// Uses Arc for read-mostly maps that are populated during type collection
+/// and only read during type inference. This avoids expensive clones when
+/// creating child scopes for nested blocks/functions.
 #[derive(Debug, Clone, Default)]
 pub struct TypeEnv {
-    /// Variable bindings: name -> type
+    /// Variable bindings: name -> type (mutated frequently in child scopes)
     vars: HashMap<String, Ty>,
-    /// Struct definitions: name -> info
-    structs: HashMap<String, StructInfo>,
-    /// Enum definitions: name -> info
-    enums: HashMap<String, EnumInfo>,
-    /// Function signatures: name -> info
-    functions: HashMap<String, FnInfo>,
-    /// Impl methods: (type_name, method_name) -> FnInfo
-    methods: HashMap<(String, String), FnInfo>,
-    /// Type aliases: name -> info (includes type parameters for generic aliases)
-    type_aliases: HashMap<String, TypeAliasInfo>,
-    /// Trait definitions: trait_name -> TraitInfo
-    traits: HashMap<String, TraitInfo>,
-    /// Trait implementations: (trait_name, type_name) -> TraitImplInfo
-    trait_impls: HashMap<(String, String), TraitImplInfo>,
+    /// Struct definitions: name -> info (shared via Arc, read-mostly)
+    structs: Arc<HashMap<String, StructInfo>>,
+    /// Enum definitions: name -> info (shared via Arc, read-mostly)
+    enums: Arc<HashMap<String, EnumInfo>>,
+    /// Function signatures: name -> info (shared via Arc, read-mostly)
+    functions: Arc<HashMap<String, FnInfo>>,
+    /// Impl methods: (type_name, method_name) -> FnInfo (shared via Arc, read-mostly)
+    methods: Arc<HashMap<(String, String), FnInfo>>,
+    /// Type aliases: name -> info (shared via Arc, read-mostly)
+    type_aliases: Arc<HashMap<String, TypeAliasInfo>>,
+    /// Trait definitions: trait_name -> TraitInfo (shared via Arc, read-mostly)
+    traits: Arc<HashMap<String, TraitInfo>>,
+    /// Trait implementations: (trait_name, type_name) -> TraitImplInfo (shared via Arc, read-mostly)
+    trait_impls: Arc<HashMap<(String, String), TraitImplInfo>>,
     /// Module-level trait declarations: trait names this module implements
     module_traits: Vec<String>,
     /// Associated type bindings from module-level trait declarations: "State" -> Ty::Int
     associated_types: HashMap<String, Ty>,
-    /// External function signatures: (module, function, arity) -> FnInfo
-    /// Used for type-checking FFI calls to Erlang/Elixir/etc
-    extern_functions: HashMap<(String, String, usize), FnInfo>,
-    /// Maps Dream extern module name -> BEAM module name
-    /// Used for #[name = "Elixir.Enum"] attribute support
-    extern_module_names: HashMap<String, String>,
-    /// Set of known extern module names (Dream names)
-    /// Used to resolve `module::fn()` calls as extern calls
-    extern_modules: HashSet<String>,
+    /// External function signatures: (module, function, arity) -> FnInfo (shared via Arc, read-mostly)
+    extern_functions: Arc<HashMap<(String, String, usize), FnInfo>>,
+    /// Maps Dream extern module name -> BEAM module name (shared via Arc, read-mostly)
+    extern_module_names: Arc<HashMap<String, String>>,
+    /// Set of known extern module names (shared via Arc, read-mostly)
+    extern_modules: Arc<HashSet<String>>,
     /// Extern function imports: local_name -> (module, function_name)
     /// Used for `use jason::encode; encode(data)` syntax
     extern_imports: HashMap<String, (String, String)>,
-    /// Maps extern function (module, dream_name, arity) -> beam_name
-    /// Used for #[name = "encode!"] attribute support on functions
-    extern_function_names: HashMap<(String, String, usize), String>,
-    /// Module aliases: alias_name -> full_module_path
-    /// Used for `use erlang::std::application as erl_app` syntax
-    extern_module_aliases: HashMap<String, String>,
+    /// Maps extern function (module, dream_name, arity) -> beam_name (shared via Arc, read-mostly)
+    extern_function_names: Arc<HashMap<(String, String, usize), String>>,
+    /// Module aliases: alias_name -> full_module_path (shared via Arc, read-mostly)
+    extern_module_aliases: Arc<HashMap<String, String>>,
+    /// Cache for type compatibility checks to avoid redundant computation.
+    /// Uses Arc<RwLock<>> to allow sharing between scopes and future parallelization.
+    type_compat_cache: Arc<RwLock<HashMap<(Ty, Ty), bool>>>,
 }
 
 impl TypeEnv {
@@ -508,24 +511,34 @@ impl TypeEnv {
     }
 
     /// Create a child scope that inherits from this environment.
+    ///
+    /// Uses Arc::clone() for read-mostly maps (cheap reference count increment)
+    /// and HashMap::clone() only for mutable maps like vars and extern_imports.
     pub fn child(&self) -> Self {
         Self {
+            // Clone vars since child scopes add local variable bindings
             vars: self.vars.clone(),
-            structs: self.structs.clone(),
-            enums: self.enums.clone(),
-            functions: self.functions.clone(),
-            methods: self.methods.clone(),
-            type_aliases: self.type_aliases.clone(),
-            traits: self.traits.clone(),
-            trait_impls: self.trait_impls.clone(),
+            // Share type definitions via Arc (cheap, just increments ref count)
+            structs: Arc::clone(&self.structs),
+            enums: Arc::clone(&self.enums),
+            functions: Arc::clone(&self.functions),
+            methods: Arc::clone(&self.methods),
+            type_aliases: Arc::clone(&self.type_aliases),
+            traits: Arc::clone(&self.traits),
+            trait_impls: Arc::clone(&self.trait_impls),
+            // Clone these smaller collections
             module_traits: self.module_traits.clone(),
             associated_types: self.associated_types.clone(),
-            extern_functions: self.extern_functions.clone(),
-            extern_module_names: self.extern_module_names.clone(),
-            extern_modules: self.extern_modules.clone(),
+            // Share extern info via Arc
+            extern_functions: Arc::clone(&self.extern_functions),
+            extern_module_names: Arc::clone(&self.extern_module_names),
+            extern_modules: Arc::clone(&self.extern_modules),
+            // Clone extern_imports since it can be modified per-scope
             extern_imports: self.extern_imports.clone(),
-            extern_function_names: self.extern_function_names.clone(),
-            extern_module_aliases: self.extern_module_aliases.clone(),
+            extern_function_names: Arc::clone(&self.extern_function_names),
+            extern_module_aliases: Arc::clone(&self.extern_module_aliases),
+            // Share the cache across scopes - type compatibility is a global property
+            type_compat_cache: Arc::clone(&self.type_compat_cache),
         }
     }
 
@@ -648,9 +661,9 @@ impl TypeEnv {
         // If the module has a #[name = "..."] attribute, use that; otherwise use the module path
         if let Some(beam_name) = self.extern_module_names.get(&module_path).cloned() {
             // Also register the alias -> BEAM name mapping for code generation
-            self.extern_module_names.insert(alias.clone(), beam_name);
+            Arc::make_mut(&mut self.extern_module_names).insert(alias.clone(), beam_name);
         }
-        self.extern_module_aliases.insert(alias, module_path);
+        Arc::make_mut(&mut self.extern_module_aliases).insert(alias, module_path);
     }
 
     /// Resolve a module name, checking aliases first.
@@ -685,6 +698,10 @@ pub struct TypeChecker {
     /// Type variable substitutions from unification (reserved for future use)
     #[allow(dead_code)]
     substitutions: HashMap<u32, Ty>,
+    /// Cache for fully resolved inference variable types.
+    /// Maps inference variable ID -> fully resolved type.
+    /// Uses Arc<RwLock<>> for future parallelization.
+    substitution_cache: Arc<RwLock<HashMap<u32, Ty>>>,
     /// Current function's type parameters and their bounds (for checking calls within generic functions)
     /// Maps type param name (e.g., "T") to Vec<trait_name> (e.g., ["GenServer"])
     current_type_param_bounds: HashMap<String, Vec<String>>,
@@ -702,6 +719,7 @@ impl TypeChecker {
             current_return_type: None,
             current_function_span: None,
             substitutions: HashMap::new(),
+            substitution_cache: Arc::new(RwLock::new(HashMap::new())),
             current_type_param_bounds: HashMap::new(),
             current_module: None,
         }
@@ -762,6 +780,11 @@ impl TypeChecker {
                 // Occurs check: don't allow Infer(id) = ... Infer(id) ...
                 if !other.has_infer_id(*id) {
                     self.substitutions.insert(*id, other.clone());
+                    // Invalidate the substitution cache since adding a new substitution
+                    // may affect previously cached resolutions
+                    if let Ok(mut cache) = self.substitution_cache.write() {
+                        cache.clear();
+                    }
                 }
                 Ok(())
             }
@@ -859,12 +882,26 @@ impl TypeChecker {
     }
 
     /// Apply all recorded substitutions to a type.
+    /// Uses memoization for inference variable resolution.
     fn apply_substitutions(&self, ty: &Ty) -> Ty {
         match ty {
             Ty::Infer(id) => {
+                // Check the cache first
+                if let Ok(cache) = self.substitution_cache.read() {
+                    if let Some(cached) = cache.get(id) {
+                        return cached.clone();
+                    }
+                }
+
+                // Not in cache, resolve it
                 if let Some(resolved) = self.substitutions.get(id) {
                     // Recursively apply substitutions
-                    self.apply_substitutions(resolved)
+                    let result = self.apply_substitutions(resolved);
+                    // Cache the fully resolved result
+                    if let Ok(mut cache) = self.substitution_cache.write() {
+                        cache.insert(*id, result.clone());
+                    }
+                    result
                 } else {
                     ty.clone()
                 }
@@ -1280,7 +1317,7 @@ impl TypeChecker {
                         .collect();
                     // Check for #[record = "name"] attribute
                     let record_name = get_record_name(&s.attrs);
-                    self.env.structs.insert(
+                    Arc::make_mut(&mut self.env.structs).insert(
                         s.name.clone(),
                         StructInfo {
                             name: s.name.clone(),
@@ -1311,7 +1348,7 @@ impl TypeChecker {
                             (v.name.clone(), kind)
                         })
                         .collect();
-                    self.env.enums.insert(
+                    Arc::make_mut(&mut self.env.enums).insert(
                         e.name.clone(),
                         EnumInfo {
                             name: e.name.clone(),
@@ -1350,7 +1387,7 @@ impl TypeChecker {
                             }
                         })
                         .collect();
-                    self.env.traits.insert(
+                    Arc::make_mut(&mut self.env.traits).insert(
                         trait_def.name.clone(),
                         TraitInfo {
                             name: trait_def.name.clone(),
@@ -1366,7 +1403,7 @@ impl TypeChecker {
                         .map(|(name, ty)| (name.clone(), self.ast_type_to_ty(ty)))
                         .collect();
                     let methods = impl_def.methods.iter().map(|m| m.name.clone()).collect();
-                    self.env.trait_impls.insert(
+                    Arc::make_mut(&mut self.env.trait_impls).insert(
                         (impl_def.trait_name.clone(), impl_def.type_name.clone()),
                         TraitImplInfo {
                             trait_name: impl_def.trait_name.clone(),
@@ -1396,7 +1433,7 @@ impl TypeChecker {
                 Item::TypeAlias(alias) => {
                     // Store type alias with its type parameters for generic alias support
                     let ty = self.ast_type_to_ty(&alias.ty);
-                    self.env.type_aliases.insert(
+                    Arc::make_mut(&mut self.env.type_aliases).insert(
                         alias.name.clone(),
                         TypeAliasInfo {
                             name: alias.name.clone(),
@@ -1429,12 +1466,11 @@ impl TypeChecker {
             .unwrap_or_else(|| module_path.to_string());
 
         // Store the Dream name -> BEAM name mapping
-        self.env
-            .extern_module_names
+        Arc::make_mut(&mut self.env.extern_module_names)
             .insert(module_path.to_string(), beam_module_name.clone());
 
         // Register this as a known extern module
-        self.env.extern_modules.insert(module_path.to_string());
+        Arc::make_mut(&mut self.env.extern_modules).insert(module_path.to_string());
 
         for item in &extern_mod.items {
             match item {
@@ -1473,14 +1509,14 @@ impl TypeChecker {
                     let arity = info.params.len();
 
                     // Store the function info
-                    self.env.extern_functions.insert(
+                    Arc::make_mut(&mut self.env.extern_functions).insert(
                         (module_path.to_string(), func.name.clone(), arity),
                         info,
                     );
 
                     // Store the Dream name -> BEAM name mapping if different
                     if beam_fn_name != func.name {
-                        self.env.extern_function_names.insert(
+                        Arc::make_mut(&mut self.env.extern_function_names).insert(
                             (module_path.to_string(), func.name.clone(), arity),
                             beam_fn_name,
                         );
@@ -1542,10 +1578,10 @@ impl TypeChecker {
                     if let Some(alias) = rename {
                         // Register the module alias: alias -> extern module name (e.g., "erl" -> "erlang")
                         // NOT the full path - we want to resolve to the actual extern module name
-                        self.env.extern_module_aliases.insert(alias.clone(), name.clone());
+                        Arc::make_mut(&mut self.env.extern_module_aliases).insert(alias.clone(), name.clone());
                         // Also add to extern_module_names if there's a BEAM name mapping
                         if let Some(beam_name) = self.env.extern_module_names.get(name).cloned() {
-                            self.env.extern_module_names.insert(alias.clone(), beam_name);
+                            Arc::make_mut(&mut self.env.extern_module_names).insert(alias.clone(), beam_name);
                         }
                     }
                     return;
@@ -1579,13 +1615,28 @@ impl TypeChecker {
                 }
             }
             UseTree::Glob { module } => {
-                // Glob imports from extern/stdlib modules aren't fully supported yet
-                // e.g., `use jason::*;` - we'd need to know all functions in the module
+                // Glob imports: `use jason::*;` imports all functions from the module
                 if module.segments.len() >= 1 && module.prefix == PathPrefix::None {
                     let first_segment = &module.segments[0];
                     if Self::is_stdlib_module(first_segment) || self.env.is_extern_module(first_segment) {
-                        // TODO: Could iterate over all registered functions for this module
-                        // and add them all as imports
+                        // Collect all function names for this module from extern_functions
+                        // We need to collect first to avoid borrowing issues
+                        let functions_to_import: Vec<String> = self.env.extern_functions
+                            .keys()
+                            .filter(|(mod_name, _, _)| mod_name == first_segment)
+                            .map(|(_, func_name, _)| func_name.clone())
+                            .collect::<HashSet<_>>() // Dedupe (same function can have multiple arities)
+                            .into_iter()
+                            .collect();
+
+                        // Now add them as imports
+                        for func_name in functions_to_import {
+                            self.env.add_extern_import(
+                                func_name.clone(),
+                                first_segment.clone(),
+                                func_name,
+                            );
+                        }
                     }
                 }
             }
@@ -1599,14 +1650,14 @@ impl TypeChecker {
                 Item::Function(func) => {
                     let info = self.function_to_info(func);
                     // Store with both simple name and module-qualified name
-                    self.env.functions.insert(func.name.clone(), info.clone());
+                    Arc::make_mut(&mut self.env.functions).insert(func.name.clone(), info.clone());
                     let qualified_name = format!("{}::{}", module.name, func.name);
-                    self.env.functions.insert(qualified_name, info);
+                    Arc::make_mut(&mut self.env.functions).insert(qualified_name, info);
                 }
                 Item::Impl(impl_block) => {
                     for method in &impl_block.methods {
                         let info = self.function_to_info(method);
-                        self.env.methods.insert(
+                        Arc::make_mut(&mut self.env.methods).insert(
                             (impl_block.type_name.clone(), method.name.clone()),
                             info,
                         );
@@ -2227,34 +2278,35 @@ impl TypeChecker {
                 } else {
                     // Could be a variant without a type name (e.g., Some(x))
                     // Search all enums for this variant
-                    for (name, info) in &self.env.enums.clone() {
-                        if let Some((_, _expected_kind)) =
-                            info.variants.iter().find(|(v, _)| v == variant)
-                        {
-                            // Found the enum - instantiate it
-                            let (instantiated, subst) = self.instantiate_enum(info);
-                            if let Some((_, variant_kind)) = instantiated.variants.iter().find(|(v, _)| v == variant) {
-                                self.check_variant_args(variant, variant_kind, args)?;
-                            }
+                    // Clone the enum info to avoid borrow conflicts with &mut self methods
+                    let found_enum: Option<(String, EnumInfo)> = self.env.enums.iter()
+                        .find(|(_, info)| info.variants.iter().any(|(v, _)| v == variant))
+                        .map(|(name, info)| (name.clone(), info.clone()));
 
-                            // Build type arguments
-                            let type_args: Vec<Ty> = info
-                                .type_params
-                                .iter()
-                                .map(|p| {
-                                    subst
-                                        .get(&p.name)
-                                        .map(|t| self.apply_substitutions(t))
-                                        .unwrap_or(Ty::Any)
-                                })
-                                .collect();
-
-                            return Ok(Ty::Named {
-                                name: name.clone(),
-                                module: None,
-                                args: type_args,
-                            });
+                    if let Some((name, info)) = found_enum {
+                        // Found the enum - instantiate it
+                        let (instantiated, subst) = self.instantiate_enum(&info);
+                        if let Some((_, variant_kind)) = instantiated.variants.iter().find(|(v, _)| v == variant) {
+                            self.check_variant_args(variant, variant_kind, args)?;
                         }
+
+                        // Build type arguments
+                        let type_args: Vec<Ty> = info
+                            .type_params
+                            .iter()
+                            .map(|p| {
+                                subst
+                                    .get(&p.name)
+                                    .map(|t| self.apply_substitutions(t))
+                                    .unwrap_or(Ty::Any)
+                            })
+                            .collect();
+
+                        return Ok(Ty::Named {
+                            name: name.clone(),
+                            module: None,
+                            args: type_args,
+                        });
                     }
                     self.error(TypeError::new(format!("undefined variant: {}", variant)));
                     Ok(Ty::Error)
@@ -2285,14 +2337,52 @@ impl TypeChecker {
                 // Extract the success type from Result<T, E> or Option<T>
                 if let Ty::Named { name, args, .. } = &ty {
                     match name.as_str() {
-                        "Result" if args.len() >= 1 => {
+                        "Result" if args.len() >= 2 => {
                             // Result<T, E> - the ? operator returns T
-                            // TODO: Check that function return type is compatible with Result<_, E>
+                            // Check that function return type is Result<_, E>
+                            if let Some(ret_ty) = &self.current_return_type {
+                                match ret_ty {
+                                    Ty::Named { name: ret_name, args: ret_args, .. }
+                                        if ret_name == "Result" && ret_args.len() >= 2 =>
+                                    {
+                                        // Check error types are compatible
+                                        if !self.types_compatible(&args[1], &ret_args[1]) {
+                                            self.warn(Warning::new(format!(
+                                                "the `?` operator on Result<_, {}> may not be compatible with function return type Result<_, {}>",
+                                                args[1], ret_args[1]
+                                            )));
+                                        }
+                                    }
+                                    _ => {
+                                        self.error(TypeError::new(format!(
+                                            "the `?` operator on Result requires the function to return Result, but found {}",
+                                            ret_ty
+                                        )));
+                                    }
+                                }
+                            }
+                            Ok(args[0].clone())
+                        }
+                        "Result" if args.len() >= 1 => {
+                            // Result<T> with no explicit error type - just return T
                             Ok(args[0].clone())
                         }
                         "Option" if args.len() >= 1 => {
                             // Option<T> - the ? operator returns T
-                            // TODO: Check that function return type is compatible with Option<_>
+                            // Check that function return type is Option<_>
+                            if let Some(ret_ty) = &self.current_return_type {
+                                match ret_ty {
+                                    Ty::Named { name: ret_name, .. } if ret_name == "Option" => {
+                                        // OK - function returns Option
+                                    }
+                                    _ => {
+                                        self.error(TypeError::new(format!(
+                                            "the `?` operator on Option requires the function to return Option, but found {}",
+                                            ret_ty
+                                        )));
+                                    }
+                                }
+                            }
                             Ok(args[0].clone())
                         }
                         _ => {
@@ -3069,7 +3159,15 @@ impl TypeChecker {
             return true;
         }
 
-        match (ty1, ty2) {
+        // Check the cache for previously computed results
+        let cache_key = (ty1.clone(), ty2.clone());
+        if let Ok(cache) = self.env.type_compat_cache.read() {
+            if let Some(&result) = cache.get(&cache_key) {
+                return result;
+            }
+        }
+
+        let result = match (ty1, ty2) {
             (Ty::Int, Ty::Int) => true,
             (Ty::Float, Ty::Float) => true,
             (Ty::String, Ty::String) => true,
@@ -3125,7 +3223,13 @@ impl TypeChecker {
             }
 
             _ => false,
+        };
+
+        // Store in cache before returning
+        if let Ok(mut cache) = self.env.type_compat_cache.write() {
+            cache.insert(cache_key, result);
         }
+        result
     }
 
     // =========================================================================
@@ -3727,13 +3831,24 @@ impl TypeChecker {
             }
 
             Expr::MethodCall { receiver, method, type_args, args, resolved_module, .. } => {
+                let annotated_receiver = Box::new(self.annotate_expr(receiver));
+                let annotated_args: Vec<Expr> = args.iter().map(|a| self.annotate_expr(a)).collect();
+
+                // If explicit type_args provided, no need to infer
+                let inferred = if type_args.is_empty() {
+                    // Try to infer type args for generic methods
+                    self.infer_type_args_for_method_call(receiver, method, args, resolved_module)
+                } else {
+                    vec![]
+                };
+
                 Expr::MethodCall {
-                    receiver: Box::new(self.annotate_expr(receiver)),
+                    receiver: annotated_receiver,
                     method: method.clone(),
                     type_args: type_args.clone(),
-                    args: args.iter().map(|a| self.annotate_expr(a)).collect(),
+                    args: annotated_args,
                     resolved_module: resolved_module.clone(),
-                    inferred_type_args: vec![], // TODO: implement method type inference
+                    inferred_type_args: inferred,
                 }
             }
 
@@ -4066,8 +4181,11 @@ impl TypeChecker {
             _ => return vec![], // Not a generic function
         };
 
-        // Clear substitutions for a fresh inference
+        // Clear substitutions and cache for a fresh inference
         self.substitutions.clear();
+        if let Ok(mut cache) = self.substitution_cache.write() {
+            cache.clear();
+        }
 
         // Create fresh inference variables for type params
         let mut type_var_map: HashMap<String, u32> = HashMap::new();
@@ -4095,6 +4213,91 @@ impl TypeChecker {
 
         // Extract resolved types for each type param
         fn_info.type_params.iter()
+            .map(|tp| {
+                if let Some(&var_id) = type_var_map.get(&tp.name) {
+                    let resolved = self.apply_substitutions(&Ty::Infer(var_id));
+                    resolved.to_ast_type()
+                } else {
+                    ast::Type::Any
+                }
+            })
+            .collect()
+    }
+
+    /// Infer type arguments for a generic method call.
+    /// Similar to infer_type_args_for_call but handles method lookup based on receiver type.
+    fn infer_type_args_for_method_call(
+        &mut self,
+        receiver: &Expr,
+        method: &str,
+        args: &[Expr],
+        resolved_module: &Option<String>,
+    ) -> Vec<ast::Type> {
+        // Get the receiver type
+        let receiver_ty = match self.infer_expr(receiver) {
+            Ok(ty) => ty,
+            Err(_) => return vec![],
+        };
+
+        // Get the type name from the receiver type
+        let type_name = match &receiver_ty {
+            Ty::Named { name, .. } => name.clone(),
+            Ty::String => "string".to_string(),
+            Ty::Int => "int".to_string(),
+            Ty::Float => "float".to_string(),
+            Ty::Bool => "bool".to_string(),
+            Ty::Atom => "atom".to_string(),
+            Ty::List(_) => "list".to_string(),
+            _ => return vec![],
+        };
+
+        // Look up method info - first try impl method, then resolved module
+        let method_info = self.env.get_method(&type_name, method).cloned()
+            .or_else(|| {
+                resolved_module.as_ref().and_then(|mod_name| {
+                    self.env.get_function(&format!("{}::{}", mod_name, method)).cloned()
+                })
+            });
+
+        let method_info = match method_info {
+            Some(info) if !info.type_params.is_empty() => info,
+            _ => return vec![], // Not a generic method
+        };
+
+        // Clear substitutions and cache for a fresh inference
+        self.substitutions.clear();
+        if let Ok(mut cache) = self.substitution_cache.write() {
+            cache.clear();
+        }
+
+        // Create fresh inference variables for type params
+        let mut type_var_map: HashMap<String, u32> = HashMap::new();
+        for type_param in &method_info.type_params {
+            let var_id = self.infer_counter;
+            self.infer_counter += 1;
+            type_var_map.insert(type_param.name.clone(), var_id);
+        }
+
+        // Substitute type params in method signature with inference vars
+        let subst: HashMap<String, Ty> = type_var_map.iter()
+            .map(|(name, id)| (name.clone(), Ty::Infer(*id)))
+            .collect();
+
+        // Skip the first parameter (self) if it exists
+        let params_to_check: Vec<Ty> = method_info.params.iter()
+            .skip(1) // Skip 'self' parameter
+            .map(|(_, ty)| ty.substitute(&subst))
+            .collect();
+
+        // Unify each argument type with parameter type
+        for (arg, param_ty) in args.iter().zip(params_to_check.iter()) {
+            if let Ok(arg_ty) = self.infer_expr(arg) {
+                let _ = self.unify(&arg_ty, param_ty);
+            }
+        }
+
+        // Extract resolved types for each type param
+        method_info.type_params.iter()
             .map(|tp| {
                 if let Some(&var_id) = type_var_map.get(&tp.name) {
                     let resolved = self.apply_substitutions(&Ty::Infer(var_id));
@@ -4241,9 +4444,9 @@ pub fn check_modules_with_metadata(modules: &[Module]) -> TypeCheckResult {
 
     TypeCheckResult {
         modules: results,
-        extern_module_names: checker.env.extern_module_names.clone(),
-        extern_function_names: checker.env.extern_function_names.clone(),
-        struct_info: checker.env.structs.clone(),
+        extern_module_names: (*checker.env.extern_module_names).clone(),
+        extern_function_names: (*checker.env.extern_function_names).clone(),
+        struct_info: (*checker.env.structs).clone(),
         warnings: checker.warnings,
     }
 }
