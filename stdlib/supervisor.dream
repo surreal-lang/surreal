@@ -188,7 +188,7 @@ fn start_one_child(spec: Any) -> (Atom, Pid, Atom, Atom, Atom) {
     // and returns a pid (like genserver::start)
     let child_pid = erl::apply(module, :start, [args]);
     // Link to the child so we get EXIT signals
-    erl::link(child_pid);
+    let _ = erl::link(child_pid);
     (id, child_pid, module, restart, child_type)
 }
 
@@ -196,14 +196,14 @@ fn start_one_child(spec: Any) -> (Atom, Pid, Atom, Atom, Atom) {
 fn restart_child(child: (Atom, Pid, Atom, Atom, Atom)) -> (Atom, Pid, Atom, Atom, Atom) {
     let (id, _old_pid, module, restart, child_type) = child;
     let new_pid = erl::apply(module, :start, [()]);
-    erl::link(new_pid);
+    let _ = erl::link(new_pid);
     (id, new_pid, module, restart, child_type)
 }
 
 /// The main supervisor loop.
 fn supervisor_loop(strategy: Atom, specs: [Any], children: [Any]) -> Atom {
     // Set trap_exit to receive EXIT signals from children
-    erl::process_flag(:trap_exit, true);
+    let _ = erl::process_flag(:trap_exit, true);
     supervisor_loop_inner(strategy, specs, children)
 }
 
@@ -299,7 +299,7 @@ fn handle_child_exit(strategy: Atom, specs: [Any], children: [Any], child_pid: P
                     :rest_for_one => {
                         // Stop children started after the failed one, then restart them
                         let (before, remaining) = split_at_child(children, child_pid);
-                        stop_children(remaining);
+                        let _ = stop_children(remaining);
                         let specs_to_restart = get_specs_for_children(remaining, specs);
                         let restarted = start_children(specs_to_restart, []);
                         let new_child = restart_child(child);
@@ -370,8 +370,8 @@ fn handle_terminate_child(children: [Any], child_id: Atom) -> Any {
 
 fn do_terminate_child(child: Any) -> Any {
     let (_id, child_pid, _module, _restart, _type) = child;
-    erl::unlink(child_pid);
-    erl::exit(child_pid, :shutdown);
+    let _ = erl::unlink(child_pid);
+    let _ = erl::exit(child_pid, :shutdown);
     :ok
 }
 
@@ -385,8 +385,8 @@ fn stop_children(children: [Any]) -> Atom {
         [] => :ok,
         [child | rest] => {
             let (_id, child_pid, _module, _restart, _type) = child;
-            erl::unlink(child_pid);
-            erl::exit(child_pid, :shutdown);
+            let _ = erl::unlink(child_pid);
+            let _ = erl::exit(child_pid, :shutdown);
             stop_children(rest)
         }
     }

@@ -12,8 +12,8 @@ pub fn current() -> Pid {
 }
 
 /// Sleep for the given number of milliseconds.
-pub fn sleep(ms: int) -> Atom {
-    erl_timer::sleep(ms)
+pub fn sleep(ms: int) {
+    let _ = erl_timer::sleep(ms);
 }
 
 /// Check if a process is alive.
@@ -21,9 +21,9 @@ pub fn is_alive(p: Pid) -> bool {
     erl::is_process_alive(p)
 }
 
-/// Send a message to a process (returns the message).
-pub fn send<T>(p: Pid, msg: T) -> T {
-    erl::send(p, msg)
+/// Send a message to a process.
+pub fn send<T>(p: Pid, msg: T) {
+    let _ = erl::send(p, msg);
 }
 
 /// Register a process with a name.

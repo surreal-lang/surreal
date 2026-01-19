@@ -126,29 +126,25 @@ pub fn call_timeout(server: Pid, msg: Any, timeout: int) -> (Atom, Any) {
 
 /// Send an asynchronous cast to a GenServer.
 /// Returns immediately without waiting for a reply.
-pub fn cast(server: Pid, msg: Any) -> Atom {
+pub fn cast(server: Pid, msg: Any) {
     process::send(server, (:gen_cast, msg));
-    :ok
 }
 
 /// Reply to a call from within a handler.
 /// Useful for async replies when you don't reply in handle_call.
-pub fn reply(from: From, msg: Any) -> Atom {
+pub fn reply(from: From, msg: Any) {
     process::send(from.pid, (from.ref, msg));
-    :ok
 }
 
 /// Stop a GenServer gracefully.
-pub fn stop(server: Pid) -> Atom {
+pub fn stop(server: Pid) {
     // Send a cast with :stop message
     cast(server, :stop);
-    :ok
 }
 
 /// Stop a GenServer with a specific reason.
-pub fn stop_reason(server: Pid, reason: Atom) -> Atom {
+pub fn stop_reason(server: Pid, reason: Atom) {
     cast(server, (:stop, reason));
-    :ok
 }
 
 // ============== Server API ==============
@@ -218,7 +214,7 @@ fn server_loop_typed<T: GenServer>(state: Any) -> Atom {
                 },
                 (:stop, reason, response, new_state) => {
                     reply(from, response);
-                    terminate_typed::<T>(new_state, reason);
+                    let _ = terminate_typed::<T>(new_state, reason);
                     :ok
                 },
                 _ => server_loop_typed::<T>(state)
@@ -229,11 +225,11 @@ fn server_loop_typed<T: GenServer>(state: Any) -> Atom {
             // Handle special :stop message
             match msg {
                 :stop => {
-                    terminate_typed::<T>(state, :normal);
+                    let _ = terminate_typed::<T>(state, :normal);
                     :ok
                 },
                 (:stop, reason) => {
-                    terminate_typed::<T>(state, reason);
+                    let _ = terminate_typed::<T>(state, reason);
                     :ok
                 },
                 _ => {
@@ -241,7 +237,7 @@ fn server_loop_typed<T: GenServer>(state: Any) -> Atom {
                     match result {
                         (:noreply, new_state) => server_loop_typed::<T>(new_state),
                         (:stop, reason, new_state) => {
-                            terminate_typed::<T>(new_state, reason);
+                            let _ = terminate_typed::<T>(new_state, reason);
                             :ok
                         },
                         _ => server_loop_typed::<T>(state)
@@ -255,7 +251,7 @@ fn server_loop_typed<T: GenServer>(state: Any) -> Atom {
             match result {
                 (:noreply, new_state) => server_loop_typed::<T>(new_state),
                 (:stop, reason, new_state) => {
-                    terminate_typed::<T>(new_state, reason);
+                    let _ = terminate_typed::<T>(new_state, reason);
                     :ok
                 },
                 _ => server_loop_typed::<T>(state)
@@ -281,7 +277,7 @@ fn server_loop(module: Atom, state: Any) -> Atom {
                 },
                 (:stop, reason, response, new_state) => {
                     reply(from, response);
-                    call_terminate(module, reason, new_state);
+                    let _ = call_terminate(module, reason, new_state);
                     :ok
                 },
                 _ => server_loop(module, state)
@@ -292,11 +288,11 @@ fn server_loop(module: Atom, state: Any) -> Atom {
             // Handle special :stop message
             match msg {
                 :stop => {
-                    call_terminate(module, :normal, state);
+                    let _ = call_terminate(module, :normal, state);
                     :ok
                 },
                 (:stop, reason) => {
-                    call_terminate(module, reason, state);
+                    let _ = call_terminate(module, reason, state);
                     :ok
                 },
                 _ => {
@@ -304,7 +300,7 @@ fn server_loop(module: Atom, state: Any) -> Atom {
                     match result {
                         (:noreply, new_state) => server_loop(module, new_state),
                         (:stop, reason, new_state) => {
-                            call_terminate(module, reason, new_state);
+                            let _ = call_terminate(module, reason, new_state);
                             :ok
                         },
                         _ => server_loop(module, state)
@@ -318,7 +314,7 @@ fn server_loop(module: Atom, state: Any) -> Atom {
             match result {
                 (:noreply, new_state) => server_loop(module, new_state),
                 (:stop, reason, new_state) => {
-                    call_terminate(module, reason, new_state);
+                    let _ = call_terminate(module, reason, new_state);
                     :ok
                 },
                 _ => server_loop(module, state)
@@ -347,6 +343,6 @@ fn call_terminate(module: Atom, reason: Atom, state: Any) -> Atom {
 
 /// Call terminate for typed GenServer. Takes state first so trait dispatch
 /// can use the state's __struct__ tag for method resolution.
-fn terminate_typed<T: GenServer>(state: Any, reason: Atom) -> Atom {
-    GenServer::terminate::<T>(reason, state)
+fn terminate_typed<T: GenServer>(state: Any, reason: Atom) {
+    let _ = GenServer::terminate::<T>(reason, state);
 }

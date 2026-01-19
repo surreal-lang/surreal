@@ -355,22 +355,20 @@ pub fn min_by<T>(items: [T], f: fn(T) -> int) -> T {
 // =============================================================================
 
 /// Apply a function to each element for side effects.
-pub fn each<T>(items: [T], f: fn(T) -> ()) -> Atom {
-    erl_lists::foreach(f, items);
-    :ok
+pub fn each<T>(items: [T], f: fn(T) -> ()) {
+    let _ = erl_lists::foreach(f, items);
 }
 
 /// Apply a function to each element with its index.
-pub fn each_with_index<T>(items: [T], f: fn(T, int) -> ()) -> Atom {
+pub fn each_with_index<T>(items: [T], f: fn(T, int) -> ()) {
     each_with_index_loop(items, 0, f);
-    :ok
 }
 
-fn each_with_index_loop<T>(items: [T], idx: int, f: fn(T, int) -> ()) -> Atom {
+fn each_with_index_loop<T>(items: [T], idx: int, f: fn(T, int) -> ()) {
     match items {
-        [] => :ok,
+        [] => (),
         [head | tail] => {
-            f(head, idx);
+            let _ = f(head, idx);
             each_with_index_loop(tail, idx + 1, f)
         }
     }

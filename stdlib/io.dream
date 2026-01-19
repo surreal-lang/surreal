@@ -6,23 +6,23 @@ use erlang::std::io as erl_io;
 use display::DisplayOpts;
 
 /// Print a string followed by a newline.
-pub fn println(s: String) -> Atom {
-    erl_io::format("~s~n", [s])
+pub fn println(s: String) {
+    let _ = erl_io::format("~s~n", [s]);
 }
 
 /// Print with format string (like Erlang's io:format).
-pub fn format(fmt: String, args: Any) -> Atom {
-    erl_io::format(fmt, args)
+pub fn format(fmt: String, args: Any) {
+    let _ = erl_io::format(fmt, args);
 }
 
 /// Print a string without a newline.
-pub fn print(s: String) -> Atom {
-    erl_io::format("~s", [s])
+pub fn print(s: String) {
+    let _ = erl_io::format("~s", [s]);
 }
 
 /// Print an integer followed by a newline.
-pub fn println_int(n: int) -> Atom {
-    erl_io::format("~p~n", [n])
+pub fn println_int(n: int) {
+    let _ = erl_io::format("~p~n", [n]);
 }
 
 /// Display a term and print it, returning the term for chaining.

@@ -204,9 +204,9 @@ pub fn reset_module_levels() -> Atom {
 ///
 /// Example output:
 ///   2026-01-17T22:15:30.123 [info] Server started on http://localhost:8080
-pub fn setup() -> Atom {
+pub fn setup() {
     // Set level to info (default is notice)
-    :logger::set_primary_config(:level, :info);
+    let _ = :logger::set_primary_config(:level, :info);
 
     // Configure formatter for single-line output
     // Using maps:from_list to ensure atom keys
@@ -216,13 +216,12 @@ pub fn setup() -> Atom {
         (:template, [:time, " [", :level, "] ", :msg, "\n"])
     ]);
 
-    :logger::update_handler_config(:default, :formatter, (:logger_formatter, formatter_config));
-    :ok
+    let _ = :logger::update_handler_config(:default, :formatter, (:logger_formatter, formatter_config));
 }
 
 /// Configure logger with debug level and clean format.
-pub fn setup_debug() -> Atom {
-    :logger::set_primary_config(:level, :debug);
+pub fn setup_debug() {
+    let _ = :logger::set_primary_config(:level, :debug);
 
     let formatter_config = :maps::from_list([
         (:single_line, true),
@@ -230,6 +229,5 @@ pub fn setup_debug() -> Atom {
         (:template, [:time, " [", :level, "] ", :msg, "\n"])
     ]);
 
-    :logger::update_handler_config(:default, :formatter, (:logger_formatter, formatter_config));
-    :ok
+    let _ = :logger::update_handler_config(:default, :formatter, (:logger_formatter, formatter_config));
 }
