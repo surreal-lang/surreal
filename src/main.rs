@@ -18,7 +18,68 @@ use dream::{
     deps::DepsManager,
 };
 use std::collections::HashSet;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
+
+/// Cached stdlib data containing both modules and generic function registry.
+/// This eliminates redundant parsing of stdlib files within a compilation session.
+struct StdlibData {
+    modules: Vec<Module>,
+    generics: Option<SharedGenericRegistry>,
+}
+
+static STDLIB_CACHE: OnceLock<StdlibData> = OnceLock::new();
+
+/// Load stdlib modules and generics in a single pass, with caching.
+/// This is the primary entry point for getting stdlib data - it caches results
+/// for the process lifetime to avoid redundant parsing.
+fn get_stdlib() -> &'static StdlibData {
+    STDLIB_CACHE.get_or_init(load_stdlib_uncached)
+}
+
+/// Load stdlib modules and extract generic functions in a single pass.
+/// Called only once per process by `get_stdlib()`.
+fn load_stdlib_uncached() -> StdlibData {
+    let stdlib_dir = match find_stdlib_dir() {
+        Some(dir) => dir,
+        None => {
+            return StdlibData {
+                modules: Vec::new(),
+                generics: None,
+            };
+        }
+    };
+
+    // Use package-aware loader with "dream" as the package name
+    let mut loader = ModuleLoader::with_package("dream".to_string(), stdlib_dir.clone());
+    if loader.load_all_in_dir(&stdlib_dir).is_err() {
+        return StdlibData {
+            modules: Vec::new(),
+            generics: None,
+        };
+    }
+
+    let modules = loader.into_modules();
+
+    // Extract generic functions from each loaded module
+    let registry = Arc::new(RwLock::new(GenericFunctionRegistry::new()));
+    {
+        let mut reg = registry.write().unwrap();
+        for module in &modules {
+            for item in &module.items {
+                if let Item::Function(func) = item {
+                    if !func.type_params.is_empty() {
+                        reg.register(&module.name, func);
+                    }
+                }
+            }
+        }
+    }
+
+    StdlibData {
+        modules,
+        generics: Some(registry),
+    }
+}
 
 #[derive(Parser)]
 #[command(name = "dream")]
@@ -494,8 +555,8 @@ fn compile_modules(
     target: &str,
     package_name: Option<&str>,
 ) -> ExitCode {
-    // Use stdlib generics registry if available
-    let stdlib_registry = load_stdlib_generics();
+    // Use cached stdlib generics registry
+    let stdlib_registry = get_stdlib().generics.clone();
     compile_modules_with_registry(modules, build_dir, target, stdlib_registry, package_name, &[])
 }
 
@@ -509,8 +570,8 @@ fn compile_modules_with_options(
     dep_ebin_paths: &[PathBuf],
     dependencies: &std::collections::HashSet<String>,
 ) -> ExitCode {
-    // Use stdlib generics registry if available
-    let stdlib_registry = load_stdlib_generics();
+    // Use cached stdlib generics registry
+    let stdlib_registry = get_stdlib().generics.clone();
     compile_modules_with_registry_and_options(
         modules,
         build_dir,
@@ -540,10 +601,11 @@ fn compile_modules_with_registry(
     // Load stub modules for FFI type checking
     let stub_modules = load_stub_modules();
 
-    // Load all stdlib modules for type checking
+    // Use cached stdlib modules for type checking
     // This is needed even when compiling stdlib itself, because stdlib modules
     // may depend on extern modules defined in other stdlib files
-    let stdlib_modules_full = load_stdlib_modules();
+    let stdlib_data = get_stdlib();
+    let stdlib_modules_full = &stdlib_data.modules;
 
     // Check if we're compiling stdlib itself (by checking if any module shares a name with stdlib)
     let stdlib_module_names_raw: std::collections::HashSet<_> = stdlib_modules_full
@@ -561,11 +623,12 @@ fn compile_modules_with_registry(
     // but keep other stdlib modules for type checking (e.g., extern module definitions)
     let stdlib_modules: Vec<Module> = if is_compiling_stdlib {
         stdlib_modules_full
-            .into_iter()
+            .iter()
             .filter(|m| !user_module_names.contains(&m.name))
+            .cloned()
             .collect()
     } else {
-        stdlib_modules_full
+        stdlib_modules_full.clone()
     };
 
     // Combine user modules with stub modules and stdlib for type checking
@@ -765,7 +828,7 @@ fn compile_modules_with_registry(
         }
     }
 
-    // Expand derive macros (e.g., #[derive(Debug, Clone)]) with macro registry
+    // Expand derives, quotes, and resolve stdlib methods in a single pass
     for module in &mut modules {
         if let Err(errors) = expand_derives_with_registry(module, &mut macro_registry) {
             for err in errors {
@@ -773,15 +836,7 @@ fn compile_modules_with_registry(
             }
             return ExitCode::from(1);
         }
-    }
-
-    // Expand quote expressions in all modules (quote { ... } -> tuple construction)
-    for module in &mut modules {
         expand_quotes(module);
-    }
-
-    // Resolve stdlib method calls (e.g., s.trim() -> string::trim(s))
-    for module in &mut modules {
         resolve_stdlib_methods(module);
     }
 
@@ -917,10 +972,11 @@ fn compile_modules_with_registry_and_options(
     // Load stub modules for FFI type checking
     let stub_modules = load_stub_modules();
 
-    // Load all stdlib modules for type checking
+    // Use cached stdlib modules for type checking
     // This is needed even when compiling stdlib itself, because stdlib modules
     // may depend on extern modules defined in other stdlib files
-    let stdlib_modules_full = load_stdlib_modules();
+    let stdlib_data = get_stdlib();
+    let stdlib_modules_full = &stdlib_data.modules;
 
     // Check if we're compiling stdlib itself (by checking if any module shares a name with stdlib)
     let stdlib_module_names_raw: std::collections::HashSet<_> = stdlib_modules_full
@@ -938,11 +994,12 @@ fn compile_modules_with_registry_and_options(
     // but keep other stdlib modules for type checking (e.g., extern module definitions)
     let stdlib_modules: Vec<Module> = if is_compiling_stdlib {
         stdlib_modules_full
-            .into_iter()
+            .iter()
             .filter(|m| !user_module_names.contains(&m.name))
+            .cloned()
             .collect()
     } else {
-        stdlib_modules_full
+        stdlib_modules_full.clone()
     };
 
     // Combine user modules with stub modules and stdlib for type checking
@@ -1142,7 +1199,7 @@ fn compile_modules_with_registry_and_options(
         }
     }
 
-    // Expand derive macros (e.g., #[derive(Debug, Clone)]) with macro registry
+    // Expand derives, quotes, and resolve stdlib methods in a single pass
     for module in &mut modules {
         if let Err(errors) = expand_derives_with_registry(module, &mut macro_registry) {
             for err in errors {
@@ -1150,15 +1207,7 @@ fn compile_modules_with_registry_and_options(
             }
             return ExitCode::from(1);
         }
-    }
-
-    // Expand quote expressions in all modules (quote { ... } -> tuple construction)
-    for module in &mut modules {
         expand_quotes(module);
-    }
-
-    // Resolve stdlib method calls (e.g., s.trim() -> string::trim(s))
-    for module in &mut modules {
         resolve_stdlib_methods(module);
     }
 
@@ -1648,27 +1697,6 @@ fn load_stub_modules() -> Vec<Module> {
     stub_modules
 }
 
-/// Load stdlib modules for type checking.
-/// This allows the type checker to see function signatures from stdlib.
-fn load_stdlib_modules() -> Vec<Module> {
-    let stdlib_dir = match find_stdlib_dir() {
-        Some(dir) => dir,
-        None => {
-            return Vec::new();
-        }
-    };
-
-    // Use package-aware loader with "dream" as the package name
-    // This enables implicit modules: stdlib/io.dream -> dream::io
-    let mut loader = ModuleLoader::with_package("dream".to_string(), stdlib_dir.clone());
-
-    // Load all Dream files in the stdlib directory
-    // Silently ignore errors - some stdlib files may have parse errors during development
-    let _ = loader.load_all_in_dir(&stdlib_dir);
-
-    loader.into_modules()
-}
-
 /// Get the stdlib output directory.
 fn stdlib_beam_dir() -> PathBuf {
     // Use target/stdlib relative to executable for compiled stdlib .beam files
@@ -1689,33 +1717,6 @@ fn stdlib_beam_dir() -> PathBuf {
     }
     // Fallback to relative path
     PathBuf::from("target/stdlib")
-}
-
-/// Load stdlib modules and extract their generic functions into a registry.
-/// This enables cross-module monomorphization of stdlib generic functions.
-fn load_stdlib_generics() -> Option<SharedGenericRegistry> {
-    let stdlib_dir = find_stdlib_dir()?;
-    let registry = Arc::new(RwLock::new(GenericFunctionRegistry::new()));
-
-    // Use package-aware loader with "dream" as the package name
-    let mut loader = ModuleLoader::with_package("dream".to_string(), stdlib_dir.clone());
-    if loader.load_all_in_dir(&stdlib_dir).is_err() {
-        return Some(registry);
-    }
-
-    // Extract generic functions from each loaded module
-    for module in loader.modules() {
-        let mut reg = registry.write().unwrap();
-        for item in &module.items {
-            if let Item::Function(func) = item {
-                if !func.type_params.is_empty() {
-                    reg.register(&module.name, func);
-                }
-            }
-        }
-    }
-
-    Some(registry)
 }
 
 /// Compile the stdlib to target/stdlib/ if needed.
