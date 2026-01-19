@@ -4054,64 +4054,21 @@ impl TypeChecker {
         }
     }
 
-    /// Transform an extern call with Result<T, E> return type into a match expression.
-    /// Converts: :mod::func(args)
-    /// Into: match :mod::func(args) { (:ok, v) => Ok(v), (:error, e) => Err(e) }
-    /// For Result<(), E>, Erlang returns just 'ok' atom instead of {:ok, _}
-    fn transform_extern_to_result(&mut self, module: &str, function: &str, args: Vec<Expr>, is_unit_ok: bool) -> Expr {
-        // Create the raw extern call (this will return {:ok, T} | {:error, E} from Erlang)
-        let extern_call = Expr::ExternCall {
+    /// Transform an extern call with Result<T, E> return type.
+    ///
+    /// Erlang's `{ok, V}` / `{error, E}` convention is directly compatible with
+    /// Dream's `Ok(V)` / `Err(E)` representation (both compile to `{'ok', V}` / `{'error', E}`),
+    /// so we can pass through the extern call directly without any transformation.
+    ///
+    /// For Result<(), E>, Erlang returns just 'ok' atom, which is also compatible
+    /// with Dream's `Ok(())` (both compile to just `'ok'`).
+    fn transform_extern_to_result(&mut self, module: &str, function: &str, args: Vec<Expr>, _is_unit_ok: bool) -> Expr {
+        // Erlang's {ok, V} / {error, E} is already compatible with Dream's Result type.
+        // No transformation needed - just return the raw extern call.
+        Expr::ExternCall {
             module: module.to_string(),
             function: function.to_string(),
             args,
-        };
-
-        // Create match arms based on whether Ok type is Unit
-        let ok_arm = if is_unit_ok {
-            // For Result<(), E>: Erlang returns just 'ok' atom
-            // :ok => Ok(())
-            MatchArm {
-                pattern: Pattern::Atom("ok".to_string()),
-                guard: None,
-                body: Expr::EnumVariant {
-                    type_name: Some("Result".to_string()),
-                    variant: "Ok".to_string(),
-                    args: EnumVariantArgs::Tuple(vec![Expr::Unit]),
-                },
-            }
-        } else {
-            // For Result<T, E>: Erlang returns {:ok, value}
-            // (:ok, __val) => Ok(__val)
-            MatchArm {
-                pattern: Pattern::Tuple(vec![
-                    Pattern::Atom("ok".to_string()),
-                    Pattern::Ident("__ffi_val".to_string()),
-                ]),
-                guard: None,
-                body: Expr::EnumVariant {
-                    type_name: Some("Result".to_string()),
-                    variant: "Ok".to_string(),
-                    args: EnumVariantArgs::Tuple(vec![Expr::Ident("__ffi_val".to_string())]),
-                },
-            }
-        };
-
-        let err_arm = MatchArm {
-            pattern: Pattern::Tuple(vec![
-                Pattern::Atom("error".to_string()),
-                Pattern::Ident("__ffi_err".to_string()),
-            ]),
-            guard: None,
-            body: Expr::EnumVariant {
-                type_name: Some("Result".to_string()),
-                variant: "Err".to_string(),
-                args: EnumVariantArgs::Tuple(vec![Expr::Ident("__ffi_err".to_string())]),
-            },
-        };
-
-        Expr::Match {
-            expr: Box::new(extern_call),
-            arms: vec![ok_arm, err_arm],
         }
     }
 

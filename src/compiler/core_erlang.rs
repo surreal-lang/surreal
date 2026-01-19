@@ -5512,7 +5512,8 @@ mod tests {
     #[test]
     fn test_extern_call_result_transformation() {
         // When extern function declares Result<T, E> return type,
-        // the call should be transformed to wrap the Erlang {:ok, T} | {:error, E} tuple
+        // the call should pass through directly since Erlang's {:ok, T} | {:error, E}
+        // is already compatible with Dream's Result<T, E> representation.
         let source = r#"
             mod test {
                 extern mod file {
@@ -5525,24 +5526,22 @@ mod tests {
             }
         "#;
 
-        // Use typecheck=true to trigger the FFI Result transformation
+        // Use typecheck=true to trigger the FFI Result handling
         let result = emit_core_erlang_with_typecheck(source, true).unwrap();
-        // Should contain a case expression that wraps the extern call
+        // Should contain the extern call directly
         assert!(result.contains("call 'file':'read_file'"), "missing file:read_file call");
-        // Should contain pattern matching on {:ok, _} and {:error, _}
-        assert!(result.contains("'ok'"), "missing 'ok' atom in output:\n{}", result);
-        assert!(result.contains("'error'"), "missing 'error' atom in output:\n{}", result);
         // Should NOT contain function calls to Ok/Err (which would be apply 'Ok'/1)
         assert!(!result.contains("apply 'Ok'"), "should not have apply 'Ok' call, got:\n{}", result);
         assert!(!result.contains("apply 'Err'"), "should not have apply 'Err' call, got:\n{}", result);
-        // Should have proper tuple construction
-        assert!(result.contains("{'ok'"), "should have {{'ok', ...}} tuple construction, got:\n{}", result);
-        assert!(result.contains("{'error'"), "should have {{'error', ...}} tuple construction, got:\n{}", result);
+        // Should NOT have redundant case wrapper that matches {ok, V} -> {ok, V}
+        // The extern call result passes through directly
+        assert!(!result.contains("case call 'file':'read_file'"),
+            "should not have redundant case wrapper around extern call, got:\n{}", result);
     }
 
     #[test]
     fn test_ffi_result_with_unwrap_or() {
-        // Test that unwrap_or works with FFI Result transformation
+        // Test that unwrap_or works with FFI Result that passes through directly
         let source = r#"
             mod test {
                 extern mod file {
@@ -5557,11 +5556,10 @@ mod tests {
 
         let result = emit_core_erlang_with_typecheck(source, true).unwrap();
 
-        // The FFI call should be transformed to return Result, then unwrap_or is called on it
+        // The FFI call should pass through directly (Erlang {ok, V} | {error, E} is compatible)
         assert!(result.contains("call 'file':'read_file'"), "missing file:read_file call in:\n{}", result);
-        // The Result should have proper tuple construction before unwrap_or is called
-        assert!(result.contains("{'ok'"), "missing {{'ok', ...}} in:\n{}", result);
-        assert!(result.contains("{'error'"), "missing {{'error', ...}} in:\n{}", result);
+        // unwrap_or should be called on the result
+        // The UFCS method call should resolve to result::unwrap_or
     }
 
     #[test]
