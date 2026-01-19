@@ -1,13 +1,13 @@
 // HTTP API Application
 // Implements OTP application behavior using the Application trait
 
-use application::Application;
+use application::{Application, StartType};
 use crate::bindings::cowboy;
 
 impl Application {
     /// OTP Application start callback
     /// Called automatically when the application starts
-    pub fn start(_type: Atom, _args: Any) -> Result<Pid, Any> {
+    pub fn start(_type: StartType, _args: Any) -> Result<Pid, Any> {
         // Configure logger with clean single-line format
         logger::setup();
 
