@@ -1859,7 +1859,7 @@ impl TypeChecker {
     /// Type check a statement.
     fn check_stmt(&mut self, stmt: &Stmt) -> TypeResult<()> {
         match stmt {
-            Stmt::Let { pattern, ty, value, else_block } => {
+            Stmt::Let { pattern, ty, value, else_block, .. } => {
                 let value_ty = self.infer_expr(value)?;
 
                 // If there's a type annotation, check it matches
@@ -3717,11 +3717,12 @@ impl TypeChecker {
 
     fn annotate_stmt(&mut self, stmt: &Stmt) -> Stmt {
         match stmt {
-            Stmt::Let { pattern, ty, value, else_block } => Stmt::Let {
+            Stmt::Let { pattern, ty, value, else_block, span } => Stmt::Let {
                 pattern: pattern.clone(),
                 ty: ty.clone(),
                 value: self.annotate_expr(value),
                 else_block: else_block.as_ref().map(|b| self.annotate_block(b)),
+                span: span.clone(),
             },
             Stmt::Expr { expr: e, span } => Stmt::Expr { expr: self.annotate_expr(e), span: span.clone() },
         }
@@ -4543,7 +4544,7 @@ impl MethodResolver {
 
     fn resolve_stmt(&mut self, stmt: &mut Stmt) {
         match stmt {
-            Stmt::Let { pattern, ty, value, else_block } => {
+            Stmt::Let { pattern, ty, value, else_block, .. } => {
                 self.resolve_expr(value);
 
                 // Resolve else block if present

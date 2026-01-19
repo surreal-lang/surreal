@@ -3952,7 +3952,7 @@ impl CoreErlangEmitter {
     /// Emit a quoted statement.
     fn emit_quoted_stmt(&mut self, stmt: &Stmt) -> CoreErlangResult<()> {
         match stmt {
-            Stmt::Let { pattern, ty: _, value, else_block } => {
+            Stmt::Let { pattern, ty: _, value, else_block, .. } => {
                 self.emit("{'let', ");
                 self.emit_quoted_pattern(pattern)?;
                 self.emit(", ");

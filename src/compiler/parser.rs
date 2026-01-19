@@ -1370,6 +1370,7 @@ impl<'source> Parser<'source> {
     /// Parse a let statement.
     /// Supports both `let pattern = value;` and `let pattern = value else { ... };`
     fn parse_let_stmt(&mut self) -> ParseResult<Stmt> {
+        let start = self.current_span().start;
         self.expect(&Token::Let)?;
         let pattern = self.parse_pattern()?;
 
@@ -1392,8 +1393,9 @@ impl<'source> Parser<'source> {
         };
 
         self.expect(&Token::Semi)?;
+        let end = self.previous_span().end;
 
-        Ok(Stmt::Let { pattern, ty, value, else_block })
+        Ok(Stmt::Let { pattern, ty, value, else_block, span: start..end })
     }
 
     /// Parse an expression.
@@ -6327,5 +6329,29 @@ mod repl_edit {
         let expr = parser.parse_expr().unwrap();
         assert_eq!(expr.span, 0..4);
         assert!(matches!(expr.expr, Expr::Bool(true)));
+    }
+
+    #[test]
+    fn test_let_stmt_span() {
+        let source = "let x = 42;";
+        let mut parser = Parser::new(source);
+        let stmt = parser.parse_let_stmt().unwrap();
+        if let Stmt::Let { span, .. } = stmt {
+            assert_eq!(span, 0..11);
+        } else {
+            panic!("expected Let statement");
+        }
+    }
+
+    #[test]
+    fn test_let_stmt_with_type_span() {
+        let source = "let x: int = 42;";
+        let mut parser = Parser::new(source);
+        let stmt = parser.parse_let_stmt().unwrap();
+        if let Stmt::Let { span, .. } = stmt {
+            assert_eq!(span, 0..16);
+        } else {
+            panic!("expected Let statement");
+        }
     }
 }

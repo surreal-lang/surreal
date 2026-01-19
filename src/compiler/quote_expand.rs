@@ -419,6 +419,7 @@ fn quote_block_with_splice(block: &Block, expr_tuple: Expr) -> Expr {
         ty: None,
         value: unspanned(stmts_expr),
         else_block: None,
+        span: 0..0,
     });
 
     // Generate: (_stmts, final_expr)
@@ -502,6 +503,7 @@ fn quote_list_with_splice(elems: &[SpannedExpr]) -> Expr {
                 ty: None,
                 value: unspanned(part),
                 else_block: None,
+                span: 0..0,
             });
             list_vars.push(Expr::Ident(var_name));
         }
@@ -745,11 +747,12 @@ fn substitute_var_in_expr(spanned: &SpannedExpr, var_name: &str, replacement: &s
         }
         Expr::Block(block) => {
             let stmts = block.stmts.iter().map(|s| match s {
-                Stmt::Let { pattern, ty, value, else_block } => Stmt::Let {
+                Stmt::Let { pattern, ty, value, else_block, span } => Stmt::Let {
                     pattern: pattern.clone(),
                     ty: ty.clone(),
                     value: unspanned(substitute_var_in_expr(value, var_name, replacement)),
                     else_block: else_block.clone(),
+                    span: span.clone(),
                 },
                 Stmt::Expr { expr: e, span } => Stmt::Expr { expr: unspanned(substitute_var_in_expr(e, var_name, replacement)), span: span.clone() },
             }).collect();
@@ -771,7 +774,7 @@ fn substitute_var_in_expr(spanned: &SpannedExpr, var_name: &str, replacement: &s
 /// Convert a quoted statement to tuple construction code.
 fn quote_stmt_to_tuple(stmt: &Stmt) -> Expr {
     match stmt {
-        Stmt::Let { pattern, ty, value, else_block } => {
+        Stmt::Let { pattern, ty, value, else_block, .. } => {
             let pattern_tuple = quote_pattern_to_tuple(pattern);
             let type_tuple = ty
                 .as_ref()

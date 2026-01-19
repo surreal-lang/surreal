@@ -598,6 +598,8 @@ pub enum Stmt {
         value: SpannedExpr,
         /// Optional else block for `let else` syntax (must diverge)
         else_block: Option<Block>,
+        /// Source span for LSP features
+        span: Span,
     },
     /// Expression statement (with semicolon).
     Expr {

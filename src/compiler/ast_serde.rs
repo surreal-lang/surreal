@@ -322,7 +322,7 @@ pub fn block_to_erlang_term(block: &Block) -> String {
 /// Convert a statement to Erlang term format.
 pub fn stmt_to_erlang_term(stmt: &Stmt) -> String {
     match stmt {
-        Stmt::Let { pattern, ty, value, else_block } => {
+        Stmt::Let { pattern, ty, value, else_block, .. } => {
             let ty_str = ty.as_ref()
                 .map(|t| type_to_erlang_term(t))
                 .unwrap_or_else(|| "none".to_string());
@@ -1559,7 +1559,7 @@ fn term_to_stmt(term: &Term) -> TermParseResult<Stmt> {
             } else {
                 None
             };
-            Ok(Stmt::Let { pattern, ty, value, else_block })
+            Ok(Stmt::Let { pattern, ty, value, else_block, span: 0..0 })
         }
         "expr" => {
             let expr = SpannedExpr::unspanned(term_to_expr(&tuple[1])?);
