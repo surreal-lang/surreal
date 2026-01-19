@@ -4,8 +4,10 @@ pub mod completion;
 pub mod definition;
 pub mod diagnostics;
 pub mod hover;
+pub mod references;
 
 pub use completion::handle_completion;
 pub use definition::handle_goto_definition;
 pub use diagnostics::publish_diagnostics;
 pub use hover::handle_hover;
+pub use references::handle_references;

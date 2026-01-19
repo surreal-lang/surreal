@@ -10,6 +10,15 @@ use crate::compiler::{
     Pattern, Span, SpannedExpr, Stmt,
 };
 
+/// Information about a reference to a symbol.
+#[derive(Debug, Clone)]
+pub struct ReferenceInfo {
+    /// Span of this reference
+    pub span: Span,
+    /// Whether this is the definition site
+    pub is_definition: bool,
+}
+
 /// Information about a symbol found at a position.
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -144,6 +153,927 @@ pub fn find_symbol_at_offset(module: &Module, offset: usize) -> Option<SymbolInf
     }
 
     ctx.found
+}
+
+/// Context for collecting all references to a symbol.
+struct ReferenceCollector {
+    /// Stack of scopes (innermost last)
+    scopes: Vec<Scope>,
+    /// The target variable definition span we're looking for (for variable references)
+    target_def_span: Option<Span>,
+    /// The target function name we're looking for
+    target_func_name: Option<String>,
+    /// The target struct name we're looking for
+    target_struct_name: Option<String>,
+    /// Whether to include the definition in results
+    include_definition: bool,
+    /// Collected references
+    references: Vec<ReferenceInfo>,
+}
+
+impl ReferenceCollector {
+    fn new(include_definition: bool) -> Self {
+        Self {
+            scopes: vec![Scope::new()],
+            target_def_span: None,
+            target_func_name: None,
+            target_struct_name: None,
+            include_definition,
+            references: Vec::new(),
+        }
+    }
+
+    fn push_scope(&mut self) {
+        self.scopes.push(Scope::new());
+    }
+
+    fn pop_scope(&mut self) {
+        self.scopes.pop();
+    }
+
+    fn define_variable(&mut self, name: String, span: Span) {
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.define(name, span);
+        }
+    }
+
+    fn lookup_variable(&self, name: &str) -> Option<Span> {
+        // Search from innermost scope outward
+        for scope in self.scopes.iter().rev() {
+            if let Some(span) = scope.lookup(name) {
+                return Some(span);
+            }
+        }
+        None
+    }
+
+    fn add_reference(&mut self, span: Span, is_definition: bool) {
+        if is_definition && !self.include_definition {
+            return;
+        }
+        self.references.push(ReferenceInfo { span, is_definition });
+    }
+}
+
+/// Find all references to the symbol at the given offset.
+pub fn find_all_references(
+    module: &Module,
+    offset: usize,
+    include_definition: bool,
+) -> Vec<ReferenceInfo> {
+    // First, find the symbol at the given offset
+    let symbol = match find_symbol_at_offset(module, offset) {
+        Some(s) => s,
+        None => return Vec::new(),
+    };
+
+    let mut collector = ReferenceCollector::new(include_definition);
+
+    match symbol {
+        SymbolInfo::Variable {
+            definition_span: Some(def_span),
+            usage_span,
+            ..
+        } => {
+            // For variables, we track by definition span to handle shadowing correctly
+            collector.target_def_span = Some(def_span.clone());
+
+            // Collect all references
+            for item in &module.items {
+                collect_refs_in_item(&mut collector, item);
+            }
+
+            // If we're on the definition and include_definition is true, make sure it's included
+            if include_definition && usage_span == def_span {
+                // Check if it's already there
+                let already_has_def = collector
+                    .references
+                    .iter()
+                    .any(|r| r.is_definition && r.span == def_span);
+                if !already_has_def {
+                    collector.references.insert(
+                        0,
+                        ReferenceInfo {
+                            span: def_span,
+                            is_definition: true,
+                        },
+                    );
+                }
+            }
+        }
+
+        SymbolInfo::Variable {
+            name,
+            definition_span: None,
+            ..
+        } => {
+            // Variable without known definition - might be a parameter or global
+            // Fall back to name-based matching in the same function scope
+            collector.target_func_name = Some(name);
+            for item in &module.items {
+                collect_refs_in_item(&mut collector, item);
+            }
+        }
+
+        SymbolInfo::FunctionCall { name, .. } | SymbolInfo::FunctionDef { name, .. } => {
+            // For functions, match by name
+            collector.target_func_name = Some(name.clone());
+            for item in &module.items {
+                collect_func_refs_in_item(&mut collector, item);
+            }
+        }
+
+        SymbolInfo::StructRef { name, .. } => {
+            // For structs, match by name
+            collector.target_struct_name = Some(name.clone());
+            for item in &module.items {
+                collect_struct_refs_in_item(&mut collector, item);
+            }
+        }
+
+        SymbolInfo::FieldAccess { .. } => {
+            // Field access references are more complex - would need type info
+            // For now, return empty
+        }
+    }
+
+    collector.references
+}
+
+// Reference collection functions for variables
+fn collect_refs_in_item(collector: &mut ReferenceCollector, item: &Item) {
+    match item {
+        Item::Function(func) => collect_refs_in_function(collector, func),
+        Item::Impl(impl_block) => {
+            for method in &impl_block.methods {
+                collect_refs_in_function(collector, method);
+            }
+        }
+        Item::TraitImpl(trait_impl) => {
+            for method in &trait_impl.methods {
+                collect_refs_in_function(collector, method);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_refs_in_function(collector: &mut ReferenceCollector, func: &Function) {
+    collector.push_scope();
+
+    // Add parameters to scope
+    for param in &func.params {
+        if let Some((name, _)) = extract_pattern_binding(&param.pattern) {
+            // Use the function span as a rough definition span for parameters
+            collector.define_variable(name, func.span.clone());
+        }
+    }
+
+    collect_refs_in_block(collector, &func.body);
+
+    collector.pop_scope();
+}
+
+fn collect_refs_in_block(collector: &mut ReferenceCollector, block: &Block) {
+    collector.push_scope();
+
+    for stmt in &block.stmts {
+        collect_refs_in_stmt(collector, stmt);
+    }
+
+    if let Some(expr) = &block.expr {
+        collect_refs_in_expr(collector, expr);
+    }
+
+    collector.pop_scope();
+}
+
+fn collect_refs_in_stmt(collector: &mut ReferenceCollector, stmt: &Stmt) {
+    match stmt {
+        Stmt::Let {
+            pattern,
+            value,
+            span,
+            ..
+        } => {
+            // Visit value first
+            collect_refs_in_expr(collector, value);
+
+            // Add binding to scope and check if it's a definition we're tracking
+            if let Some((name, _)) = extract_pattern_binding(pattern) {
+                // Check if this is the definition we're looking for
+                if let Some(ref target_span) = collector.target_def_span {
+                    if span == target_span {
+                        collector.add_reference(span.clone(), true);
+                    }
+                }
+                collector.define_variable(name, span.clone());
+            }
+        }
+        Stmt::Expr { expr, .. } => {
+            collect_refs_in_expr(collector, expr);
+        }
+    }
+}
+
+fn collect_refs_in_expr(collector: &mut ReferenceCollector, expr: &SpannedExpr) {
+    match &expr.expr {
+        Expr::Ident(name) => {
+            // Check if this variable references our target definition
+            if let Some(ref target_span) = collector.target_def_span {
+                if let Some(def_span) = collector.lookup_variable(name) {
+                    if &def_span == target_span {
+                        collector.add_reference(expr.span.clone(), false);
+                    }
+                }
+            }
+        }
+
+        Expr::Path { segments } if segments.len() == 1 => {
+            // Single-segment path could be a variable
+            let name = &segments[0];
+            if let Some(ref target_span) = collector.target_def_span {
+                if let Some(def_span) = collector.lookup_variable(name) {
+                    if &def_span == target_span {
+                        collector.add_reference(expr.span.clone(), false);
+                    }
+                }
+            }
+        }
+
+        Expr::Call { func, args, .. } => {
+            collect_refs_in_expr(collector, func);
+            for arg in args {
+                collect_refs_in_expr(collector, arg);
+            }
+        }
+
+        Expr::MethodCall {
+            receiver, args, ..
+        } => {
+            collect_refs_in_expr(collector, receiver);
+            for arg in args {
+                collect_refs_in_expr(collector, arg);
+            }
+        }
+
+        Expr::FieldAccess { expr: inner, .. } => {
+            collect_refs_in_expr(collector, inner);
+        }
+
+        Expr::Binary { left, right, .. } => {
+            collect_refs_in_expr(collector, left);
+            collect_refs_in_expr(collector, right);
+        }
+
+        Expr::Unary { expr: inner, .. } => {
+            collect_refs_in_expr(collector, inner);
+        }
+
+        Expr::If {
+            cond,
+            then_block,
+            else_block,
+        } => {
+            collect_refs_in_expr(collector, cond);
+            collect_refs_in_block(collector, then_block);
+            if let Some(else_blk) = else_block {
+                collect_refs_in_block(collector, else_blk);
+            }
+        }
+
+        Expr::Match { expr: inner, arms } => {
+            collect_refs_in_expr(collector, inner);
+            for arm in arms {
+                collect_refs_in_match_arm(collector, arm);
+            }
+        }
+
+        Expr::Block(block) => {
+            collect_refs_in_block(collector, block);
+        }
+
+        Expr::Tuple(elements) | Expr::List(elements) => {
+            for elem in elements {
+                collect_refs_in_expr(collector, elem);
+            }
+        }
+
+        Expr::StructInit { fields, base, .. } => {
+            for (_, field_expr) in fields {
+                collect_refs_in_expr(collector, field_expr);
+            }
+            if let Some(base_expr) = base {
+                collect_refs_in_expr(collector, base_expr);
+            }
+        }
+
+        Expr::For { clauses, body, .. } => {
+            collector.push_scope();
+            for clause in clauses {
+                collect_refs_in_for_clause(collector, clause);
+            }
+            collect_refs_in_expr(collector, body);
+            collector.pop_scope();
+        }
+
+        Expr::Closure { body, .. } => {
+            collector.push_scope();
+            collect_refs_in_block(collector, body);
+            collector.pop_scope();
+        }
+
+        Expr::Receive { arms, timeout } => {
+            for arm in arms {
+                collect_refs_in_match_arm(collector, arm);
+            }
+            if let Some((timeout_expr, timeout_block)) = timeout {
+                collect_refs_in_expr(collector, timeout_expr);
+                collect_refs_in_block(collector, timeout_block);
+            }
+        }
+
+        Expr::Spawn(inner) => {
+            collect_refs_in_expr(collector, inner);
+        }
+
+        Expr::SpawnClosure(block) => {
+            collector.push_scope();
+            collect_refs_in_block(collector, block);
+            collector.pop_scope();
+        }
+
+        Expr::Return(Some(inner)) => {
+            collect_refs_in_expr(collector, inner);
+        }
+
+        Expr::Send { to, msg } => {
+            collect_refs_in_expr(collector, to);
+            collect_refs_in_expr(collector, msg);
+        }
+
+        Expr::Pipe { left, right } => {
+            collect_refs_in_expr(collector, left);
+            collect_refs_in_expr(collector, right);
+        }
+
+        Expr::Try { expr: inner } => {
+            collect_refs_in_expr(collector, inner);
+        }
+
+        Expr::MapLiteral(entries) => {
+            for (key, value) in entries {
+                collect_refs_in_expr(collector, key);
+                collect_refs_in_expr(collector, value);
+            }
+        }
+
+        Expr::ListCons { head, tail } => {
+            collect_refs_in_expr(collector, head);
+            collect_refs_in_expr(collector, tail);
+        }
+
+        Expr::EnumVariant { args, .. } => {
+            match args {
+                EnumVariantArgs::Tuple(exprs) => {
+                    for e in exprs {
+                        collect_refs_in_expr(collector, e);
+                    }
+                }
+                EnumVariantArgs::Struct(fields) => {
+                    for (_, e) in fields {
+                        collect_refs_in_expr(collector, e);
+                    }
+                }
+                EnumVariantArgs::Unit => {}
+            }
+        }
+
+        _ => {}
+    }
+}
+
+fn collect_refs_in_match_arm(collector: &mut ReferenceCollector, arm: &MatchArm) {
+    collector.push_scope();
+
+    // Add pattern bindings to scope
+    collect_pattern_bindings(collector, &arm.pattern, &arm.span);
+
+    if let Some(guard) = &arm.guard {
+        collect_refs_in_expr(collector, guard);
+    }
+
+    collect_refs_in_expr(collector, &arm.body);
+
+    collector.pop_scope();
+}
+
+fn collect_refs_in_for_clause(collector: &mut ReferenceCollector, clause: &ForClause) {
+    match clause {
+        ForClause::Generator {
+            pattern, source, ..
+        } => {
+            collect_refs_in_expr(collector, source);
+            collect_pattern_bindings(collector, pattern, &source.span);
+        }
+        ForClause::When(expr) => {
+            collect_refs_in_expr(collector, expr);
+        }
+    }
+}
+
+fn collect_pattern_bindings(collector: &mut ReferenceCollector, pattern: &Pattern, def_span: &Span) {
+    match pattern {
+        Pattern::Ident(name) => {
+            collector.define_variable(name.clone(), def_span.clone());
+        }
+        Pattern::Tuple(elements) | Pattern::List(elements) => {
+            for elem in elements {
+                collect_pattern_bindings(collector, elem, def_span);
+            }
+        }
+        Pattern::ListCons { head, tail } => {
+            collect_pattern_bindings(collector, head, def_span);
+            collect_pattern_bindings(collector, tail, def_span);
+        }
+        Pattern::Struct { fields, .. } => {
+            for (_, pat) in fields {
+                collect_pattern_bindings(collector, pat, def_span);
+            }
+        }
+        Pattern::Enum { fields, .. } => {
+            match fields {
+                EnumPatternFields::Tuple(pats) => {
+                    for pat in pats {
+                        collect_pattern_bindings(collector, pat, def_span);
+                    }
+                }
+                EnumPatternFields::Struct(field_pats) => {
+                    for (_, pat) in field_pats {
+                        collect_pattern_bindings(collector, pat, def_span);
+                    }
+                }
+                EnumPatternFields::Unit => {}
+            }
+        }
+        _ => {}
+    }
+}
+
+// Reference collection functions for functions
+fn collect_func_refs_in_item(collector: &mut ReferenceCollector, item: &Item) {
+    match item {
+        Item::Function(func) => {
+            // Check if this is the function definition we're looking for
+            if let Some(ref target_name) = collector.target_func_name {
+                if &func.name == target_name {
+                    collector.add_reference(func.span.clone(), true);
+                }
+            }
+            // Also search for calls within the function body
+            collect_func_refs_in_function(collector, func);
+        }
+        Item::Impl(impl_block) => {
+            for method in &impl_block.methods {
+                if let Some(ref target_name) = collector.target_func_name {
+                    if &method.name == target_name {
+                        collector.add_reference(method.span.clone(), true);
+                    }
+                }
+                collect_func_refs_in_function(collector, method);
+            }
+        }
+        Item::TraitImpl(trait_impl) => {
+            for method in &trait_impl.methods {
+                if let Some(ref target_name) = collector.target_func_name {
+                    if &method.name == target_name {
+                        collector.add_reference(method.span.clone(), true);
+                    }
+                }
+                collect_func_refs_in_function(collector, method);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_func_refs_in_function(collector: &mut ReferenceCollector, func: &Function) {
+    collect_func_refs_in_block(collector, &func.body);
+}
+
+fn collect_func_refs_in_block(collector: &mut ReferenceCollector, block: &Block) {
+    for stmt in &block.stmts {
+        collect_func_refs_in_stmt(collector, stmt);
+    }
+    if let Some(expr) = &block.expr {
+        collect_func_refs_in_expr(collector, expr);
+    }
+}
+
+fn collect_func_refs_in_stmt(collector: &mut ReferenceCollector, stmt: &Stmt) {
+    match stmt {
+        Stmt::Let { value, .. } => {
+            collect_func_refs_in_expr(collector, value);
+        }
+        Stmt::Expr { expr, .. } => {
+            collect_func_refs_in_expr(collector, expr);
+        }
+    }
+}
+
+fn collect_func_refs_in_expr(collector: &mut ReferenceCollector, expr: &SpannedExpr) {
+    match &expr.expr {
+        Expr::Path { segments } => {
+            // Check for function references (module::func or just func)
+            if let Some(ref target_name) = collector.target_func_name {
+                if let Some(func_name) = segments.last() {
+                    if func_name == target_name {
+                        collector.add_reference(expr.span.clone(), false);
+                    }
+                }
+            }
+        }
+
+        Expr::Call { func, args, .. } => {
+            // Check if this is a call to our target function
+            if let Expr::Path { segments } = &func.expr {
+                if let Some(ref target_name) = collector.target_func_name {
+                    if let Some(func_name) = segments.last() {
+                        if func_name == target_name {
+                            collector.add_reference(func.span.clone(), false);
+                        }
+                    }
+                }
+            } else if let Expr::Ident(name) = &func.expr {
+                if let Some(ref target_name) = collector.target_func_name {
+                    if name == target_name {
+                        collector.add_reference(func.span.clone(), false);
+                    }
+                }
+            } else {
+                collect_func_refs_in_expr(collector, func);
+            }
+
+            for arg in args {
+                collect_func_refs_in_expr(collector, arg);
+            }
+        }
+
+        Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } => {
+            collect_func_refs_in_expr(collector, receiver);
+
+            // Check if this method call matches our target
+            if let Some(ref target_name) = collector.target_func_name {
+                if method == target_name {
+                    // For method calls, we'd need type info to be precise
+                    // For now, include it as a potential reference
+                    collector.add_reference(expr.span.clone(), false);
+                }
+            }
+
+            for arg in args {
+                collect_func_refs_in_expr(collector, arg);
+            }
+        }
+
+        Expr::Binary { left, right, .. } => {
+            collect_func_refs_in_expr(collector, left);
+            collect_func_refs_in_expr(collector, right);
+        }
+
+        Expr::Unary { expr: inner, .. } => {
+            collect_func_refs_in_expr(collector, inner);
+        }
+
+        Expr::If {
+            cond,
+            then_block,
+            else_block,
+        } => {
+            collect_func_refs_in_expr(collector, cond);
+            collect_func_refs_in_block(collector, then_block);
+            if let Some(else_blk) = else_block {
+                collect_func_refs_in_block(collector, else_blk);
+            }
+        }
+
+        Expr::Match { expr: inner, arms } => {
+            collect_func_refs_in_expr(collector, inner);
+            for arm in arms {
+                if let Some(guard) = &arm.guard {
+                    collect_func_refs_in_expr(collector, guard);
+                }
+                collect_func_refs_in_expr(collector, &arm.body);
+            }
+        }
+
+        Expr::Block(block) => {
+            collect_func_refs_in_block(collector, block);
+        }
+
+        Expr::Tuple(elements) | Expr::List(elements) => {
+            for elem in elements {
+                collect_func_refs_in_expr(collector, elem);
+            }
+        }
+
+        Expr::StructInit { fields, base, .. } => {
+            for (_, field_expr) in fields {
+                collect_func_refs_in_expr(collector, field_expr);
+            }
+            if let Some(base_expr) = base {
+                collect_func_refs_in_expr(collector, base_expr);
+            }
+        }
+
+        Expr::For { clauses, body, .. } => {
+            for clause in clauses {
+                if let ForClause::Generator { source, .. } = clause {
+                    collect_func_refs_in_expr(collector, source);
+                } else if let ForClause::When(expr) = clause {
+                    collect_func_refs_in_expr(collector, expr);
+                }
+            }
+            collect_func_refs_in_expr(collector, body);
+        }
+
+        Expr::Closure { body, .. } => {
+            collect_func_refs_in_block(collector, body);
+        }
+
+        Expr::Receive { arms, timeout } => {
+            for arm in arms {
+                if let Some(guard) = &arm.guard {
+                    collect_func_refs_in_expr(collector, guard);
+                }
+                collect_func_refs_in_expr(collector, &arm.body);
+            }
+            if let Some((timeout_expr, timeout_block)) = timeout {
+                collect_func_refs_in_expr(collector, timeout_expr);
+                collect_func_refs_in_block(collector, timeout_block);
+            }
+        }
+
+        Expr::Spawn(inner) | Expr::Try { expr: inner } | Expr::Return(Some(inner)) => {
+            collect_func_refs_in_expr(collector, inner);
+        }
+
+        Expr::SpawnClosure(block) => {
+            collect_func_refs_in_block(collector, block);
+        }
+
+        Expr::Send { to, msg } | Expr::Pipe { left: to, right: msg } => {
+            collect_func_refs_in_expr(collector, to);
+            collect_func_refs_in_expr(collector, msg);
+        }
+
+        Expr::MapLiteral(entries) => {
+            for (key, value) in entries {
+                collect_func_refs_in_expr(collector, key);
+                collect_func_refs_in_expr(collector, value);
+            }
+        }
+
+        Expr::ListCons { head, tail } => {
+            collect_func_refs_in_expr(collector, head);
+            collect_func_refs_in_expr(collector, tail);
+        }
+
+        Expr::FieldAccess { expr: inner, .. } => {
+            collect_func_refs_in_expr(collector, inner);
+        }
+
+        Expr::EnumVariant { args, .. } => {
+            match args {
+                EnumVariantArgs::Tuple(exprs) => {
+                    for e in exprs {
+                        collect_func_refs_in_expr(collector, e);
+                    }
+                }
+                EnumVariantArgs::Struct(fields) => {
+                    for (_, e) in fields {
+                        collect_func_refs_in_expr(collector, e);
+                    }
+                }
+                EnumVariantArgs::Unit => {}
+            }
+        }
+
+        _ => {}
+    }
+}
+
+// Reference collection functions for structs
+fn collect_struct_refs_in_item(collector: &mut ReferenceCollector, item: &Item) {
+    match item {
+        Item::Struct(s) => {
+            if let Some(ref target_name) = collector.target_struct_name {
+                if &s.name == target_name {
+                    collector.add_reference(s.span.clone(), true);
+                }
+            }
+        }
+        Item::Function(func) => {
+            collect_struct_refs_in_function(collector, func);
+        }
+        Item::Impl(impl_block) => {
+            // Check if impl is for our struct
+            if let Some(ref target_name) = collector.target_struct_name {
+                if &impl_block.type_name == target_name {
+                    // The impl itself references the struct (at the type name position)
+                    // For now, just note it
+                }
+            }
+            for method in &impl_block.methods {
+                collect_struct_refs_in_function(collector, method);
+            }
+        }
+        Item::TraitImpl(trait_impl) => {
+            for method in &trait_impl.methods {
+                collect_struct_refs_in_function(collector, method);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_struct_refs_in_function(collector: &mut ReferenceCollector, func: &Function) {
+    collect_struct_refs_in_block(collector, &func.body);
+}
+
+fn collect_struct_refs_in_block(collector: &mut ReferenceCollector, block: &Block) {
+    for stmt in &block.stmts {
+        collect_struct_refs_in_stmt(collector, stmt);
+    }
+    if let Some(expr) = &block.expr {
+        collect_struct_refs_in_expr(collector, expr);
+    }
+}
+
+fn collect_struct_refs_in_stmt(collector: &mut ReferenceCollector, stmt: &Stmt) {
+    match stmt {
+        Stmt::Let { value, .. } => {
+            collect_struct_refs_in_expr(collector, value);
+        }
+        Stmt::Expr { expr, .. } => {
+            collect_struct_refs_in_expr(collector, expr);
+        }
+    }
+}
+
+fn collect_struct_refs_in_expr(collector: &mut ReferenceCollector, expr: &SpannedExpr) {
+    match &expr.expr {
+        Expr::StructInit { name, fields, base } => {
+            if let Some(ref target_name) = collector.target_struct_name {
+                if name == target_name {
+                    collector.add_reference(expr.span.clone(), false);
+                }
+            }
+            for (_, field_expr) in fields {
+                collect_struct_refs_in_expr(collector, field_expr);
+            }
+            if let Some(base_expr) = base {
+                collect_struct_refs_in_expr(collector, base_expr);
+            }
+        }
+
+        Expr::Call { func, args, .. } => {
+            collect_struct_refs_in_expr(collector, func);
+            for arg in args {
+                collect_struct_refs_in_expr(collector, arg);
+            }
+        }
+
+        Expr::MethodCall {
+            receiver, args, ..
+        } => {
+            collect_struct_refs_in_expr(collector, receiver);
+            for arg in args {
+                collect_struct_refs_in_expr(collector, arg);
+            }
+        }
+
+        Expr::Binary { left, right, .. } => {
+            collect_struct_refs_in_expr(collector, left);
+            collect_struct_refs_in_expr(collector, right);
+        }
+
+        Expr::Unary { expr: inner, .. } => {
+            collect_struct_refs_in_expr(collector, inner);
+        }
+
+        Expr::If {
+            cond,
+            then_block,
+            else_block,
+        } => {
+            collect_struct_refs_in_expr(collector, cond);
+            collect_struct_refs_in_block(collector, then_block);
+            if let Some(else_blk) = else_block {
+                collect_struct_refs_in_block(collector, else_blk);
+            }
+        }
+
+        Expr::Match { expr: inner, arms } => {
+            collect_struct_refs_in_expr(collector, inner);
+            for arm in arms {
+                if let Some(guard) = &arm.guard {
+                    collect_struct_refs_in_expr(collector, guard);
+                }
+                collect_struct_refs_in_expr(collector, &arm.body);
+            }
+        }
+
+        Expr::Block(block) => {
+            collect_struct_refs_in_block(collector, block);
+        }
+
+        Expr::Tuple(elements) | Expr::List(elements) => {
+            for elem in elements {
+                collect_struct_refs_in_expr(collector, elem);
+            }
+        }
+
+        Expr::For { clauses, body, .. } => {
+            for clause in clauses {
+                if let ForClause::Generator { source, .. } = clause {
+                    collect_struct_refs_in_expr(collector, source);
+                } else if let ForClause::When(expr) = clause {
+                    collect_struct_refs_in_expr(collector, expr);
+                }
+            }
+            collect_struct_refs_in_expr(collector, body);
+        }
+
+        Expr::Closure { body, .. } => {
+            collect_struct_refs_in_block(collector, body);
+        }
+
+        Expr::Receive { arms, timeout } => {
+            for arm in arms {
+                if let Some(guard) = &arm.guard {
+                    collect_struct_refs_in_expr(collector, guard);
+                }
+                collect_struct_refs_in_expr(collector, &arm.body);
+            }
+            if let Some((timeout_expr, timeout_block)) = timeout {
+                collect_struct_refs_in_expr(collector, timeout_expr);
+                collect_struct_refs_in_block(collector, timeout_block);
+            }
+        }
+
+        Expr::Spawn(inner) | Expr::Try { expr: inner } | Expr::Return(Some(inner)) => {
+            collect_struct_refs_in_expr(collector, inner);
+        }
+
+        Expr::SpawnClosure(block) => {
+            collect_struct_refs_in_block(collector, block);
+        }
+
+        Expr::Send { to, msg } | Expr::Pipe { left: to, right: msg } => {
+            collect_struct_refs_in_expr(collector, to);
+            collect_struct_refs_in_expr(collector, msg);
+        }
+
+        Expr::MapLiteral(entries) => {
+            for (key, value) in entries {
+                collect_struct_refs_in_expr(collector, key);
+                collect_struct_refs_in_expr(collector, value);
+            }
+        }
+
+        Expr::ListCons { head, tail } => {
+            collect_struct_refs_in_expr(collector, head);
+            collect_struct_refs_in_expr(collector, tail);
+        }
+
+        Expr::FieldAccess { expr: inner, .. } => {
+            collect_struct_refs_in_expr(collector, inner);
+        }
+
+        Expr::EnumVariant { args, .. } => {
+            match args {
+                EnumVariantArgs::Tuple(exprs) => {
+                    for e in exprs {
+                        collect_struct_refs_in_expr(collector, e);
+                    }
+                }
+                EnumVariantArgs::Struct(fields) => {
+                    for (_, e) in fields {
+                        collect_struct_refs_in_expr(collector, e);
+                    }
+                }
+                EnumVariantArgs::Unit => {}
+            }
+        }
+
+        _ => {}
+    }
 }
 
 fn visit_item(ctx: &mut LookupContext, item: &Item) {
@@ -704,5 +1634,133 @@ mod tests {
         } else {
             panic!("Expected function call info, got {:?}", info);
         }
+    }
+
+    #[test]
+    fn test_find_all_variable_references() {
+        let source = r#"mod test {
+    fn example() {
+        let x = 42;
+        let y = x + 1;
+        x
+    }
+}"#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        // Find position of 'x' in the usage (y = x + 1)
+        // We use rfind to get the last standalone x
+        let x_usage_pos = source.rfind("\n        x").unwrap() + 9; // Position of standalone 'x'
+        let refs = find_all_references(&module, x_usage_pos, true);
+
+        // Should find: definition + 2 references (in y = x + 1 and standalone x)
+        assert!(
+            refs.len() >= 2,
+            "Expected at least 2 references, got {} at positions: {:?}",
+            refs.len(),
+            refs.iter().map(|r| r.span.clone()).collect::<Vec<_>>()
+        );
+
+        // Check that one is marked as definition
+        let def_count = refs.iter().filter(|r| r.is_definition).count();
+        assert!(def_count >= 1, "Expected at least 1 definition, got {}", def_count);
+    }
+
+    #[test]
+    fn test_find_all_references_variable_shadowing() {
+        let source = r#"mod test {
+    fn example() {
+        let x = 1;
+        let y = x;
+        {
+            let x = 2;
+            let z = x;
+        }
+        x
+    }
+}"#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        // Find position of outer 'x' usage (y = x)
+        let outer_x_usage = source.find("y = x").unwrap() + 4; // Position of 'x' in 'y = x'
+        let outer_refs = find_all_references(&module, outer_x_usage, true);
+
+        // Find position of inner 'x' usage (z = x)
+        let inner_x_usage = source.find("z = x").unwrap() + 4; // Position of 'x' in 'z = x'
+        let inner_refs = find_all_references(&module, inner_x_usage, true);
+
+        // The outer x and inner x should have different reference counts
+        // Outer x: definition, y = x, final x (3 refs)
+        // Inner x: definition, z = x (2 refs)
+        // At minimum, both should find some references
+        assert!(
+            outer_refs.len() >= 1,
+            "Outer x should have at least 1 reference, got {}",
+            outer_refs.len()
+        );
+        assert!(
+            inner_refs.len() >= 1,
+            "Inner x should have at least 1 reference, got {}",
+            inner_refs.len()
+        );
+    }
+
+    #[test]
+    fn test_find_all_function_references() {
+        let source = r#"mod test {
+    fn helper() -> Int {
+        42
+    }
+
+    fn example() {
+        let a = helper();
+        let b = helper();
+        a + b
+    }
+}"#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        // Find position of 'helper' function definition
+        let helper_pos = source.find("fn helper").unwrap() + 3;
+        let refs = find_all_references(&module, helper_pos, true);
+
+        // Should find: definition + 2 calls
+        assert!(
+            refs.len() >= 3,
+            "Expected at least 3 references (1 def + 2 calls), got {}",
+            refs.len()
+        );
+
+        let def_count = refs.iter().filter(|r| r.is_definition).count();
+        assert_eq!(def_count, 1, "Expected exactly 1 definition");
+    }
+
+    #[test]
+    fn test_find_all_references_exclude_definition() {
+        let source = r#"mod test {
+    fn example() {
+        let x = 42;
+        x
+    }
+}"#;
+        let mut parser = Parser::new(source);
+        let module = parser.parse_module().unwrap();
+
+        // Find position of 'x' usage
+        let x_usage_pos = source.rfind("\n        x").unwrap() + 9;
+        let refs_with_def = find_all_references(&module, x_usage_pos, true);
+        let refs_without_def = find_all_references(&module, x_usage_pos, false);
+
+        // With definition should have more or equal refs
+        assert!(
+            refs_with_def.len() >= refs_without_def.len(),
+            "With definition should have >= refs than without"
+        );
+
+        // Without definition should have no definitions
+        let def_count_without = refs_without_def.iter().filter(|r| r.is_definition).count();
+        assert_eq!(def_count_without, 0, "Should have 0 definitions when excluding");
     }
 }

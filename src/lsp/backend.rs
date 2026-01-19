@@ -8,7 +8,7 @@ use tower_lsp::{Client, LanguageServer};
 
 use super::analysis::Analyzer;
 use super::document::DocumentManager;
-use super::handlers::{handle_completion, handle_goto_definition, handle_hover, publish_diagnostics};
+use super::handlers::{handle_completion, handle_goto_definition, handle_hover, handle_references, publish_diagnostics};
 
 /// The Dream language server.
 pub struct DreamLanguageServer {
@@ -66,6 +66,7 @@ impl LanguageServer for DreamLanguageServer {
                     ..Default::default()
                 }),
                 definition_provider: Some(OneOf::Left(true)),
+                references_provider: Some(OneOf::Left(true)),
                 ..Default::default()
             },
             server_info: Some(ServerInfo {
@@ -171,5 +172,24 @@ impl LanguageServer for DreamLanguageServer {
         });
 
         Ok(completions)
+    }
+
+    async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
+        let uri = &params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+        let include_declaration = params.context.include_declaration;
+
+        let doc = match self.documents.get(uri) {
+            Some(doc) => doc,
+            None => return Ok(None),
+        };
+
+        let result = self.analyzer.analyze(&doc.content, doc.path.as_deref());
+
+        let references = result.module.as_ref().and_then(|module| {
+            handle_references(module, &doc.line_index, position, uri, include_declaration)
+        });
+
+        Ok(references)
     }
 }
