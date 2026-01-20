@@ -16,7 +16,7 @@ fn format_type_error(err: &TypeError) -> String {
     }
 }
 
-/// Compile a Dream source file and return the result as a string
+/// Compile a Surreal source file and return the result as a string
 fn compile_to_string(source: &str) -> String {
     // Parse
     let mut parser = Parser::new(source);

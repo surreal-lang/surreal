@@ -195,7 +195,7 @@ fn test_max_min() {
 // This Map implementation demonstrates FFI interop for wrapping Erlang
 // data structures. Direct :maps:: and :lists:: calls are used here to show
 // how to build high-level abstractions on top of Erlang primitives.
-// For production code, prefer using stdlib/map.dream instead.
+// For production code, prefer using stdlib/map.surreal instead.
 
 pub struct Map {
     data: map,

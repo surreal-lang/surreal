@@ -3784,7 +3784,7 @@ impl<'source> Parser<'source> {
 
     /// Expect an identifier or a keyword that can be used as a function name.
     /// This is needed for extern blocks where Erlang/Elixir function names may
-    /// be Dream keywords (spawn, receive, self, etc.)
+    /// be Surreal keywords (spawn, receive, self, etc.)
     fn expect_ident_or_keyword(&mut self) -> ParseResult<String> {
         let name = match self.peek().cloned() {
             Some(Token::Ident(name)) => name,

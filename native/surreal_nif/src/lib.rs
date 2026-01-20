@@ -1,6 +1,6 @@
-//! Dream Compiler NIF
+//! Surreal Compiler NIF
 //!
-//! Exposes the Dream compiler to Erlang/Elixir via Rustler NIFs.
+//! Exposes the Surreal compiler to Erlang/Elixir via Rustler NIFs.
 //! This enables in-memory compilation without disk I/O or erlc process spawning.
 
 use rustler::{Atom, Encoder, Env, NifResult, Term};
@@ -37,7 +37,7 @@ mod atoms {
     }
 }
 
-/// Parse Dream source code and return module information.
+/// Parse Surreal source code and return module information.
 ///
 /// Returns: {:ok, %{name: atom, functions: [{name, arity}, ...]}} | {:error, reason}
 #[rustler::nif]
@@ -70,7 +70,7 @@ fn parse<'a>(env: Env<'a>, source: String) -> Term<'a> {
     }
 }
 
-/// Generate Core Erlang AST from Dream source code.
+/// Generate Core Erlang AST from Surreal source code.
 ///
 /// Returns: {:ok, CoreErlangAST} | {:error, reason}
 ///

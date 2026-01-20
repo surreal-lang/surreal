@@ -1,6 +1,6 @@
 //! AST serialization to/from Erlang term format.
 //!
-//! This module handles converting Dream AST nodes to Erlang term text format
+//! This module handles converting Surreal AST nodes to Erlang term text format
 //! and parsing Erlang terms back to AST nodes. This enables macros to run on
 //! BEAM and manipulate AST as Erlang data structures.
 //!
@@ -1230,7 +1230,7 @@ impl<'a> TermParser<'a> {
             }
         }
 
-        // Return as string (charlists are used for format strings in Dream)
+        // Return as string (charlists are used for format strings in Surreal)
         Ok(Term::String(content))
     }
 

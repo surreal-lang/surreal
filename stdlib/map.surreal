@@ -1,4 +1,4 @@
-// Dream Standard Library - Map Module
+// Surreal Standard Library - Map Module
 //
 // Provides a key-value map backed by Erlang maps with Option/Result-based access.
 // Uses Option and Result from the prelude.

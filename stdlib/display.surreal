@@ -1,4 +1,4 @@
-// Dream Standard Library - Display Module
+// Surreal Standard Library - Display Module
 //
 // Provides the Display trait for converting values to readable string representations.
 // Similar to Rust's Display trait.

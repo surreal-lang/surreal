@@ -1,4 +1,4 @@
--module(dream_nif).
+-module(surreal_nif).
 -export([parse/1, generate_core_ast/1]).
 -on_load(init/0).
 
@@ -13,18 +13,18 @@ find_nif_lib() ->
         %% From priv dir if running as app
         priv_path(),
         %% From project root
-        "native/dream_nif/target/release/libdream_nif",
-        "native/dream_nif/target/debug/libdream_nif",
+        "native/surreal_nif/target/release/libsurreal_nif",
+        "native/surreal_nif/target/debug/libsurreal_nif",
         %% Absolute path fallback
-        filename:join([code:lib_dir(), "..", "..", "native", "dream_nif", "target", "release", "libdream_nif"]),
-        filename:join([code:lib_dir(), "..", "..", "native", "dream_nif", "target", "debug", "libdream_nif"])
+        filename:join([code:lib_dir(), "..", "..", "native", "surreal_nif", "target", "release", "libsurreal_nif"]),
+        filename:join([code:lib_dir(), "..", "..", "native", "surreal_nif", "target", "debug", "libsurreal_nif"])
     ],
     find_first_existing(Paths).
 
 priv_path() ->
-    case code:priv_dir(dream_nif) of
+    case code:priv_dir(surreal_nif) of
         {error, _} -> undefined;
-        Dir -> filename:join(Dir, "libdream_nif")
+        Dir -> filename:join(Dir, "libsurreal_nif")
     end.
 
 find_first_existing([undefined | Rest]) ->
@@ -37,15 +37,15 @@ find_first_existing([Path | Rest]) ->
     end;
 find_first_existing([]) ->
     %% Last resort - return a path and let load_nif fail with a clear error
-    "libdream_nif".
+    "libsurreal_nif".
 
-%% Parse Dream source code and return module information.
+%% Parse Surreal source code and return module information.
 %% Returns: {ok, [{ModuleName, [{FuncName, Arity}, ...]}]} | {error, Reason}
 -spec parse(binary() | string()) -> {ok, term()} | {error, term()}.
 parse(_Source) ->
     erlang:nif_error(nif_not_loaded).
 
-%% Generate Core Erlang AST from Dream source code.
+%% Generate Core Erlang AST from Surreal source code.
 %% Returns: {ok, CoreErlangAST} | {error, Reason}
 -spec generate_core_ast(binary() | string()) -> {ok, term()} | {error, term()}.
 generate_core_ast(_Source) ->

@@ -1,8 +1,8 @@
 #![deny(warnings)]
 
-//! Dream - A programming language with Rust-like syntax and Erlang-style concurrency.
+//! Surreal - A programming language with Rust-like syntax and Erlang-style concurrency.
 //!
-//! Dream compiles to Core Erlang for BEAM execution or to bytecode for the Dream VM.
+//! Surreal compiles to Core Erlang for BEAM execution or to bytecode for the Surreal VM.
 //!
 //! ## Features
 //! - Process spawning with parent tracking

@@ -1,8 +1,8 @@
 //! Generate .surreal binding files from Erlang and Elixir source files.
 //!
 //! Parses Erlang -spec/-type and Elixir @spec/@type declarations and converts them
-//! to Dream extern mod syntax. Detects Result/Option patterns and generates
-//! appropriate Dream types.
+//! to Surreal extern mod syntax. Detects Result/Option patterns and generates
+//! appropriate Surreal types.
 
 use std::collections::HashMap;
 use std::fs;
@@ -1307,7 +1307,7 @@ fn parse_param_list(s: &str, type_var_map: &HashMap<String, ErlangType>, registr
         .collect()
 }
 
-/// Sanitize a parameter name to be a valid Dream identifier.
+/// Sanitize a parameter name to be a valid Surreal identifier.
 /// Handles Erlang union types in param names like "Req | undefined".
 fn sanitize_param_name(name: &str) -> String {
     // Strip union type suffixes (e.g., "Req | undefined" -> "Req")
@@ -1317,7 +1317,7 @@ fn sanitize_param_name(name: &str) -> String {
         name
     };
 
-    // Convert to lowercase for Dream convention
+    // Convert to lowercase for Surreal convention
     let name = name.to_lowercase();
 
     // Replace any invalid characters with underscores
@@ -1916,7 +1916,7 @@ fn parse_fun_type(s: &str) -> ErlangType {
     }
 }
 
-/// Check if a type name is a known Dream type.
+/// Check if a type name is a known Surreal type.
 fn is_known_surreal_type(name: &str) -> bool {
     matches!(name,
         "int" | "float" | "string" | "atom" | "bool" | "pid" | "ref" |
@@ -1924,7 +1924,7 @@ fn is_known_surreal_type(name: &str) -> bool {
     )
 }
 
-/// Check if a name conflicts with Dream keywords.
+/// Check if a name conflicts with Surreal keywords.
 fn is_surreal_keyword(name: &str) -> bool {
     matches!(name,
         "binary" | "fn" | "let" | "mut" | "if" | "else" | "match" | "struct" |
@@ -1953,7 +1953,7 @@ fn camel_to_snake(s: &str) -> String {
     result
 }
 
-/// Sanitize a module name to be a valid Dream identifier.
+/// Sanitize a module name to be a valid Surreal identifier.
 /// Handles Elixir modules (Elixir.Foo.Bar -> foo_bar) and other special cases.
 fn sanitize_module_name(name: &str) -> String {
     // Handle Elixir modules: Elixir.Foo.BarBaz -> foo_bar_baz
@@ -1983,7 +1983,7 @@ fn sanitize_module_name(name: &str) -> String {
     sanitize_identifier(name)
 }
 
-/// Ensure a string is a valid Dream identifier.
+/// Ensure a string is a valid Surreal identifier.
 fn sanitize_identifier(name: &str) -> String {
     let mut result = String::new();
 
@@ -2022,7 +2022,7 @@ fn capitalize_first(s: &str) -> String {
     }
 }
 
-/// Check if a name is a Dream keyword that conflicts with function names.
+/// Check if a name is a Surreal keyword that conflicts with function names.
 /// Type names (atom, string, int, etc.) are NOT included because the parser
 /// can distinguish `atom` (type) from `atom(...)` (function call).
 fn is_surreal_function_keyword(name: &str) -> bool {
@@ -2048,7 +2048,7 @@ fn is_surreal_function_keyword(name: &str) -> bool {
     )
 }
 
-/// Sanitize a function name to be a valid Dream identifier.
+/// Sanitize a function name to be a valid Surreal identifier.
 /// Handles Elixir conventions:
 /// - `encode!` → `encode_bang` (raises on error)
 /// - `valid?` → `valid_q` (returns boolean)
@@ -2174,7 +2174,7 @@ fn generate_surreal(modules: &HashMap<String, ModuleInfo>) -> String {
             continue;
         }
 
-        // Sanitize the module name to be a valid Dream identifier
+        // Sanitize the module name to be a valid Surreal identifier
         let safe_name = sanitize_module_name(module_name);
 
         output.push_str(&format!("// Erlang module: {}\n", module_name));
@@ -2224,7 +2224,7 @@ fn generate_surreal(modules: &HashMap<String, ModuleInfo>) -> String {
     output
 }
 
-/// Convert Erlang type to Dream type syntax.
+/// Convert Erlang type to Surreal type syntax.
 ///
 /// Type naming convention:
 /// - Primitives (lowercase): int, bool, float

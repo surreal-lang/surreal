@@ -12,7 +12,7 @@ use surreal::{
         cfg, check_modules_with_metadata, expand_derives_with_registry, expand_quotes,
         get_derive_macro_name, is_derive_macro, is_macro, resolve_stdlib_methods,
         CompilerError, CompilerWarning, CoreErlangEmitter, GenericFunctionRegistry, Item, MacroRegistry,
-        Module, ModuleContext, ModuleLoader, Parser as DreamParser, SharedGenericRegistry,
+        Module, ModuleContext, ModuleLoader, Parser as SurrealParser, SharedGenericRegistry,
     },
     config::{generate_surreal_toml, generate_main_surreal, ApplicationConfig, CompileOptions, ProjectConfig},
     deps::DepsManager,
@@ -91,7 +91,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Create a new Dream project
+    /// Create a new Surreal project
     New {
         /// Name of the project
         name: String,
@@ -171,7 +171,7 @@ enum Commands {
     },
     /// Show version information
     Version,
-    /// Start an interactive Dream shell (REPL)
+    /// Start an interactive Surreal shell (REPL)
     Shell,
     /// Manage dependencies
     Deps {
@@ -272,7 +272,7 @@ fn cmd_stdlib(force: bool) -> ExitCode {
     }
 }
 
-/// Create a new Dream project.
+/// Create a new Surreal project.
 fn cmd_new(name: &str) -> ExitCode {
     let project_dir = Path::new(name);
 
@@ -1012,7 +1012,7 @@ fn compile_modules_with_registry_and_options(
     dependencies: &std::collections::HashSet<String>,
 ) -> ExitCode {
     use std::time::Instant;
-    let timing = std::env::var("DREAM_TIMING").is_ok();
+    let timing = std::env::var("SURREAL_TIMING").is_ok();
     let total_start = Instant::now();
 
     if modules.is_empty() {
@@ -1771,7 +1771,7 @@ fn load_stub_modules() -> Vec<Module> {
         };
 
         // Wrap in a module since parser expects that
-        // Add _stubs suffix to avoid name conflicts with Dream stdlib modules
+        // Add _stubs suffix to avoid name conflicts with Surreal stdlib modules
         // (stubs are for FFI to external BEAM modules, stdlib compiles to surreal::*)
         let stub_name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("stubs");
         let stub_module_name = format!("{}_stubs", stub_name);
@@ -1900,11 +1900,11 @@ fn stdlib_path_to_module_name(stdlib_dir: &Path, path: &Path) -> Option<String> 
     Some(format!("surreal::{}", module_path))
 }
 
-/// Extract the module name(s) from a Dream source file.
+/// Extract the module name(s) from a Surreal source file.
 /// Returns the name of the first module declared in the file.
 fn extract_module_name(source_file: &Path) -> Option<String> {
     let source = fs::read_to_string(source_file).ok()?;
-    let mut parser = DreamParser::new(&source);
+    let mut parser = SurrealParser::new(&source);
 
     // Use a dummy fallback name - we'll get the real name from the parsed result
     let fallback = source_file
@@ -2078,7 +2078,7 @@ fn run_application(
         return ExitCode::from(1);
     };
 
-    // Shell mode: use the Dream REPL with the application loaded
+    // Shell mode: use the Surreal REPL with the application loaded
     if shell_mode {
         let mut all_paths = vec![beam_dir.to_path_buf()];
         if let Some(stdlib) = stdlib_dir {

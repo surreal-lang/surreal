@@ -1,4 +1,4 @@
-//! Type checker for Dream.
+//! Type checker for Surreal.
 //!
 //! Performs semantic analysis to validate types across the program.
 //! The type checker runs after parsing and before code generation.
@@ -490,7 +490,7 @@ pub struct TypeEnv {
     associated_types: HashMap<String, Ty>,
     /// External function signatures: (module, function, arity) -> FnInfo (shared via Arc, read-mostly)
     extern_functions: Arc<HashMap<(String, String, usize), FnInfo>>,
-    /// Maps Dream extern module name -> BEAM module name (shared via Arc, read-mostly)
+    /// Maps Surreal extern module name -> BEAM module name (shared via Arc, read-mostly)
     extern_module_names: Arc<HashMap<String, String>>,
     /// Set of known extern module names (shared via Arc, read-mostly)
     extern_modules: Arc<HashSet<String>>,
@@ -629,7 +629,7 @@ impl TypeEnv {
         false
     }
 
-    /// Get the BEAM module name for a Dream extern module name.
+    /// Get the BEAM module name for a Surreal extern module name.
     /// Returns the mapped name if #[name = "..."] was used, otherwise the original name.
     /// Resolves module aliases first.
     pub fn get_beam_module_name(&self, surreal_name: &str) -> Option<&String> {
@@ -1466,7 +1466,7 @@ impl TypeChecker {
             })
             .unwrap_or_else(|| module_path.to_string());
 
-        // Store the Dream name -> BEAM name mapping
+        // Store the Surreal name -> BEAM name mapping
         Arc::make_mut(&mut self.env.extern_module_names)
             .insert(module_path.to_string(), beam_module_name.clone());
 
@@ -1515,7 +1515,7 @@ impl TypeChecker {
                         info,
                     );
 
-                    // Store the Dream name -> BEAM name mapping if different
+                    // Store the Surreal name -> BEAM name mapping if different
                     if beam_fn_name != func.name {
                         Arc::make_mut(&mut self.env.extern_function_names).insert(
                             (module_path.to_string(), func.name.clone(), arity),
@@ -1531,7 +1531,7 @@ impl TypeChecker {
         }
     }
 
-    /// Known Dream stdlib modules that should NOT be treated as extern modules.
+    /// Known Surreal stdlib modules that should NOT be treated as extern modules.
     /// These modules live under the surreal:: namespace and have their own implementations.
     const STDLIB_MODULES: &'static [&'static str] = &[
         "io", "list", "enumerable", "iterator", "option", "result",
@@ -1539,7 +1539,7 @@ impl TypeChecker {
         "process", "genserver", "supervisor", "application", "logger",
     ];
 
-    /// Check if a module name is a Dream stdlib module.
+    /// Check if a module name is a Surreal stdlib module.
     fn is_stdlib_module(name: &str) -> bool {
         Self::STDLIB_MODULES.contains(&name)
     }
@@ -1547,7 +1547,7 @@ impl TypeChecker {
     /// Collect extern imports from a use declaration.
     /// Handles `use jason::encode;` and `use jason::{encode, decode};`
     /// Also handles module aliasing: `use erlang::std::application as erl_app;`
-    /// Note: Dream stdlib modules take priority over extern modules with the same name.
+    /// Note: Surreal stdlib modules take priority over extern modules with the same name.
     fn collect_use_decl(&mut self, use_decl: &UseDecl) {
         match &use_decl.tree {
             UseTree::Path { module, name, rename } => {
@@ -2774,7 +2774,7 @@ impl TypeChecker {
                 } else if let Some((module, func_name)) = self.env.get_extern_import(name).cloned() {
                     // This is an imported function: `use logger::info; info(msg)` or `use jason::encode; encode(data)`
 
-                    // For stdlib imports, look up as a Dream function
+                    // For stdlib imports, look up as a Surreal function
                     if Self::is_stdlib_module(&module) {
                         let qualified_name = format!("{}::{}", module, func_name);
                         if let Some(info) = self.env.get_function(&qualified_name).cloned() {
@@ -3741,7 +3741,7 @@ impl TypeChecker {
                         let func_name = &segments[1];
 
                         // Only transform to ExternCall if it's an extern module but NOT a stdlib module.
-                        // Stdlib modules (io, logger, etc.) have Dream wrapper implementations that should be called.
+                        // Stdlib modules (io, logger, etc.) have Surreal wrapper implementations that should be called.
                         if self.env.is_extern_module(module) && !Self::is_stdlib_module(module) {
                             // Resolve module alias to full path for code generation
                             let resolved_module = self.env.resolve_module_alias(module).to_string();
@@ -4065,13 +4065,13 @@ impl TypeChecker {
     /// Transform an extern call with Result<T, E> return type.
     ///
     /// Erlang's `{ok, V}` / `{error, E}` convention is directly compatible with
-    /// Dream's `Ok(V)` / `Err(E)` representation (both compile to `{'ok', V}` / `{'error', E}`),
+    /// Surreal's `Ok(V)` / `Err(E)` representation (both compile to `{'ok', V}` / `{'error', E}`),
     /// so we can pass through the extern call directly without any transformation.
     ///
     /// For Result<(), E>, Erlang returns just 'ok' atom, which is also compatible
-    /// with Dream's `Ok(())` (both compile to just `'ok'`).
+    /// with Surreal's `Ok(())` (both compile to just `'ok'`).
     fn transform_extern_to_result(&mut self, module: &str, function: &str, args: Vec<SpannedExpr>, _is_unit_ok: bool, span: Span) -> SpannedExpr {
-        // Erlang's {ok, V} / {error, E} is already compatible with Dream's Result type.
+        // Erlang's {ok, V} / {error, E} is already compatible with Surreal's Result type.
         // No transformation needed - just return the raw extern call.
         SpannedExpr::new(Expr::ExternCall {
             module: module.to_string(),
@@ -4341,7 +4341,7 @@ pub fn check_modules(modules: &[Module]) -> Vec<(String, TypeResult<Module>)> {
 pub struct TypeCheckResult {
     /// Type check results per module: (module_name, result)
     pub modules: Vec<(String, TypeResult<Module>)>,
-    /// Extern module name mappings (Dream name -> BEAM name)
+    /// Extern module name mappings (Surreal name -> BEAM name)
     pub extern_module_names: HashMap<String, String>,
     /// Extern function name mappings (module, surreal_name, arity) -> beam_name
     /// Used for #[name = "encode!"] attribute support on functions

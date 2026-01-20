@@ -1,7 +1,7 @@
-//! Compiler for the Dream language.
+//! Compiler for the Surreal language.
 //!
 //! This module contains the lexer, parser, AST types, and code generator
-//! for a Rust-like language that compiles to Dream bytecode.
+//! for a Rust-like language that compiles to Surreal bytecode.
 
 mod ast;
 pub mod cfg;

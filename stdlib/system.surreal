@@ -1,4 +1,4 @@
-// Dream Standard Library - System Module
+// Surreal Standard Library - System Module
 //
 // System interaction: environment, arguments, shell commands.
 // Provides access to OS-level functionality.

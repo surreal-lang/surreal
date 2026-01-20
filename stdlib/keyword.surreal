@@ -1,4 +1,4 @@
-// Dream Standard Library - Keyword Module
+// Surreal Standard Library - Keyword Module
 //
 // Provides functions for working with keyword lists (ordered key-value pairs).
 // A keyword list is a list of 2-tuples where the first element is an atom.

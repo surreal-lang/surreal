@@ -1,4 +1,4 @@
-%% Simple test macro for Dream macro system
+%% Simple test macro for Surreal macro system
 -module(test_macro).
 -export([simple_derive/1]).
 

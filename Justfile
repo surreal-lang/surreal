@@ -1,4 +1,4 @@
-# Dream Language Justfile
+# Surreal Language Justfile
 
 # Default recipe - show available commands
 default:
@@ -20,7 +20,7 @@ test:
 check:
     cargo check
 
-# Run a Dream file
+# Run a Surreal file
 run file:
     cargo run --release -- run {{file}}
 

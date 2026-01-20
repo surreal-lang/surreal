@@ -1,4 +1,4 @@
-// Dream Standard Library - Result Module
+// Surreal Standard Library - Result Module
 //
 // Provides the Result<T, E> type for representing success or failure.
 

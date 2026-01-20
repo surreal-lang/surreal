@@ -1,4 +1,4 @@
-// Dream Standard Library - Option Module
+// Surreal Standard Library - Option Module
 //
 // Provides the Option<T> type for representing optional values.
 

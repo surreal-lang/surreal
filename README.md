@@ -1,8 +1,8 @@
-# Dream
+# Surreal
 
 **A programming language with Rust-like syntax and Erlang-style concurrency.**
 
-Dream brings Rust's expressive type system and familiar syntax to the BEAM virtual machine. Write concurrent, fault-tolerant applications with the ergonomics of Rust and the battle-tested runtime of Erlang/OTP.
+Surreal brings Rust's expressive type system and familiar syntax to the BEAM virtual machine. Write concurrent, fault-tolerant applications with the ergonomics of Rust and the battle-tested runtime of Erlang/OTP.
 
 ```rust
 use process::send;
@@ -27,9 +27,9 @@ fn worker() {
 }
 ```
 
-## Why Dream?
+## Why Surreal?
 
-Dream combines the best of two worlds:
+Surreal combines the best of two worlds:
 
 | From Rust | From Erlang/OTP |
 |-----------|-----------------|
@@ -67,7 +67,7 @@ surreal shell
 Source → Lexer → Parser → AST → Core Erlang → BEAM
 ```
 
-Dream compiles to Core Erlang, which is then compiled to BEAM bytecode. This gives you full access to the Erlang/OTP ecosystem, including OTP behaviors, Hex packages, and interop with Erlang and Elixir libraries.
+Surreal compiles to Core Erlang, which is then compiled to BEAM bytecode. This gives you full access to the Erlang/OTP ecosystem, including OTP behaviors, Hex packages, and interop with Erlang and Elixir libraries.
 
 ## Language Features
 
@@ -490,7 +490,7 @@ let json = :"Elixir.Jason"::encode(data);
 
 ## Project Structure
 
-A Dream project looks like this:
+A Surreal project looks like this:
 
 ```
 my_app/
@@ -525,7 +525,7 @@ full = ["json"]
 
 ### Module System
 
-Dream uses a Rust-like module system:
+Surreal uses a Rust-like module system:
 
 ```rust
 // src/lib.surreal - root module
@@ -568,8 +568,8 @@ surreal test --features json       # Test with features
 
 ```bash
 # Clone the repository
-git clone https://github.com/scrogson/dream
-cd dream
+git clone https://github.com/scrogson/surreal
+cd surreal
 
 # Build the compiler
 cargo build --release
@@ -591,7 +591,7 @@ See the `examples/` directory for complete examples:
 
 ## Related Projects
 
-- [tree-sitter-dream](https://github.com/scrogson/tree-sitter-dream) - Tree-sitter grammar for editor support
+- [tree-sitter-surreal](https://github.com/scrogson/tree-sitter-surreal) - Tree-sitter grammar for editor support
 
 ## License
 

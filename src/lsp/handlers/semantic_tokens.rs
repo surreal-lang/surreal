@@ -1,6 +1,6 @@
 //! Semantic tokens handler for syntax highlighting.
 //!
-//! This module provides `textDocument/semanticTokens/full` support for Dream code.
+//! This module provides `textDocument/semanticTokens/full` support for Surreal code.
 //! It enables type-aware syntax highlighting in editors by distinguishing between
 //! different types of identifiers (variables, functions, types, etc.).
 

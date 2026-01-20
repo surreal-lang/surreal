@@ -1,4 +1,4 @@
-//! Code generation from AST to Dream bytecode.
+//! Code generation from AST to Surreal bytecode.
 
 use std::collections::{HashMap, HashSet};
 

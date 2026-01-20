@@ -2,7 +2,7 @@
 /// Uses Option and Result from the prelude.
 ///
 /// NOTE: This example demonstrates how to build a HashMap abstraction using FFI.
-/// For production code, prefer using stdlib/map.dream which provides the
+/// For production code, prefer using stdlib/map.surreal which provides the
 /// same functionality with a cleaner API.
 
 mod hashmap {

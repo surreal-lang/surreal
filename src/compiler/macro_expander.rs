@@ -1,7 +1,7 @@
 //! Macro expander that executes user-defined macros on BEAM.
 //!
 //! This module handles the BEAM communication needed for running user-defined
-//! macros at compile time. Macros are Dream functions marked with `#[macro]`
+//! macros at compile time. Macros are Surreal functions marked with `#[macro]`
 //! that take AST data and return transformed AST.
 //!
 //! ## Architecture
@@ -287,7 +287,7 @@ impl MacroExpander {
     /// # Returns
     ///
     /// The expanded AST as an Erlang term string, which can be deserialized
-    /// back to Dream AST nodes.
+    /// back to Surreal AST nodes.
     pub fn expand_macro(
         &mut self,
         module: &str,

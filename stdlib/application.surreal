@@ -1,4 +1,4 @@
-// Dream Standard Library - Application Module
+// Surreal Standard Library - Application Module
 //
 // Provides OTP Application behavior for managing supervision trees
 // and application lifecycle.

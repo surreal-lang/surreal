@@ -1,7 +1,7 @@
 //! Analysis wrapper for compiler APIs.
 //!
 //! This module provides a clean interface between the LSP server and
-//! the Dream compiler's parser and type checker.
+//! the Surreal compiler's parser and type checker.
 
 use std::path::Path;
 use std::sync::OnceLock;

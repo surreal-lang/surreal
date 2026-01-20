@@ -13,8 +13,8 @@ use super::handlers::{
     handle_semantic_tokens_full, publish_diagnostics,
 };
 
-/// The Dream language server.
-pub struct DreamLanguageServer {
+/// The Surreal language server.
+pub struct SurrealLanguageServer {
     /// LSP client for sending notifications
     client: Client,
     /// Document manager for open files
@@ -23,7 +23,7 @@ pub struct DreamLanguageServer {
     analyzer: Arc<Analyzer>,
 }
 
-impl DreamLanguageServer {
+impl SurrealLanguageServer {
     /// Create a new language server.
     pub fn new(client: Client) -> Self {
         Self {
@@ -56,7 +56,7 @@ impl DreamLanguageServer {
 }
 
 #[tower_lsp::async_trait]
-impl LanguageServer for DreamLanguageServer {
+impl LanguageServer for SurrealLanguageServer {
     async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
@@ -91,7 +91,7 @@ impl LanguageServer for DreamLanguageServer {
 
     async fn initialized(&self, _: InitializedParams) {
         self.client
-            .log_message(MessageType::INFO, "Dream LSP server initialized")
+            .log_message(MessageType::INFO, "Surreal LSP server initialized")
             .await;
     }
 

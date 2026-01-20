@@ -1,6 +1,6 @@
-//! Dream interactive shell (REPL)
+//! Surreal interactive shell (REPL)
 //!
-//! Provides an interactive environment for evaluating Dream expressions
+//! Provides an interactive environment for evaluating Surreal expressions
 //! using the BEAM runtime with a persistent process for fast evaluation.
 //! Uses runtime introspection for module discovery and method dispatch.
 
@@ -95,7 +95,7 @@ fn format_repl_error(
 }
 
 /// Result marker for protocol
-const RESULT_MARKER: &str = "\x00DREAM_RESULT\x00";
+const RESULT_MARKER: &str = "\x00SURREAL_RESULT\x00";
 
 /// Erlang eval server with introspection support
 /// Protocol:
@@ -123,7 +123,7 @@ Loop = fun Loop() ->
                             list_to_atom(Base)
                         end || F <- filelib:wildcard("surreal::*.beam", Dir)]
                     || Dir <- Paths])),
-                    io:format("~s~nok:~w~n", [<<0, "DREAM_RESULT", 0>>, Mods]),
+                    io:format("~s~nok:~w~n", [<<0, "SURREAL_RESULT", 0>>, Mods]),
                     Loop();
                 _ ->
                     case string:prefix(Cmd, "exports:") of
@@ -138,7 +138,7 @@ Loop = fun Loop() ->
                                                         nomatch ->
                                                             case string:prefix(Cmd, "eval:") of
                                                                 nomatch ->
-                                                                    io:format("~s~nerr:unknown_command~n", [<<0, "DREAM_RESULT", 0>>]),
+                                                                    io:format("~s~nerr:unknown_command~n", [<<0, "SURREAL_RESULT", 0>>]),
                                                                     Loop();
                                                                 Filename ->
                                                                     Result = try
@@ -162,7 +162,7 @@ Loop = fun Loop() ->
                                                                         Class:Reason:Stack ->
                                                                             {error, {Class, Reason, Stack}}
                                                                     end,
-                                                                    io:format("~s~n", [<<0, "DREAM_RESULT", 0>>]),
+                                                                    io:format("~s~n", [<<0, "SURREAL_RESULT", 0>>]),
                                                                     case Result of
                                                                         {ok, Value} -> io:format("ok:~p~n", [Value]);
                                                                         {error, Err} -> io:format("err:~p~n", [Err])
@@ -194,7 +194,7 @@ Loop = fun Loop() ->
                                                                 Class:Reason:Stack ->
                                                                     {error, {Class, Reason, Stack}}
                                                             end,
-                                                            io:format("~s~n", [<<0, "DREAM_RESULT", 0>>]),
+                                                            io:format("~s~n", [<<0, "SURREAL_RESULT", 0>>]),
                                                             case Result of
                                                                 {ok, Value} -> io:format("ok:~p~n", [Value]);
                                                                 {error, Err} -> io:format("err:~p~n", [Err])
@@ -212,7 +212,7 @@ Loop = fun Loop() ->
                                                         Class:Reason:Stack ->
                                                             {error, {Class, Reason, Stack}}
                                                     end,
-                                                    io:format("~s~n", [<<0, "DREAM_RESULT", 0>>]),
+                                                    io:format("~s~n", [<<0, "SURREAL_RESULT", 0>>]),
                                                     case Result of
                                                         {ok, Value} -> io:format("ok:~p~n", [Value]);
                                                         {error, Err} -> io:format("err:~p~n", [Err])
@@ -237,7 +237,7 @@ Loop = fun Loop() ->
                                                 Class:Reason:Stack ->
                                                     {error, {Class, Reason, Stack}}
                                             end,
-                                            io:format("~s~n", [<<0, "DREAM_RESULT", 0>>]),
+                                            io:format("~s~n", [<<0, "SURREAL_RESULT", 0>>]),
                                             case Result of
                                                 {ok, Value} -> io:format("ok:~p~n", [Value]);
                                                 {error, Err} -> io:format("err:~p~n", [Err])
@@ -257,13 +257,13 @@ Loop = fun Loop() ->
                                                end,
                                     case FindFile(Paths) of
                                         not_found ->
-                                            io:format("~s~nerr:module_not_found~n", [<<0, "DREAM_RESULT", 0>>]);
+                                            io:format("~s~nerr:module_not_found~n", [<<0, "SURREAL_RESULT", 0>>]);
                                         {ok, FullPath} ->
                                             case beam_lib:chunks(FullPath, [exports]) of
                                                 {ok, {_, [{exports, Exports}]}} ->
-                                                    io:format("~s~nok:~w~n", [<<0, "DREAM_RESULT", 0>>, Exports]);
+                                                    io:format("~s~nok:~w~n", [<<0, "SURREAL_RESULT", 0>>, Exports]);
                                                 {error, _, _} ->
-                                                    io:format("~s~nerr:beam_read_failed~n", [<<0, "DREAM_RESULT", 0>>])
+                                                    io:format("~s~nerr:beam_read_failed~n", [<<0, "SURREAL_RESULT", 0>>])
                                             end
                                     end,
                                     Loop()
@@ -282,7 +282,7 @@ Loop = fun Loop() ->
                             catch
                                 Class:Reason:Stack -> {error, {Class, Reason, Stack}}
                             end,
-                            io:format("~s~n", [<<0, "DREAM_RESULT", 0>>]),
+                            io:format("~s~n", [<<0, "SURREAL_RESULT", 0>>]),
                             case Result of
                                 {ok, Value} -> io:format("ok:~w~n", [Value]);
                                 {error, Err} -> io:format("err:~p~n", [Err])
@@ -727,7 +727,7 @@ impl ReplState {
         let counter = EVAL_COUNTER.fetch_add(1, Ordering::SeqCst);
         let module_name = format!("__repl_{}", counter);
 
-        // Generate Dream source (bindings will be injected into Core Erlang)
+        // Generate Surreal source (bindings will be injected into Core Erlang)
         let (surreal_source, expr_offset) = self.generate_surreal_source(&module_name, expr_source);
 
         // Parse
@@ -822,7 +822,7 @@ impl ReplState {
         result.map(|v| format_surreal_value(&v))
     }
 
-    /// Generate Dream source code wrapping an expression
+    /// Generate Surreal source code wrapping an expression
     /// Uses an extern declaration for binding retrieval to get proper `any` type
     /// Returns (source, expr_offset) where expr_offset is the byte offset of the user expression
     fn generate_surreal_source(&self, module_name: &str, expr_source: &str) -> (String, usize) {
@@ -996,7 +996,7 @@ fn capitalize_first(s: &str) -> String {
     }
 }
 
-/// Format Erlang value as Dream syntax
+/// Format Erlang value as Surreal syntax
 fn format_surreal_value(value: &str) -> String {
     let value = value.trim();
 
@@ -1189,7 +1189,7 @@ fn format_single_field(field: &str) -> String {
 }
 
 fn print_banner() {
-    println!("Dream {} (BEAM backend)", env!("CARGO_PKG_VERSION"));
+    println!("Surreal {} (BEAM backend)", env!("CARGO_PKG_VERSION"));
     println!("Type :help for commands, :quit to exit");
     println!();
 }
@@ -1201,10 +1201,10 @@ fn print_help() {
     println!("  :clear          Clear all bindings");
     println!("  :bindings       Show current bindings");
     println!("  :reload         Reload module registry");
-    println!("  :edit, :e       Open $EDITOR to write Dream code");
+    println!("  :edit, :e       Open $EDITOR to write Surreal code");
     println!("  :load <file>    Compile and load a .surreal file");
     println!();
-    println!("Enter Dream expressions to evaluate them.");
+    println!("Enter Surreal expressions to evaluate them.");
     println!("Use 'let x = expr' to create bindings.");
     println!("Press TAB for completion.");
 }
@@ -1357,7 +1357,7 @@ pub fn run_shell_with_app(
     beam_dir: std::path::PathBuf,
     deps_dirs: Vec<std::path::PathBuf>,
 ) -> ExitCode {
-    println!("Dream {} (BEAM backend)", env!("CARGO_PKG_VERSION"));
+    println!("Surreal {} (BEAM backend)", env!("CARGO_PKG_VERSION"));
     println!("Starting application '{}'...", app_name);
     println!();
 
@@ -1540,8 +1540,8 @@ fn edit_and_eval(state: &mut ReplState) -> Result<Option<String>, String> {
     let content = std::fs::read_to_string(&temp_file)
         .map_err(|e| format!("Failed to read temp file: {}", e))?;
 
-    // Debug: show what we're about to parse if DREAM_DEBUG is set
-    if std::env::var("DREAM_DEBUG").is_ok() {
+    // Debug: show what we're about to parse if SURREAL_DEBUG is set
+    if std::env::var("SURREAL_DEBUG").is_ok() {
         eprintln!("=== DEBUG: Content to parse ({} bytes) ===", content.len());
         eprintln!("{:?}", content);
         eprintln!("=== END DEBUG ===");
@@ -1581,7 +1581,7 @@ fn load_and_compile(state: &mut ReplState, path: &str) -> Result<String, String>
     Ok(format!("Loaded {}", path.display()))
 }
 
-/// Compile Dream source code and load modules into BEAM
+/// Compile Surreal source code and load modules into BEAM
 fn compile_and_run_source(
     state: &mut ReplState,
     source: &str,

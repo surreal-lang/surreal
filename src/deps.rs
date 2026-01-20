@@ -1,4 +1,4 @@
-//! Dependency management for Dream projects.
+//! Dependency management for Surreal projects.
 //!
 //! Handles fetching dependencies from hex.pm, git repositories, and local paths.
 
@@ -39,7 +39,7 @@ pub type DepsResult<T> = Result<T, DepsError>;
 /// Hex.pm repository base URL
 const HEX_REPO: &str = "https://repo.hex.pm";
 
-/// Dependency manager for a Dream project.
+/// Dependency manager for a Surreal project.
 pub struct DepsManager {
     project_root: PathBuf,
     config: ProjectConfig,
@@ -531,7 +531,7 @@ impl DepsManager {
 
         // Check if there are .erl files
         if !src_dir.exists() {
-            // Might be a Dream or Elixir package, skip
+            // Might be a Surreal or Elixir package, skip
             return Ok(());
         }
 

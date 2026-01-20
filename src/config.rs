@@ -1,4 +1,4 @@
-//! Project configuration for Dream projects.
+//! Project configuration for Surreal projects.
 //!
 //! Handles parsing of `surreal.toml` manifest files and project discovery.
 
@@ -318,7 +318,7 @@ version = "0.1.0"
 /// Generate a default main.surreal content for a new project.
 pub fn generate_main_surreal(name: &str) -> String {
     format!(
-        r#"// {} - A Dream project
+        r#"// {} - A Surreal project
 
 pub fn main() {{
     :ok

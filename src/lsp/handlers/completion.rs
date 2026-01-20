@@ -7,7 +7,7 @@ use tower_lsp::lsp_types::{
 use crate::compiler::{Item, Module, Pattern, Type};
 use crate::lsp::position::LineIndex;
 
-/// Dream language keywords.
+/// Surreal language keywords.
 const KEYWORDS: &[&str] = &[
     "fn", "let", "mut", "if", "else", "match", "return", "true", "false", "struct", "enum",
     "impl", "trait", "pub", "mod", "use", "spawn", "receive", "self", "for", "in", "while",

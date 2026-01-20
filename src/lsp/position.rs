@@ -4,7 +4,7 @@ use tower_lsp::lsp_types::{Position, Range};
 
 /// Index for efficient byte offset ↔ position conversion.
 ///
-/// The LSP protocol uses line/character positions while the Dream compiler
+/// The LSP protocol uses line/character positions while the Surreal compiler
 /// uses byte offsets. This struct enables conversion between the two.
 #[derive(Debug, Clone)]
 pub struct LineIndex {

@@ -1,4 +1,4 @@
-//! Prelude module - types automatically available in all Dream modules.
+//! Prelude module - types automatically available in all Surreal modules.
 //!
 //! The prelude contains fundamental types like Option and Result that are
 //! injected into every module at parse time.

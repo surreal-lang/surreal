@@ -1,4 +1,4 @@
-// Dream Standard Library - Supervisor Module
+// Surreal Standard Library - Supervisor Module
 //
 // A behaviour module for implementing supervisors.
 // Based on Erlang/OTP's supervisor and Elixir's Supervisor.

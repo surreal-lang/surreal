@@ -157,7 +157,7 @@ pub struct CoreErlangEmitter {
     cross_module_inlining_source: Option<String>,
     /// Compile options for conditional compilation (test mode, features).
     compile_options: CompileOptions,
-    /// Maps Dream extern module name -> BEAM module name
+    /// Maps Surreal extern module name -> BEAM module name
     /// Used for #[name = "Elixir.Enum"] attribute support
     extern_module_names: HashMap<String, String>,
     /// Maps (module, surreal_name, arity) -> BEAM function name
@@ -251,7 +251,7 @@ impl CoreErlangEmitter {
         }
     }
 
-    /// Set the extern module name mappings (Dream name -> BEAM name).
+    /// Set the extern module name mappings (Surreal name -> BEAM name).
     /// Used for #[name = "Elixir.Enum"] attribute support.
     pub fn set_extern_module_names(&mut self, mappings: HashMap<String, String>) {
         self.extern_module_names = mappings;
@@ -299,14 +299,14 @@ impl CoreErlangEmitter {
         "process", "genserver", "supervisor", "application", "logger",
     ];
 
-    /// Resolve a simple module name string, adding surreal:: prefix for Dream modules.
+    /// Resolve a simple module name string, adding surreal:: prefix for Surreal modules.
     /// All Surreal modules (both stdlib and user modules) get the surreal:: prefix.
     fn resolve_module_name(module: &str) -> String {
         // If already has surreal:: prefix, use as-is
         if module.starts_with(Self::STDLIB_PREFIX) {
             module.to_string()
         } else {
-            // Add surreal:: prefix for all Dream modules
+            // Add surreal:: prefix for all Surreal modules
             format!("{}{}", Self::STDLIB_PREFIX, module)
         }
     }
@@ -1294,10 +1294,10 @@ impl CoreErlangEmitter {
         Ok(())
     }
 
-    /// Prefix for Dream stdlib modules in the BEAM.
+    /// Prefix for Surreal stdlib modules in the BEAM.
     pub const STDLIB_PREFIX: &'static str = "surreal::";
 
-    /// Get the BEAM module name for a Dream module.
+    /// Get the BEAM module name for a Surreal module.
     /// Resolves stdlib module names to their full surreal:: prefixed names.
     pub fn beam_module_name(name: &str) -> String {
         Self::resolve_module_name(name)
@@ -1312,7 +1312,7 @@ impl CoreErlangEmitter {
     /// Emit a complete Core Erlang module.
     pub fn emit_module(&mut self, module: &Module) -> CoreErlangResult<String> {
         // All Surreal modules are prefixed with surreal:: (like Elixir uses Elixir.)
-        // This ensures Dream modules are properly namespaced on the BEAM
+        // This ensures Surreal modules are properly namespaced on the BEAM
         // Unless skip_stdlib_prefix is set (for REPL modules)
         self.module_name = if self.module_context.skip_stdlib_prefix {
             module.name.clone()
@@ -1467,7 +1467,7 @@ impl CoreErlangEmitter {
             }
         }
 
-        // Module header (with Dream. prefix)
+        // Module header (with Surreal. prefix)
         self.emit(&format!("module '{}'", self.module_name));
 
         // Group functions by (name, arity) for multi-clause support (filtered by cfg)
@@ -2739,7 +2739,7 @@ impl CoreErlangEmitter {
                             self.emit_args(args)?;
                             self.emit(")");
                         } else if let Some((module, original_name)) = self.imports.get(name) {
-                            // Imported function call - add surreal:: prefix for Dream stdlib modules
+                            // Imported function call - add surreal:: prefix for Surreal stdlib modules
                             self.emit(&format!(
                                 "call '{}':'{}'(",
                                 Self::beam_module_name(&module.to_lowercase()),
@@ -2874,7 +2874,7 @@ impl CoreErlangEmitter {
                                 self.emit(")");
                             }
                         } else {
-                            // Module:Function call - add surreal:: prefix for Dream modules
+                            // Module:Function call - add surreal:: prefix for Surreal modules
                             // Check if this is a call with type args (explicit or inferred)
                             if !effective_type_args.is_empty() {
                                 // Cross-module generic call: genserver::start_typed::<Counter>()
@@ -3280,7 +3280,7 @@ impl CoreErlangEmitter {
                 }
                 // Priority 2: Check if it's an imported function
                 else if let Some((module, original_name)) = self.imports.get(method) {
-                    // Imported function call - add surreal:: prefix for Dream stdlib modules
+                    // Imported function call - add surreal:: prefix for Surreal stdlib modules
                     self.emit(&format!(
                         "call '{}':'{}'(",
                         Self::beam_module_name(&module.to_lowercase()),
@@ -5547,7 +5547,7 @@ mod tests {
     fn test_extern_call_result_transformation() {
         // When extern function declares Result<T, E> return type,
         // the call should pass through directly since Erlang's {:ok, T} | {:error, E}
-        // is already compatible with Dream's Result<T, E> representation.
+        // is already compatible with Surreal's Result<T, E> representation.
         let source = r#"
             mod test {
                 extern mod file {
@@ -5631,7 +5631,7 @@ mod tests {
 
     #[test]
     fn test_extern_mod_without_name_attribute() {
-        // Test that extern mods without #[name] use the Dream module name
+        // Test that extern mods without #[name] use the Surreal module name
         let source = r#"
             mod test {
                 extern mod erlang {

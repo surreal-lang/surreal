@@ -1,4 +1,4 @@
-//! Derive macro expansion for Dream.
+//! Derive macro expansion for Surreal.
 //!
 //! Supports `#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]` on structs and enums.
 //! Generates impl blocks with the corresponding methods at compile time.
@@ -65,7 +65,7 @@ impl DeriveKind {
 
 /// A registry of both built-in and user-defined macros.
 ///
-/// User-defined macros are Dream functions marked with `#[macro]` that take
+/// User-defined macros are Surreal functions marked with `#[macro]` that take
 /// AST data as input and return transformed AST.
 pub struct MacroRegistry {
     /// User-defined macros in current module scope: maps derive name to (module, function).
@@ -107,7 +107,7 @@ impl MacroRegistry {
     /// # Arguments
     ///
     /// * `name` - The derive name (e.g., "Serialize")
-    /// * `module` - The Dream module containing the macro (e.g., "surreal::serde::serde")
+    /// * `module` - The Surreal module containing the macro (e.g., "surreal::serde::serde")
     /// * `function` - The macro function name (e.g., "serialize_derive")
     pub fn register(&mut self, name: &str, module: &str, function: &str) {
         self.user_defined
@@ -972,7 +972,7 @@ fn generate_enum_default(enum_def: &EnumDef) -> Option<Function> {
 fn default_value_for_type(ty: &Type) -> Expr {
     match ty {
         Type::Int => Expr::Int(0),
-        // Dream doesn't have float literals, use int 0 (BEAM handles conversion)
+        // Surreal doesn't have float literals, use int 0 (BEAM handles conversion)
         Type::Float => Expr::Int(0),
         Type::String => Expr::String(String::new()),
         Type::Bool => Expr::Bool(false),

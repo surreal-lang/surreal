@@ -1,4 +1,4 @@
-// Dream Standard Library - GenServer Module
+// Surreal Standard Library - GenServer Module
 //
 // A behaviour module for implementing the server of a client-server relation.
 // Based on Erlang/OTP's gen_server and Elixir's GenServer.

@@ -1,4 +1,4 @@
-// Dream Standard Library - String Module
+// Surreal Standard Library - String Module
 //
 // Provides string manipulation functions using Erlang's string/binary modules.
 

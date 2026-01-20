@@ -1,4 +1,4 @@
-// proc_macro - Procedural macro support for Dream
+// proc_macro - Procedural macro support for Surreal
 //
 // This module provides types and utilities for writing procedural macros.
 

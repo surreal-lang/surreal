@@ -1,4 +1,4 @@
-// Dream Standard Library - Logger Module
+// Surreal Standard Library - Logger Module
 //
 // Provides structured logging with multiple severity levels.
 // Built on Erlang's logger module (OTP 21+).

@@ -1,4 +1,4 @@
-// Dream Standard Library - File Module
+// Surreal Standard Library - File Module
 //
 // File system operations with Elixir-style ergonomics.
 // All functions take path as first argument for pipe compatibility.

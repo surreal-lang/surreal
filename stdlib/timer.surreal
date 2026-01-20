@@ -1,4 +1,4 @@
-// Dream Standard Library - Timer Module
+// Surreal Standard Library - Timer Module
 //
 // Provides timing utilities using Erlang's timer module.
 

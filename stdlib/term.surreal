@@ -1,4 +1,4 @@
-// Dream Standard Library - Term Module
+// Surreal Standard Library - Term Module
 //
 // Provides a sum type for type-safe handling of dynamic Erlang values.
 // Use Term when you need to inspect or pattern match on dynamic data.

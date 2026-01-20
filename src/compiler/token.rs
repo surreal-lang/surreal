@@ -258,7 +258,7 @@ pub enum Token {
     Charlist(String),
 
     // Simple atoms: :ok, :error, :my_atom, :Self, :Some, :None
-    // Allow both lowercase and uppercase letters for Dream macros and Erlang interop
+    // Allow both lowercase and uppercase letters for Surreal macros and Erlang interop
     #[regex(r":[a-zA-Z_][a-zA-Z0-9_]*", |lex| Some(lex.slice()[1..].to_string()))]
     Atom(String),
 
@@ -554,7 +554,7 @@ mod tests {
     #[test]
     fn test_rust_keywords_are_valid_idents() {
         // This isn't Rust - we can use most Rust keywords as identifiers
-        // (except `use`, `as`, `impl`, `trait`, `for`, `type`, `extern`, `crate`, `super` which are now keywords in Dream)
+        // (except `use`, `as`, `impl`, `trait`, `for`, `type`, `extern`, `crate`, `super` which are now keywords in Surreal)
         let mut lex = Token::lexer("loop while");
         assert_eq!(lex.next(), Some(Ok(Token::Ident("loop".to_string()))));
         assert_eq!(lex.next(), Some(Ok(Token::Ident("while".to_string()))));

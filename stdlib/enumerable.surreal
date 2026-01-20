@@ -1,4 +1,4 @@
-// Dream Standard Library - Enum Module
+// Surreal Standard Library - Enum Module
 //
 // Provides functional collection operations for lists and other enumerables.
 // Inspired by Elixir's Enum module.

@@ -1,4 +1,4 @@
-# Dream
+# Surreal
 
 A programming language with Rust-like syntax and Erlang-style concurrency.
 
@@ -13,9 +13,9 @@ Combine Rust's familiar syntax with Erlang's battle-tested concurrency model (pr
 Source → Lexer → Parser → AST → Core Erlang → BEAM
 ```
 
-### WebAssembly (via Dream VM)
+### WebAssembly (via Surreal VM)
 ```
-Source → Lexer → Parser → AST → Dream Bytecode → Dream VM (Rust/WASM)
+Source → Lexer → Parser → AST → Surreal Bytecode → Surreal VM (Rust/WASM)
 ```
 
 ## Language Features
@@ -52,12 +52,12 @@ wasm-pack build --target web
 
 ## Dependency Bindings System
 
-Dream can interoperate with Erlang and Elixir libraries through **bindings** - type stub files that declare external module interfaces.
+Surreal can interoperate with Erlang and Elixir libraries through **bindings** - type stub files that declare external module interfaces.
 
 ### Why Bindings Are Needed
 
-When Dream code calls external Erlang/Elixir functions like `jason::encode(data, [])`, the compiler needs to know:
-1. That `jason` is an external module (not a Dream module)
+When Surreal code calls external Erlang/Elixir functions like `jason::encode(data, [])`, the compiler needs to know:
+1. That `jason` is an external module (not a Surreal module)
 2. The actual Erlang/Elixir module name to call (e.g., `'Elixir.Jason'`)
 3. The function signatures for type checking
 
@@ -94,17 +94,17 @@ extern mod jason {
 
 Key elements:
 - `#[name = "Elixir.Jason"]` - The actual Erlang atom for the module
-- `extern mod jason` - The Dream name used in code (`jason::encode`)
-- `#[name = "encode!"]` - Maps Dream-safe names to Erlang names with special chars
+- `extern mod jason` - The Surreal name used in code (`jason::encode`)
+- `#[name = "encode!"]` - Maps Surreal-safe names to Erlang names with special chars
 
-### Using Bindings in Dream Code
+### Using Bindings in Surreal Code
 
 1. **Declare the module** in your `lib.surreal`:
    ```surreal
    mod jason;  // Loads from _build/bindings/jason.surreal
    ```
 
-2. **Call functions** using the Dream module name:
+2. **Call functions** using the Surreal module name:
    ```surreal
    // Compiles to 'Elixir.Jason':encode(data, [])
    let result = jason::encode(data, []);
@@ -135,7 +135,7 @@ let json = :"Elixir.Jason"::encode(data);
 
 ## Module Resolution: Stdlib vs Extern
 
-Dream has two types of module calls that look similar but compile differently:
+Surreal has two types of module calls that look similar but compile differently:
 
 1. **Stdlib module calls** (`io::println`, `logger::info`) - Compile to `'surreal::io':'println'`
 2. **Direct extern calls** (`:io::format`, `:logger::info`) - Compile to `'io':'format'` (Erlang directly)
@@ -153,7 +153,7 @@ module::func(args)    →  If module is in STDLIB_MODULES: stays as Path, gets s
 
 ### The STDLIB_MODULES List
 
-Both `typeck.rs` and `core_erlang.rs` have a `STDLIB_MODULES` constant that lists Dream stdlib modules:
+Both `typeck.rs` and `core_erlang.rs` have a `STDLIB_MODULES` constant that lists Surreal stdlib modules:
 
 ```rust
 const STDLIB_MODULES: &'static [&'static str] = &[
