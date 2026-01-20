@@ -1,4 +1,4 @@
--module(surreal_nif).
+-module(surreal_native).
 -export([parse/1, generate_core_ast/1]).
 -on_load(init/0).
 
@@ -8,36 +8,33 @@ init() ->
     erlang:load_nif(SoName, 0).
 
 find_nif_lib() ->
-    %% Try various paths to find the NIF library
+    %% Try priv dir first (installed as app), then development paths
+    case code:priv_dir(surreal_compiler) of
+        {error, _} ->
+            %% Not installed as app, try development paths
+            find_dev_path();
+        Dir ->
+            filename:join(Dir, "libsurreal_native")
+    end.
+
+find_dev_path() ->
+    %% Development paths relative to package root
     Paths = [
-        %% From priv dir if running as app
-        priv_path(),
-        %% From project root
-        "native/surreal_nif/target/release/libsurreal_nif",
-        "native/surreal_nif/target/debug/libsurreal_nif",
-        %% Absolute path fallback
-        filename:join([code:lib_dir(), "..", "..", "native", "surreal_nif", "target", "release", "libsurreal_nif"]),
-        filename:join([code:lib_dir(), "..", "..", "native", "surreal_nif", "target", "debug", "libsurreal_nif"])
+        "priv/libsurreal_native",
+        "_build/default/lib/surreal_compiler/priv/libsurreal_native",
+        "native/surreal_native/target/release/libsurreal_native",
+        "native/surreal_native/target/debug/libsurreal_native"
     ],
     find_first_existing(Paths).
 
-priv_path() ->
-    case code:priv_dir(surreal_nif) of
-        {error, _} -> undefined;
-        Dir -> filename:join(Dir, "libsurreal_nif")
-    end.
-
-find_first_existing([undefined | Rest]) ->
-    find_first_existing(Rest);
 find_first_existing([Path | Rest]) ->
-    %% Check for .so or .dylib
     case filelib:is_file(Path ++ ".so") orelse filelib:is_file(Path ++ ".dylib") of
         true -> Path;
         false -> find_first_existing(Rest)
     end;
 find_first_existing([]) ->
     %% Last resort - return a path and let load_nif fail with a clear error
-    "libsurreal_nif".
+    "libsurreal_native".
 
 %% Parse Surreal source code and return module information.
 %% Returns: {ok, [{ModuleName, [{FuncName, Arity}, ...]}]} | {error, Reason}

@@ -40,7 +40,7 @@ mod atoms {
 /// Parse Surreal source code and return module information.
 ///
 /// Returns: {:ok, %{name: atom, functions: [{name, arity}, ...]}} | {:error, reason}
-#[rustler::nif]
+#[rustler::nif(schedule = "DirtyCpu")]
 fn parse<'a>(env: Env<'a>, source: String) -> Term<'a> {
     use surreal::compiler::Parser;
 
@@ -75,7 +75,7 @@ fn parse<'a>(env: Env<'a>, source: String) -> Term<'a> {
 /// Returns: {:ok, CoreErlangAST} | {:error, reason}
 ///
 /// The CoreErlangAST is in the format expected by compile:forms/2 with [from_core, binary].
-#[rustler::nif]
+#[rustler::nif(schedule = "DirtyCpu")]
 fn generate_core_ast<'a>(env: Env<'a>, source: String) -> Term<'a> {
     use surreal::compiler::{Parser, check_modules};
 
@@ -293,7 +293,7 @@ fn build_expr<'a>(env: Env<'a>, expr: &surreal::compiler::Expr) -> NifResult<Ter
     }
 }
 
-rustler::init!("surreal_nif", load = on_load);
+rustler::init!("surreal_native", load = on_load);
 
 fn on_load(_env: Env, _info: Term) -> bool {
     // Nothing to initialize, just return success

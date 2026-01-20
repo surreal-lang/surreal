@@ -1,10 +1,10 @@
 [package]
-name = "surreal_nif"
+name = "surreal_native"
 version = "0.1.0"
 edition = "2024"
 
 [lib]
-name = "surreal_nif"
+name = "surreal_native"
 crate-type = ["cdylib"]
 
 [dependencies]
@@ -12,4 +12,4 @@ crate-type = ["cdylib"]
 rustler = "0.36"
 
 # Surreal compiler - use the parent crate
-surreal = { path = "../.." }
+surreal = { path = "../../../.." }
