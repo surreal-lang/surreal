@@ -2488,6 +2488,7 @@ fn save_terminal_state() -> Option<String> {
 }
 
 /// Restore terminal state after subprocess exits.
+#[cfg_attr(not(unix), allow(unused_variables))]
 fn restore_terminal_state(saved: Option<String>) {
     #[cfg(unix)]
     if let Some(state) = saved {
