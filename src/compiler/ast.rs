@@ -207,10 +207,10 @@ impl ModuleContext {
     /// For example, if package is "http_api" and atom is "hello_handler",
     /// returns Some("surreal::http_api::hello_handler").
     pub fn resolve_local_module(&self, atom: &str) -> Option<String> {
-        if let Some(ref pkg) = self.package_name {
-            if self.local_modules.contains(atom) {
-                return Some(format!("surreal::{}::{}", pkg, atom));
-            }
+        if let Some(ref pkg) = self.package_name
+            && self.local_modules.contains(atom)
+        {
+            return Some(format!("surreal::{}::{}", pkg, atom));
         }
         None
     }

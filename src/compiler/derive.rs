@@ -488,7 +488,9 @@ fn process_use_tree_for_macros(tree: &UseTree, registry: &mut MacroRegistry) {
             if mod_path.prefix == PathPrefix::None && mod_path.segments.len() == 1 {
                 let package = &mod_path.segments[0];
                 // Look up in package_macros - clone to avoid borrow issues
-                if let Some((module, function)) = registry.get_qualified(&[package.clone()], name) {
+                if let Some((module, function)) =
+                    registry.get_qualified(std::slice::from_ref(package), name)
+                {
                     let module = module.to_string();
                     let function = function.to_string();
                     let local_name = rename.as_ref().unwrap_or(name);
@@ -508,7 +510,7 @@ fn process_use_tree_for_macros(tree: &UseTree, registry: &mut MacroRegistry) {
                     .iter()
                     .filter_map(|item| {
                         registry
-                            .get_qualified(&[package.clone()], &item.name)
+                            .get_qualified(std::slice::from_ref(package), &item.name)
                             .map(|(m, f)| {
                                 let local_name = item.rename.as_ref().unwrap_or(&item.name).clone();
                                 (local_name, m.to_string(), f.to_string())
@@ -640,26 +642,26 @@ fn get_derive_refs(attrs: &[Attribute]) -> Vec<(DeriveRef, Span)> {
     let mut derives = Vec::new();
 
     for attr in attrs {
-        if attr.name == "derive" {
-            if let AttributeArgs::Parenthesized(args) = &attr.args {
-                for arg in args {
-                    match arg {
-                        AttributeArg::Ident(name) => {
-                            derives.push((DeriveRef::Name(name.clone()), attr.span.clone()));
-                        }
-                        AttributeArg::Path(segments) => {
-                            if let Some((name, package)) = segments.split_last() {
-                                derives.push((
-                                    DeriveRef::Path {
-                                        package: package.to_vec(),
-                                        name: name.clone(),
-                                    },
-                                    attr.span.clone(),
-                                ));
-                            }
-                        }
-                        _ => {}
+        if attr.name == "derive"
+            && let AttributeArgs::Parenthesized(args) = &attr.args
+        {
+            for arg in args {
+                match arg {
+                    AttributeArg::Ident(name) => {
+                        derives.push((DeriveRef::Name(name.clone()), attr.span.clone()));
                     }
+                    AttributeArg::Path(segments) => {
+                        if let Some((name, package)) = segments.split_last() {
+                            derives.push((
+                                DeriveRef::Path {
+                                    package: package.to_vec(),
+                                    name: name.clone(),
+                                },
+                                attr.span.clone(),
+                            ));
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
@@ -687,24 +689,24 @@ fn generate_struct_derives(
         processed.insert(derive_ref.clone());
 
         // Check if it's a built-in derive (only for unqualified names)
-        if let DeriveRef::Name(ref name) = derive_ref {
-            if let Some(kind) = DeriveKind::from_name(name) {
-                if let Some(impl_block) = generate_struct_derive(struct_def, kind) {
-                    impls.push(Item::Impl(impl_block));
-                }
-                continue;
+        if let DeriveRef::Name(ref name) = derive_ref
+            && let Some(kind) = DeriveKind::from_name(name)
+        {
+            if let Some(impl_block) = generate_struct_derive(struct_def, kind) {
+                impls.push(Item::Impl(impl_block));
             }
+            continue;
         }
 
         // Try user-defined macro if registry is available
-        if let Some(ref mut reg) = registry {
-            if reg.get_by_ref(&derive_ref).is_some() {
-                match reg.expand_struct_by_ref(&derive_ref, struct_def) {
-                    Ok(items) => impls.extend(items),
-                    Err(err) => errors.push(err),
-                }
-                continue;
+        if let Some(ref mut reg) = registry
+            && reg.get_by_ref(&derive_ref).is_some()
+        {
+            match reg.expand_struct_by_ref(&derive_ref, struct_def) {
+                Ok(items) => impls.extend(items),
+                Err(err) => errors.push(err),
             }
+            continue;
         }
 
         // Not found
@@ -739,24 +741,24 @@ fn generate_enum_derives(
         processed.insert(derive_ref.clone());
 
         // Check if it's a built-in derive (only for unqualified names)
-        if let DeriveRef::Name(ref name) = derive_ref {
-            if let Some(kind) = DeriveKind::from_name(name) {
-                if let Some(impl_block) = generate_enum_derive(enum_def, kind) {
-                    impls.push(Item::Impl(impl_block));
-                }
-                continue;
+        if let DeriveRef::Name(ref name) = derive_ref
+            && let Some(kind) = DeriveKind::from_name(name)
+        {
+            if let Some(impl_block) = generate_enum_derive(enum_def, kind) {
+                impls.push(Item::Impl(impl_block));
             }
+            continue;
         }
 
         // Try user-defined macro if registry is available
-        if let Some(ref mut reg) = registry {
-            if reg.get_by_ref(&derive_ref).is_some() {
-                match reg.expand_enum_by_ref(&derive_ref, enum_def) {
-                    Ok(items) => impls.extend(items),
-                    Err(err) => errors.push(err),
-                }
-                continue;
+        if let Some(ref mut reg) = registry
+            && reg.get_by_ref(&derive_ref).is_some()
+        {
+            match reg.expand_enum_by_ref(&derive_ref, enum_def) {
+                Ok(items) => impls.extend(items),
+                Err(err) => errors.push(err),
             }
+            continue;
         }
 
         // Not found

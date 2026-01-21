@@ -621,9 +621,9 @@ mod tests {
 
     #[test]
     fn test_colon_hash_sequence() {
-        let mut lex = Token::lexer(":#foo");
+        let lex = Token::lexer(":#foo");
         println!("Tokens for :#foo:");
-        while let Some(tok) = lex.next() {
+        for tok in lex {
             println!("  {:?}", tok);
         }
         // Reset and assert

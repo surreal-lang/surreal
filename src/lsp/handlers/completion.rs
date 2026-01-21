@@ -140,30 +140,31 @@ pub fn handle_completion(
 
 fn add_module_functions(completions: &mut Vec<CompletionItem>, module: &Module, prefix: &str) {
     for item in &module.items {
-        if let Item::Function(func) = item {
-            if func.name.starts_with(prefix) && (prefix.is_empty() || !func.name.starts_with("_")) {
-                // Format parameters
-                let params_str: Vec<String> = func
-                    .params
-                    .iter()
-                    .map(|p| format!("{}: {}", format_pattern(&p.pattern), format_type(&p.ty)))
-                    .collect();
+        if let Item::Function(func) = item
+            && func.name.starts_with(prefix)
+            && (prefix.is_empty() || !func.name.starts_with("_"))
+        {
+            // Format parameters
+            let params_str: Vec<String> = func
+                .params
+                .iter()
+                .map(|p| format!("{}: {}", format_pattern(&p.pattern), format_type(&p.ty)))
+                .collect();
 
-                let ret_str = func
-                    .return_type
-                    .as_ref()
-                    .map(|t| format!(" -> {}", format_type(t)))
-                    .unwrap_or_default();
+            let ret_str = func
+                .return_type
+                .as_ref()
+                .map(|t| format!(" -> {}", format_type(t)))
+                .unwrap_or_default();
 
-                let detail = format!("fn({}){}", params_str.join(", "), ret_str);
+            let detail = format!("fn({}){}", params_str.join(", "), ret_str);
 
-                completions.push(CompletionItem {
-                    label: func.name.clone(),
-                    kind: Some(CompletionItemKind::FUNCTION),
-                    detail: Some(detail),
-                    ..Default::default()
-                });
-            }
+            completions.push(CompletionItem {
+                label: func.name.clone(),
+                kind: Some(CompletionItemKind::FUNCTION),
+                detail: Some(detail),
+                ..Default::default()
+            });
         }
     }
 }

@@ -686,10 +686,10 @@ fn collect_expr_tokens(collector: &mut TokenCollector, expr: &SpannedExpr) {
             args,
         } => {
             // Type name (if present)
-            if let Some(tn) = type_name {
-                if let Some(offset) = collector.find_name_in_span(tn, &expr.span) {
-                    collector.add_token_for_name(tn, offset, TYPE_ENUM, 0);
-                }
+            if let Some(tn) = type_name
+                && let Some(offset) = collector.find_name_in_span(tn, &expr.span)
+            {
+                collector.add_token_for_name(tn, offset, TYPE_ENUM, 0);
             }
 
             // Variant name

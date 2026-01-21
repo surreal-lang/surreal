@@ -37,7 +37,7 @@ impl<'source> Lexer<'source> {
     /// Collect all tokens into a vector.
     pub fn collect_tokens(&mut self) -> Vec<SpannedToken> {
         let mut tokens = Vec::new();
-        while let Some(tok) = self.next() {
+        for tok in self.by_ref() {
             tokens.push(tok);
         }
         tokens

@@ -17,6 +17,6 @@ use tower_lsp::{LspService, Server};
 
 /// Run the LSP server on stdin/stdout.
 pub async fn run_server() {
-    let (service, socket) = LspService::new(|client| SurrealLanguageServer::new(client));
+    let (service, socket) = LspService::new(SurrealLanguageServer::new);
     Server::new(stdin(), stdout(), socket).serve(service).await;
 }

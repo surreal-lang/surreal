@@ -998,15 +998,15 @@ fn parse_export_tuple(s: &str) -> Option<(String, u8)> {
 
 /// Find stdlib path
 fn find_stdlib_path() -> Option<String> {
-    if let Ok(exe_path) = std::env::current_exe() {
-        if let Some(exe_dir) = exe_path.parent() {
-            let stdlib = exe_dir.join("../stdlib");
-            if stdlib.exists() {
-                return stdlib
-                    .canonicalize()
-                    .ok()
-                    .map(|p| p.to_string_lossy().into_owned());
-            }
+    if let Ok(exe_path) = std::env::current_exe()
+        && let Some(exe_dir) = exe_path.parent()
+    {
+        let stdlib = exe_dir.join("../stdlib");
+        if stdlib.exists() {
+            return stdlib
+                .canonicalize()
+                .ok()
+                .map(|p| p.to_string_lossy().into_owned());
         }
     }
 
@@ -1066,37 +1066,38 @@ fn format_surreal_value(value: &str) -> String {
         return format!("\"{}\"", inner);
     }
 
-    if value.starts_with("#{") && value.contains("'__struct__'") {
-        if let Some(struct_start) = value.find("'__struct__' => '") {
-            let after_struct = &value[struct_start + 17..];
-            if let Some(struct_end) = after_struct.find('\'') {
-                let struct_path = &after_struct[..struct_end];
-                let struct_name = struct_path.split("::").last().unwrap_or(struct_path);
+    if value.starts_with("#{")
+        && value.contains("'__struct__'")
+        && let Some(struct_start) = value.find("'__struct__' => '")
+    {
+        let after_struct = &value[struct_start + 17..];
+        if let Some(struct_end) = after_struct.find('\'') {
+            let struct_path = &after_struct[..struct_end];
+            let struct_name = struct_path.split("::").last().unwrap_or(struct_path);
 
-                // Check for wrapped struct format: data => #{...}
-                if let Some(data_start) = value.find("data => ") {
-                    let after_data = &value[data_start + 8..];
-                    if let Some(data_content) = extract_map_content(after_data) {
-                        if struct_name == "Map" {
-                            if data_content == "#{}" {
-                                return "{}".to_string();
-                            }
-                            return format!("{{ {} }}", format_map_fields(&data_content));
-                        }
+            // Check for wrapped struct format: data => #{...}
+            if let Some(data_start) = value.find("data => ") {
+                let after_data = &value[data_start + 8..];
+                if let Some(data_content) = extract_map_content(after_data) {
+                    if struct_name == "Map" {
                         if data_content == "#{}" {
-                            return format!("{}()", struct_name);
+                            return "{}".to_string();
                         }
-                        return format!("{}({})", struct_name, format_map_fields(&data_content));
+                        return format!("{{ {} }}", format_map_fields(&data_content));
                     }
-                } else {
-                    // Direct struct format: #{field => val, '__struct__' => 'Type', ...}
-                    // Extract fields excluding __struct__
-                    let fields = format_struct_fields(value, struct_name);
-                    if fields.is_empty() {
-                        return format!("{} {{}}", struct_name);
+                    if data_content == "#{}" {
+                        return format!("{}()", struct_name);
                     }
-                    return format!("{} {{ {} }}", struct_name, fields);
+                    return format!("{}({})", struct_name, format_map_fields(&data_content));
                 }
+            } else {
+                // Direct struct format: #{field => val, '__struct__' => 'Type', ...}
+                // Extract fields excluding __struct__
+                let fields = format_struct_fields(value, struct_name);
+                if fields.is_empty() {
+                    return format!("{} {{}}", struct_name);
+                }
+                return format!("{} {{ {} }}", struct_name, fields);
             }
         }
     }
@@ -1668,8 +1669,10 @@ fn compile_and_run_source(
         // Don't prefix REPL-edited modules - let users call them directly
         let prefixed_module = module.clone();
 
-        let mut module_context = ModuleContext::default();
-        module_context.skip_stdlib_prefix = true; // REPL modules don't get surreal:: prefix
+        let module_context = ModuleContext {
+            skip_stdlib_prefix: true, // REPL modules don't get surreal:: prefix
+            ..Default::default()
+        };
         let mut emitter =
             CoreErlangEmitter::with_registry_and_context(registry.clone(), module_context);
 
@@ -1693,10 +1696,10 @@ fn compile_and_run_source(
                 // Extract exports from AST for tab completion (pub functions)
                 let mut exports: Vec<(String, u8)> = Vec::new();
                 for item in &module.items {
-                    if let Item::Function(func) = item {
-                        if func.is_pub {
-                            exports.push((func.name.clone(), func.params.len() as u8));
-                        }
+                    if let Item::Function(func) = item
+                        && func.is_pub
+                    {
+                        exports.push((func.name.clone(), func.params.len() as u8));
                     }
                 }
                 state

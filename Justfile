@@ -58,11 +58,37 @@ clean:
 
 # Format code
 fmt:
-    cargo fmt
+    cargo fmt --all
 
 # Lint code
 lint:
-    cargo clippy
+    cargo clippy --all-targets --all-features
+
+# Run CI checks (format, lint, test) - use before committing
+ci:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "==> Checking formatting..."
+    cargo fmt --all -- --check
+    echo "==> Running clippy..."
+    cargo clippy --all-targets --all-features
+    echo "==> Running tests..."
+    cargo test --all-features
+    echo "==> All CI checks passed!"
+
+# Install git hooks
+hooks:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p .git/hooks
+    echo '#!/bin/bash' > .git/hooks/pre-commit
+    echo 'set -e' >> .git/hooks/pre-commit
+    echo 'echo "Running pre-commit checks..."' >> .git/hooks/pre-commit
+    echo 'cargo fmt --all -- --check || { echo "Formatting check failed. Run cargo fmt to fix."; exit 1; }' >> .git/hooks/pre-commit
+    echo 'cargo clippy --all-targets --all-features -- -D warnings || { echo "Clippy check failed."; exit 1; }' >> .git/hooks/pre-commit
+    echo 'echo "Pre-commit checks passed!"' >> .git/hooks/pre-commit
+    chmod +x .git/hooks/pre-commit
+    echo "Git hooks installed!"
 
 # Watch for changes and run tests
 watch:

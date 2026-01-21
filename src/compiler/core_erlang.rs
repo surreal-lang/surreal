@@ -277,7 +277,7 @@ impl CoreErlangEmitter {
     /// Register this module's generic functions in the shared registry.
     /// Call this after emit_module to make generics available to other modules.
     pub fn register_generics(&self, registry: &mut GenericFunctionRegistry) {
-        for (_name, func) in &self.generic_functions {
+        for func in self.generic_functions.values() {
             registry.register(&self.module_name, func);
             // Also register without the surreal:: prefix for easier lookup (stdlib modules)
             let short_name = self
@@ -496,9 +496,7 @@ impl CoreErlangEmitter {
                 ..
             } => {
                 Self::block_contains_return(then_block)
-                    || else_block
-                        .as_ref()
-                        .is_some_and(|b| Self::block_contains_return(b))
+                    || else_block.as_ref().is_some_and(Self::block_contains_return)
             }
             Expr::Match { arms, .. } => arms
                 .iter()
@@ -1230,37 +1228,37 @@ impl CoreErlangEmitter {
         // Emit default methods not overridden in this impl
         if let Some(trait_def) = self.traits.get(&trait_impl.trait_name).cloned() {
             for trait_method in &trait_def.methods {
-                if let Some(ref body) = trait_method.body {
-                    if !impl_method_names.contains(&trait_method.name) {
-                        let mangled_name = format!(
-                            "{}{}_{}_{}",
-                            simple_trait,
-                            trait_type_args_suffix,
-                            trait_impl.type_name,
-                            trait_method.name
-                        );
-                        let default_method = Function {
-                            attrs: vec![],
-                            name: mangled_name.clone(),
-                            type_params: trait_method.type_params.clone(),
-                            params: trait_method.params.clone(),
-                            guard: None,
-                            return_type: trait_method.return_type.clone(),
-                            body: body.clone(),
-                            is_pub: true, // Default methods are public
-                            span: 0..0,   // Synthetic span
-                        };
-                        self.newline();
-                        self.emit_function(&default_method)?;
+                if let Some(ref body) = trait_method.body
+                    && !impl_method_names.contains(&trait_method.name)
+                {
+                    let mangled_name = format!(
+                        "{}{}_{}_{}",
+                        simple_trait,
+                        trait_type_args_suffix,
+                        trait_impl.type_name,
+                        trait_method.name
+                    );
+                    let default_method = Function {
+                        attrs: vec![],
+                        name: mangled_name.clone(),
+                        type_params: trait_method.type_params.clone(),
+                        params: trait_method.params.clone(),
+                        guard: None,
+                        return_type: trait_method.return_type.clone(),
+                        body: body.clone(),
+                        is_pub: true, // Default methods are public
+                        span: 0..0,   // Synthetic span
+                    };
+                    self.newline();
+                    self.emit_function(&default_method)?;
 
-                        // Also emit simple-name wrapper for default methods
-                        let simple_name = format!("{}_{}", trait_impl.type_name, trait_method.name);
-                        self.emit_simple_method_wrapper(
-                            &simple_name,
-                            &mangled_name,
-                            trait_method.params.len(),
-                        )?;
-                    }
+                    // Also emit simple-name wrapper for default methods
+                    let simple_name = format!("{}_{}", trait_impl.type_name, trait_method.name);
+                    self.emit_simple_method_wrapper(
+                        &simple_name,
+                        &mangled_name,
+                        trait_method.params.len(),
+                    )?;
                 }
             }
         }
@@ -1354,9 +1352,9 @@ impl CoreErlangEmitter {
         // All Surreal modules are prefixed with surreal:: (like Elixir uses Elixir.)
         // This ensures Surreal modules are properly namespaced on the BEAM
         // Unless skip_stdlib_prefix is set (for REPL modules)
-        self.module_name = if self.module_context.skip_stdlib_prefix {
-            module.name.clone()
-        } else if module.name.starts_with(Self::STDLIB_PREFIX) {
+        self.module_name = if self.module_context.skip_stdlib_prefix
+            || module.name.starts_with(Self::STDLIB_PREFIX)
+        {
             module.name.clone()
         } else {
             format!("{}{}", Self::STDLIB_PREFIX, module.name)
@@ -1454,7 +1452,7 @@ impl CoreErlangEmitter {
                         );
                         self.trait_impls
                             .entry(key)
-                            .or_insert_with(Vec::new)
+                            .or_default()
                             .push(trait_impl.type_name.clone());
                     }
 
@@ -1480,7 +1478,7 @@ impl CoreErlangEmitter {
                                 );
                                 self.trait_impls
                                     .entry(key)
-                                    .or_insert_with(Vec::new)
+                                    .or_default()
                                     .push(trait_impl.type_name.clone());
                             }
                         }
@@ -1502,7 +1500,7 @@ impl CoreErlangEmitter {
                         let key = (format!("Into_{}", target_type), "into".to_string());
                         self.trait_impls
                             .entry(key)
-                            .or_insert_with(Vec::new)
+                            .or_default()
                             .push(source_type.clone());
                     }
                 }
@@ -2361,9 +2359,7 @@ impl CoreErlangEmitter {
                 } = expr.inner()
                 {
                     let then_returns = Self::block_contains_return(then_block);
-                    let else_returns = else_block
-                        .as_ref()
-                        .is_some_and(|b| Self::block_contains_return(b));
+                    let else_returns = else_block.as_ref().is_some_and(Self::block_contains_return);
 
                     if then_returns || else_returns {
                         // Transform: if with return becomes case with continuation
@@ -2886,7 +2882,7 @@ impl CoreErlangEmitter {
                             self.emit_trait_dispatch(first, second, args)?;
                         } else if self.cross_module_inlining_source.is_some()
                             && !type_args.is_empty()
-                            && first.chars().next().map_or(false, |c| c.is_uppercase())
+                            && first.chars().next().is_some_and(|c| c.is_uppercase())
                         {
                             // When inlining from another module, trait dispatch calls like
                             // GenServer::init::<T>(args) need to be emitted as local calls
@@ -3066,7 +3062,7 @@ impl CoreErlangEmitter {
                         // 1. module::Type::method() - impl method (Type starts uppercase)
                         // 2. module::submodule::function() - nested module (submodule starts lowercase)
                         let second = &segments[1];
-                        let is_type = second.chars().next().map_or(false, |c| c.is_uppercase());
+                        let is_type = second.chars().next().is_some_and(|c| c.is_uppercase());
 
                         if is_type && segments.len() == 3 {
                             // Cross-module impl method call: module::Type::method()
@@ -3522,12 +3518,11 @@ impl CoreErlangEmitter {
                         if let Some(info) = self.struct_info.get(struct_name) {
                             if let Some(record_name) = &info.record_name {
                                 // Find field index
-                                let field_index = info
-                                    .fields
+                                // +2 because element 1 is record name
+                                info.fields
                                     .iter()
                                     .position(|(f, _)| f == field)
-                                    .map(|i| (record_name.clone(), i + 2)); // +2 because element 1 is record name
-                                field_index
+                                    .map(|i| (record_name.clone(), i + 2))
                             } else {
                                 None
                             }
@@ -4542,7 +4537,7 @@ impl CoreErlangEmitter {
     fn escape_erlang_atom(&self, s: &str) -> String {
         // Check if it's a simple atom that doesn't need quoting
         let is_simple = !s.is_empty()
-            && s.chars().next().map_or(false, |c| c.is_ascii_lowercase())
+            && s.chars().next().is_some_and(|c| c.is_ascii_lowercase())
             && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
 
         if is_simple {
@@ -5408,18 +5403,15 @@ impl CoreErlangEmitter {
         // Special handling for string literals in bitstrings
         // Each character becomes a separate integer segment
         // e.g., <<"hi">> becomes #<104>(8,1,'integer',['unsigned'|['big']]), #<105>(8,1,'integer',['unsigned'|['big']])
-        match seg.value.inner() {
-            Expr::String(s) => {
-                let chars: Vec<u32> = s.chars().map(|c| c as u32).collect();
-                for (i, code) in chars.iter().enumerate() {
-                    if i > 0 {
-                        self.emit(", ");
-                    }
-                    self.emit(&format!("#<{}>(8,1,'integer',['unsigned'|['big']])", code));
+        if let Expr::String(s) = seg.value.inner() {
+            let chars: Vec<u32> = s.chars().map(|c| c as u32).collect();
+            for (i, code) in chars.iter().enumerate() {
+                if i > 0 {
+                    self.emit(", ");
                 }
-                return Ok(());
+                self.emit(&format!("#<{}>(8,1,'integer',['unsigned'|['big']])", code));
             }
-            _ => {}
+            return Ok(());
         }
 
         self.emit("#<");

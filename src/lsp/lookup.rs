@@ -356,10 +356,10 @@ fn collect_refs_in_stmt(collector: &mut ReferenceCollector, stmt: &Stmt) {
             // Add binding to scope and check if it's a definition we're tracking
             if let Some((name, _)) = extract_pattern_binding(pattern) {
                 // Check if this is the definition we're looking for
-                if let Some(ref target_span) = collector.target_def_span {
-                    if span == target_span {
-                        collector.add_reference(span.clone(), true);
-                    }
+                if let Some(ref target_span) = collector.target_def_span
+                    && span == target_span
+                {
+                    collector.add_reference(span.clone(), true);
                 }
                 collector.define_variable(name, span.clone());
             }
@@ -374,24 +374,22 @@ fn collect_refs_in_expr(collector: &mut ReferenceCollector, expr: &SpannedExpr) 
     match &expr.expr {
         Expr::Ident(name) => {
             // Check if this variable references our target definition
-            if let Some(ref target_span) = collector.target_def_span {
-                if let Some(def_span) = collector.lookup_variable(name) {
-                    if &def_span == target_span {
-                        collector.add_reference(expr.span.clone(), false);
-                    }
-                }
+            if let Some(ref target_span) = collector.target_def_span
+                && let Some(def_span) = collector.lookup_variable(name)
+                && &def_span == target_span
+            {
+                collector.add_reference(expr.span.clone(), false);
             }
         }
 
         Expr::Path { segments } if segments.len() == 1 => {
             // Single-segment path could be a variable
             let name = &segments[0];
-            if let Some(ref target_span) = collector.target_def_span {
-                if let Some(def_span) = collector.lookup_variable(name) {
-                    if &def_span == target_span {
-                        collector.add_reference(expr.span.clone(), false);
-                    }
-                }
+            if let Some(ref target_span) = collector.target_def_span
+                && let Some(def_span) = collector.lookup_variable(name)
+                && &def_span == target_span
+            {
+                collector.add_reference(expr.span.clone(), false);
             }
         }
 
@@ -617,30 +615,30 @@ fn collect_func_refs_in_item(collector: &mut ReferenceCollector, item: &Item) {
     match item {
         Item::Function(func) => {
             // Check if this is the function definition we're looking for
-            if let Some(ref target_name) = collector.target_func_name {
-                if &func.name == target_name {
-                    collector.add_reference(func.span.clone(), true);
-                }
+            if let Some(ref target_name) = collector.target_func_name
+                && &func.name == target_name
+            {
+                collector.add_reference(func.span.clone(), true);
             }
             // Also search for calls within the function body
             collect_func_refs_in_function(collector, func);
         }
         Item::Impl(impl_block) => {
             for method in &impl_block.methods {
-                if let Some(ref target_name) = collector.target_func_name {
-                    if &method.name == target_name {
-                        collector.add_reference(method.span.clone(), true);
-                    }
+                if let Some(ref target_name) = collector.target_func_name
+                    && &method.name == target_name
+                {
+                    collector.add_reference(method.span.clone(), true);
                 }
                 collect_func_refs_in_function(collector, method);
             }
         }
         Item::TraitImpl(trait_impl) => {
             for method in &trait_impl.methods {
-                if let Some(ref target_name) = collector.target_func_name {
-                    if &method.name == target_name {
-                        collector.add_reference(method.span.clone(), true);
-                    }
+                if let Some(ref target_name) = collector.target_func_name
+                    && &method.name == target_name
+                {
+                    collector.add_reference(method.span.clone(), true);
                 }
                 collect_func_refs_in_function(collector, method);
             }
@@ -677,30 +675,28 @@ fn collect_func_refs_in_expr(collector: &mut ReferenceCollector, expr: &SpannedE
     match &expr.expr {
         Expr::Path { segments } => {
             // Check for function references (module::func or just func)
-            if let Some(ref target_name) = collector.target_func_name {
-                if let Some(func_name) = segments.last() {
-                    if func_name == target_name {
-                        collector.add_reference(expr.span.clone(), false);
-                    }
-                }
+            if let Some(ref target_name) = collector.target_func_name
+                && let Some(func_name) = segments.last()
+                && func_name == target_name
+            {
+                collector.add_reference(expr.span.clone(), false);
             }
         }
 
         Expr::Call { func, args, .. } => {
             // Check if this is a call to our target function
             if let Expr::Path { segments } = &func.expr {
-                if let Some(ref target_name) = collector.target_func_name {
-                    if let Some(func_name) = segments.last() {
-                        if func_name == target_name {
-                            collector.add_reference(func.span.clone(), false);
-                        }
-                    }
+                if let Some(ref target_name) = collector.target_func_name
+                    && let Some(func_name) = segments.last()
+                    && func_name == target_name
+                {
+                    collector.add_reference(func.span.clone(), false);
                 }
             } else if let Expr::Ident(name) = &func.expr {
-                if let Some(ref target_name) = collector.target_func_name {
-                    if name == target_name {
-                        collector.add_reference(func.span.clone(), false);
-                    }
+                if let Some(ref target_name) = collector.target_func_name
+                    && name == target_name
+                {
+                    collector.add_reference(func.span.clone(), false);
                 }
             } else {
                 collect_func_refs_in_expr(collector, func);
@@ -720,12 +716,12 @@ fn collect_func_refs_in_expr(collector: &mut ReferenceCollector, expr: &SpannedE
             collect_func_refs_in_expr(collector, receiver);
 
             // Check if this method call matches our target
-            if let Some(ref target_name) = collector.target_func_name {
-                if method == target_name {
-                    // For method calls, we'd need type info to be precise
-                    // For now, include it as a potential reference
-                    collector.add_reference(expr.span.clone(), false);
-                }
+            if let Some(ref target_name) = collector.target_func_name
+                && method == target_name
+            {
+                // For method calls, we'd need type info to be precise
+                // For now, include it as a potential reference
+                collector.add_reference(expr.span.clone(), false);
             }
 
             for arg in args {
@@ -866,10 +862,10 @@ fn collect_func_refs_in_expr(collector: &mut ReferenceCollector, expr: &SpannedE
 fn collect_struct_refs_in_item(collector: &mut ReferenceCollector, item: &Item) {
     match item {
         Item::Struct(s) => {
-            if let Some(ref target_name) = collector.target_struct_name {
-                if &s.name == target_name {
-                    collector.add_reference(s.span.clone(), true);
-                }
+            if let Some(ref target_name) = collector.target_struct_name
+                && &s.name == target_name
+            {
+                collector.add_reference(s.span.clone(), true);
             }
         }
         Item::Function(func) => {
@@ -877,11 +873,11 @@ fn collect_struct_refs_in_item(collector: &mut ReferenceCollector, item: &Item) 
         }
         Item::Impl(impl_block) => {
             // Check if impl is for our struct
-            if let Some(ref target_name) = collector.target_struct_name {
-                if &impl_block.type_name == target_name {
-                    // The impl itself references the struct (at the type name position)
-                    // For now, just note it
-                }
+            if let Some(ref target_name) = collector.target_struct_name
+                && &impl_block.type_name == target_name
+            {
+                // The impl itself references the struct (at the type name position)
+                // For now, just note it
             }
             for method in &impl_block.methods {
                 collect_struct_refs_in_function(collector, method);
@@ -923,10 +919,10 @@ fn collect_struct_refs_in_stmt(collector: &mut ReferenceCollector, stmt: &Stmt) 
 fn collect_struct_refs_in_expr(collector: &mut ReferenceCollector, expr: &SpannedExpr) {
     match &expr.expr {
         Expr::StructInit { name, fields, base } => {
-            if let Some(ref target_name) = collector.target_struct_name {
-                if name == target_name {
-                    collector.add_reference(expr.span.clone(), false);
-                }
+            if let Some(ref target_name) = collector.target_struct_name
+                && name == target_name
+            {
+                collector.add_reference(expr.span.clone(), false);
             }
             for (_, field_expr) in fields {
                 collect_struct_refs_in_expr(collector, field_expr);
@@ -1697,12 +1693,12 @@ mod tests {
         // Inner x: definition, z = x (2 refs)
         // At minimum, both should find some references
         assert!(
-            outer_refs.len() >= 1,
+            !outer_refs.is_empty(),
             "Outer x should have at least 1 reference, got {}",
             outer_refs.len()
         );
         assert!(
-            inner_refs.len() >= 1,
+            !inner_refs.is_empty(),
             "Inner x should have at least 1 reference, got {}",
             inner_refs.len()
         );

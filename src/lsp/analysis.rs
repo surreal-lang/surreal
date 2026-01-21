@@ -69,6 +69,7 @@ fn find_stdlib_dir() -> Option<std::path::PathBuf> {
 }
 
 /// Result of analyzing a single file.
+#[derive(Default)]
 pub struct AnalysisResult {
     /// Successfully parsed module (may still have type errors)
     pub module: Option<Module>,
@@ -80,18 +81,6 @@ pub struct AnalysisResult {
     pub warnings: Vec<Warning>,
     /// Type check metadata (if type checking succeeded)
     pub metadata: Option<TypeCheckResult>,
-}
-
-impl Default for AnalysisResult {
-    fn default() -> Self {
-        Self {
-            module: None,
-            parse_errors: Vec::new(),
-            type_errors: Vec::new(),
-            warnings: Vec::new(),
-            metadata: None,
-        }
-    }
 }
 
 /// Analyzer wrapping compiler APIs for LSP use.
@@ -162,7 +151,7 @@ impl Analyzer {
         result.warnings = type_result
             .warnings
             .iter()
-            .filter(|w| w.module.as_ref().map_or(true, |m| m == &module_name))
+            .filter(|w| w.module.as_ref().is_none_or(|m| m == &module_name))
             .cloned()
             .collect();
 

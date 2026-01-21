@@ -515,12 +515,8 @@ impl DepsManager {
                         still_pending.push(pkg_name);
                     } else {
                         // Last pass - report the error
-                        if let Err(e) = erlang_result {
-                            return Err(e);
-                        }
-                        if let Err(e) = elixir_result {
-                            return Err(e);
-                        }
+                        erlang_result?;
+                        elixir_result?
                     }
                 } else {
                     // Successfully compiled/detected - install to _build
@@ -561,7 +557,7 @@ impl DepsManager {
         let erl_files: Vec<_> = fs::read_dir(&src_dir)
             .map_err(|e| DepsError::new(format!("Failed to read src dir for {}: {}", name, e)))?
             .filter_map(|e| e.ok())
-            .filter(|e| e.path().extension().map_or(false, |ext| ext == "erl"))
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "erl"))
             .collect();
 
         if erl_files.is_empty() {
@@ -575,7 +571,7 @@ impl DepsManager {
                 .map(|entries| {
                     entries
                         .filter_map(|e| e.ok())
-                        .any(|e| e.path().extension().map_or(false, |ext| ext == "beam"))
+                        .any(|e| e.path().extension().is_some_and(|ext| ext == "beam"))
                 })
                 .unwrap_or(false);
 
@@ -770,7 +766,7 @@ impl DepsManager {
                     .flatten()
                     .filter_map(|e| {
                         let path = e.path();
-                        if path.extension().map_or(false, |ext| ext == "beam") {
+                        if path.extension().is_some_and(|ext| ext == "beam") {
                             path.file_stem()
                                 .and_then(|s| s.to_str())
                                 .map(|s| format!("'{}'", s))
@@ -818,10 +814,10 @@ impl DepsManager {
             let trimmed = line.trim();
             if trimmed.starts_with("@version") {
                 // Extract version string from @version "1.2.3"
-                if let Some(start) = trimmed.find('"') {
-                    if let Some(end) = trimmed[start + 1..].find('"') {
-                        return Some(trimmed[start + 1..start + 1 + end].to_string());
-                    }
+                if let Some(start) = trimmed.find('"')
+                    && let Some(end) = trimmed[start + 1..].find('"')
+                {
+                    return Some(trimmed[start + 1..start + 1 + end].to_string());
                 }
             }
         }
@@ -829,12 +825,11 @@ impl DepsManager {
         // Try to find version: "x.y.z" in project definition
         for line in content.lines() {
             let trimmed = line.trim();
-            if trimmed.starts_with("version:") {
-                if let Some(start) = trimmed.find('"') {
-                    if let Some(end) = trimmed[start + 1..].find('"') {
-                        return Some(trimmed[start + 1..start + 1 + end].to_string());
-                    }
-                }
+            if trimmed.starts_with("version:")
+                && let Some(start) = trimmed.find('"')
+                && let Some(end) = trimmed[start + 1..].find('"')
+            {
+                return Some(trimmed[start + 1..start + 1 + end].to_string());
             }
         }
 
@@ -850,7 +845,7 @@ impl DepsManager {
                 let path = entry.path();
                 if path.is_dir() {
                     files.extend(Self::find_ex_files(&path));
-                } else if path.extension().map_or(false, |ext| ext == "ex") {
+                } else if path.extension().is_some_and(|ext| ext == "ex") {
                     files.push(path);
                 }
             }
@@ -1103,7 +1098,7 @@ extern mod {} {{
 
     /// Convert a string to PascalCase.
     fn to_pascal_case(s: &str) -> String {
-        s.split(|c| c == '_' || c == '-')
+        s.split(['_', '-'])
             .map(|word| {
                 let mut chars = word.chars();
                 match chars.next() {
@@ -1127,7 +1122,7 @@ extern mod {} {{
                 let path = entry.path();
                 if path.is_dir() {
                     files.extend(Self::find_erl_files(&path));
-                } else if path.extension().map_or(false, |ext| ext == "erl") {
+                } else if path.extension().is_some_and(|ext| ext == "erl") {
                     files.push(path);
                 }
             }
@@ -1149,7 +1144,7 @@ extern mod {} {{
                 let path = entry.path();
                 if path.is_dir() {
                     files.extend(Self::find_hrl_files(&path));
-                } else if path.extension().map_or(false, |ext| ext == "hrl") {
+                } else if path.extension().is_some_and(|ext| ext == "hrl") {
                     files.push(path);
                 }
             }

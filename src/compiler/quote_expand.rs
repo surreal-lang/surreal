@@ -94,7 +94,7 @@ fn expand_expr_quotes_spanned(spanned: SpannedExpr) -> SpannedExpr {
 fn expand_expr_quotes(expr: Expr) -> Expr {
     match expr {
         // Main expansion: quote { expr } -> tuple construction code
-        Expr::Quote(inner) => quote_expr_to_tuple(&*inner),
+        Expr::Quote(inner) => quote_expr_to_tuple(&inner),
 
         // Quote item: quote { impl ... } -> tuple construction code
         Expr::QuoteItem(item) => quote_item_to_tuple(&item),
@@ -268,7 +268,7 @@ fn quote_expr_to_tuple(spanned: &SpannedExpr) -> Expr {
 
         // Function call
         Expr::Call { func, args, .. } => {
-            let args_list: Vec<Expr> = args.iter().map(|a| quote_expr_to_tuple(a)).collect();
+            let args_list: Vec<Expr> = args.iter().map(quote_expr_to_tuple).collect();
             make_tuple(vec![
                 make_atom("call"),
                 quote_expr_to_tuple(func),
@@ -283,7 +283,7 @@ fn quote_expr_to_tuple(spanned: &SpannedExpr) -> Expr {
             args,
             ..
         } => {
-            let args_list: Vec<Expr> = args.iter().map(|a| quote_expr_to_tuple(a)).collect();
+            let args_list: Vec<Expr> = args.iter().map(quote_expr_to_tuple).collect();
             make_tuple(vec![
                 make_atom("method_call"),
                 quote_expr_to_tuple(receiver),
@@ -309,7 +309,7 @@ fn quote_expr_to_tuple(spanned: &SpannedExpr) -> Expr {
 
         // Tuple
         Expr::Tuple(elems) => {
-            let elem_list: Vec<Expr> = elems.iter().map(|e| quote_expr_to_tuple(e)).collect();
+            let elem_list: Vec<Expr> = elems.iter().map(quote_expr_to_tuple).collect();
             make_tuple(vec![make_atom("tuple"), make_list(elem_list)])
         }
 
@@ -320,7 +320,7 @@ fn quote_expr_to_tuple(spanned: &SpannedExpr) -> Expr {
                 // Generate runtime list construction with splicing
                 quote_list_with_splice(elems)
             } else {
-                let elem_list: Vec<Expr> = elems.iter().map(|e| quote_expr_to_tuple(e)).collect();
+                let elem_list: Vec<Expr> = elems.iter().map(quote_expr_to_tuple).collect();
                 make_tuple(vec![make_atom("list"), make_list(elem_list)])
             }
         }
@@ -344,7 +344,7 @@ fn quote_expr_to_tuple(spanned: &SpannedExpr) -> Expr {
             function,
             args,
         } => {
-            let args_list: Vec<Expr> = args.iter().map(|a| quote_expr_to_tuple(a)).collect();
+            let args_list: Vec<Expr> = args.iter().map(quote_expr_to_tuple).collect();
             make_tuple(vec![
                 make_atom("extern_call"),
                 make_atom(module),
@@ -384,7 +384,7 @@ fn quote_block_to_tuple(block: &Block) -> Expr {
         quote_block_with_splice(block, expr_tuple)
     } else {
         // Simple case: no splicing, generate literal tuple
-        let stmts_list: Vec<Expr> = block.stmts.iter().map(|s| quote_stmt_to_tuple(s)).collect();
+        let stmts_list: Vec<Expr> = block.stmts.iter().map(quote_stmt_to_tuple).collect();
         make_tuple(vec![make_list(stmts_list), expr_tuple])
     }
 }
@@ -482,10 +482,8 @@ fn quote_list_with_splice(elems: &[SpannedExpr]) -> Expr {
                 // Flush current group as a quoted list
                 if !current_group.is_empty() {
                     // Wrap in (:list, [...]) tuple
-                    let quoted_group: Vec<Expr> = current_group
-                        .iter()
-                        .map(|e| quote_expr_to_tuple(e))
-                        .collect();
+                    let quoted_group: Vec<Expr> =
+                        current_group.iter().map(quote_expr_to_tuple).collect();
                     concat_parts.push(make_tuple(vec![make_atom("list"), make_list(quoted_group)]));
                     current_group.clear();
                 }
@@ -501,10 +499,7 @@ fn quote_list_with_splice(elems: &[SpannedExpr]) -> Expr {
 
     // Flush remaining group
     if !current_group.is_empty() {
-        let quoted_group: Vec<Expr> = current_group
-            .iter()
-            .map(|e| quote_expr_to_tuple(e))
-            .collect();
+        let quoted_group: Vec<Expr> = current_group.iter().map(quote_expr_to_tuple).collect();
         concat_parts.push(make_tuple(vec![make_atom("list"), make_list(quoted_group)]));
     }
 
@@ -570,12 +565,12 @@ fn quote_list_with_splice(elems: &[SpannedExpr]) -> Expr {
 fn quote_repetition_to_expr(pattern: &SpannedExpr, separator: Option<&str>) -> Expr {
     // Case 1: Simple splice - #(#var)*
     // Pattern is Unquote(Ident(...)) - just return the variable
-    if let Expr::Unquote(inner) = pattern.inner() {
-        if let Expr::Ident(var_name) = inner.inner() {
-            // The variable should already contain a list of quoted elements
-            // Just return it directly
-            return Expr::Ident(var_name.clone());
-        }
+    if let Expr::Unquote(inner) = pattern.inner()
+        && let Expr::Ident(var_name) = inner.inner()
+    {
+        // The variable should already contain a list of quoted elements
+        // Just return it directly
+        return Expr::Ident(var_name.clone());
     }
 
     // Case 2: Complex pattern - find the iteration variable and generate a map
@@ -640,18 +635,18 @@ fn find_unquoted_vars(spanned: &SpannedExpr) -> Vec<String> {
 fn find_unquoted_vars_recursive(expr: &Expr, vars: &mut Vec<String>) {
     match expr {
         Expr::Unquote(inner) | Expr::UnquoteAtom(inner) => {
-            if let Expr::Ident(name) = inner.inner() {
-                if !vars.contains(name) {
-                    vars.push(name.clone());
-                }
+            if let Expr::Ident(name) = inner.inner()
+                && !vars.contains(name)
+            {
+                vars.push(name.clone());
             }
         }
         Expr::Ident(name) => {
             // Check for $UNQUOTE: marker
-            if let Some(var_name) = name.strip_prefix("$UNQUOTE:") {
-                if !vars.contains(&var_name.to_string()) {
-                    vars.push(var_name.to_string());
-                }
+            if let Some(var_name) = name.strip_prefix("$UNQUOTE:")
+                && !vars.contains(&var_name.to_string())
+            {
+                vars.push(var_name.to_string());
             }
         }
         Expr::Binary { left, right, .. } => {
@@ -711,39 +706,39 @@ fn substitute_var_in_expr(spanned: &SpannedExpr, var_name: &str, replacement: &s
     let expr = spanned.inner();
     match expr {
         Expr::Unquote(inner) => {
-            if let Expr::Ident(name) = inner.inner() {
-                if name == var_name {
-                    // Replace with new variable reference
-                    return Expr::Unquote(boxed(Expr::Ident(replacement.to_string())));
-                }
+            if let Expr::Ident(name) = inner.inner()
+                && name == var_name
+            {
+                // Replace with new variable reference
+                return Expr::Unquote(boxed(Expr::Ident(replacement.to_string())));
             }
             Expr::Unquote(boxed(substitute_var_in_expr(inner, var_name, replacement)))
         }
         Expr::UnquoteAtom(inner) => {
-            if let Expr::Ident(name) = inner.inner() {
-                if name == var_name {
-                    // Replace with new variable reference
-                    return Expr::UnquoteAtom(boxed(Expr::Ident(replacement.to_string())));
-                }
+            if let Expr::Ident(name) = inner.inner()
+                && name == var_name
+            {
+                // Replace with new variable reference
+                return Expr::UnquoteAtom(boxed(Expr::Ident(replacement.to_string())));
             }
             Expr::UnquoteAtom(boxed(substitute_var_in_expr(inner, var_name, replacement)))
         }
         Expr::Ident(name) => {
             // Check for $UNQUOTE: marker
-            if let Some(var) = name.strip_prefix("$UNQUOTE:") {
-                if var == var_name {
-                    return Expr::Ident(format!("$UNQUOTE:{}", replacement));
-                }
+            if let Some(var) = name.strip_prefix("$UNQUOTE:")
+                && var == var_name
+            {
+                return Expr::Ident(format!("$UNQUOTE:{}", replacement));
             }
             expr.clone()
         }
         Expr::Binary { op, left, right } => Expr::Binary {
-            op: op.clone(),
+            op: *op,
             left: boxed(substitute_var_in_expr(left, var_name, replacement)),
             right: boxed(substitute_var_in_expr(right, var_name, replacement)),
         },
         Expr::Unary { op, expr: inner } => Expr::Unary {
-            op: op.clone(),
+            op: *op,
             expr: boxed(substitute_var_in_expr(inner, var_name, replacement)),
         },
         Expr::Call {
@@ -870,7 +865,7 @@ fn quote_stmt_to_tuple(stmt: &Stmt) -> Expr {
             let value_tuple = quote_expr_to_tuple(value);
             let else_tuple = else_block
                 .as_ref()
-                .map(|b| quote_block_to_tuple(b))
+                .map(quote_block_to_tuple)
                 .unwrap_or_else(|| make_atom("none"));
             make_tuple(vec![
                 make_atom("let"),
@@ -901,11 +896,11 @@ fn quote_pattern_to_tuple(pattern: &Pattern) -> Expr {
         Pattern::Atom(a) => make_tuple(vec![make_atom("atom"), make_atom(a)]),
         Pattern::Bool(b) => make_tuple(vec![make_atom("bool"), Expr::Bool(*b)]),
         Pattern::Tuple(pats) => {
-            let pat_list: Vec<Expr> = pats.iter().map(|p| quote_pattern_to_tuple(p)).collect();
+            let pat_list: Vec<Expr> = pats.iter().map(quote_pattern_to_tuple).collect();
             make_tuple(vec![make_atom("tuple"), make_list(pat_list)])
         }
         Pattern::List(pats) => {
-            let pat_list: Vec<Expr> = pats.iter().map(|p| quote_pattern_to_tuple(p)).collect();
+            let pat_list: Vec<Expr> = pats.iter().map(quote_pattern_to_tuple).collect();
             make_tuple(vec![make_atom("list"), make_list(pat_list)])
         }
         _ => make_atom("unsupported_pattern"),
@@ -936,19 +931,19 @@ fn quote_type_to_tuple(ty: &Type) -> Expr {
             } else if type_args.is_empty() {
                 make_tuple(vec![make_atom("named"), make_atom(name)])
             } else {
-                let args: Vec<Expr> = type_args.iter().map(|t| quote_type_to_tuple(t)).collect();
+                let args: Vec<Expr> = type_args.iter().map(quote_type_to_tuple).collect();
                 make_tuple(vec![make_atom("named"), make_atom(name), make_list(args)])
             }
         }
 
         Type::List(inner) => make_tuple(vec![make_atom("list"), quote_type_to_tuple(inner)]),
         Type::Tuple(types) => {
-            let type_list: Vec<Expr> = types.iter().map(|t| quote_type_to_tuple(t)).collect();
+            let type_list: Vec<Expr> = types.iter().map(quote_type_to_tuple).collect();
             make_tuple(vec![make_atom("tuple"), make_list(type_list)])
         }
         Type::TypeVar(name) => make_tuple(vec![make_atom("type_var"), make_atom(name)]),
         Type::Fn { params, ret } => {
-            let param_list: Vec<Expr> = params.iter().map(|t| quote_type_to_tuple(t)).collect();
+            let param_list: Vec<Expr> = params.iter().map(quote_type_to_tuple).collect();
             make_tuple(vec![
                 make_atom("fn"),
                 make_list(param_list),
@@ -966,7 +961,7 @@ fn quote_item_to_tuple(item: &Item) -> Expr {
             let methods_list: Vec<Expr> = trait_impl
                 .methods
                 .iter()
-                .map(|m| quote_function_to_tuple(m))
+                .map(quote_function_to_tuple)
                 .collect();
 
             // Check for $UNQUOTE: marker in type_name
@@ -988,7 +983,7 @@ fn quote_item_to_tuple(item: &Item) -> Expr {
             let methods_list: Vec<Expr> = impl_block
                 .methods
                 .iter()
-                .map(|m| quote_function_to_tuple(m))
+                .map(quote_function_to_tuple)
                 .collect();
 
             // Check for $UNQUOTE: marker in type_name
@@ -1012,7 +1007,7 @@ fn quote_item_to_tuple(item: &Item) -> Expr {
 
 /// Convert a quoted function to tuple construction code.
 fn quote_function_to_tuple(f: &Function) -> Expr {
-    let params_list: Vec<Expr> = f.params.iter().map(|p| quote_param_to_tuple(p)).collect();
+    let params_list: Vec<Expr> = f.params.iter().map(quote_param_to_tuple).collect();
 
     let return_type = f
         .return_type

@@ -39,7 +39,7 @@ fn escape_atom(s: &str) -> String {
     // Simple atoms don't need escaping
     if s.chars()
         .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
-        && s.chars().next().map_or(false, |c| c.is_ascii_lowercase())
+        && s.chars().next().is_some_and(|c| c.is_ascii_lowercase())
     {
         s.to_string()
     } else {
@@ -228,7 +228,7 @@ pub fn expr_to_erlang_term(expr: &Expr) -> String {
         }
 
         Expr::Match { expr, arms } => {
-            let arms_str: Vec<String> = arms.iter().map(|a| match_arm_to_erlang_term(a)).collect();
+            let arms_str: Vec<String> = arms.iter().map(match_arm_to_erlang_term).collect();
             format!(
                 "{{match, {}, [{}]}}",
                 expr_to_erlang_term(expr),
@@ -329,7 +329,7 @@ pub fn expr_to_erlang_term(expr: &Expr) -> String {
         }
         Expr::Try { expr } => format!("{{try, {}}}", expr_to_erlang_term(expr)),
         Expr::Receive { arms, timeout } => {
-            let arms_str: Vec<String> = arms.iter().map(|a| match_arm_to_erlang_term(a)).collect();
+            let arms_str: Vec<String> = arms.iter().map(match_arm_to_erlang_term).collect();
             let timeout_str = timeout
                 .as_ref()
                 .map(|(dur, block)| {
@@ -377,7 +377,7 @@ fn unaryop_to_atom(op: &UnaryOp) -> &'static str {
 
 /// Convert a block to Erlang term format.
 pub fn block_to_erlang_term(block: &Block) -> String {
-    let stmts_str: Vec<String> = block.stmts.iter().map(|s| stmt_to_erlang_term(s)).collect();
+    let stmts_str: Vec<String> = block.stmts.iter().map(stmt_to_erlang_term).collect();
     let expr_str = block
         .expr
         .as_ref()
@@ -402,7 +402,7 @@ pub fn stmt_to_erlang_term(stmt: &Stmt) -> String {
                 .unwrap_or_else(|| "none".to_string());
             let else_str = else_block
                 .as_ref()
-                .map(|b| block_to_erlang_term(b))
+                .map(block_to_erlang_term)
                 .unwrap_or_else(|| "none".to_string());
             format!(
                 "{{let, {}, {}, {}, {}}}",
@@ -444,11 +444,11 @@ pub fn pattern_to_erlang_term(pattern: &Pattern) -> String {
         Pattern::Atom(a) => format!("{{atom, '{}'}}", escape_atom(a)),
         Pattern::Bool(b) => format!("{{bool, {}}}", b),
         Pattern::Tuple(pats) => {
-            let pats_str: Vec<String> = pats.iter().map(|p| pattern_to_erlang_term(p)).collect();
+            let pats_str: Vec<String> = pats.iter().map(pattern_to_erlang_term).collect();
             format!("{{tuple, [{}]}}", pats_str.join(", "))
         }
         Pattern::List(pats) => {
-            let pats_str: Vec<String> = pats.iter().map(|p| pattern_to_erlang_term(p)).collect();
+            let pats_str: Vec<String> = pats.iter().map(pattern_to_erlang_term).collect();
             format!("{{list, [{}]}}", pats_str.join(", "))
         }
         Pattern::ListCons { head, tail } => {
@@ -482,8 +482,7 @@ pub fn pattern_to_erlang_term(pattern: &Pattern) -> String {
                 )
             }
             EnumPatternFields::Tuple(pats) => {
-                let pats_str: Vec<String> =
-                    pats.iter().map(|p| pattern_to_erlang_term(p)).collect();
+                let pats_str: Vec<String> = pats.iter().map(pattern_to_erlang_term).collect();
                 format!(
                     "{{enum, '{}', '{}', {{tuple, [{}]}}}}",
                     escape_atom(name),
@@ -526,15 +525,14 @@ pub fn type_to_erlang_term(ty: &Type) -> String {
         Type::Map => "{type, map}".to_string(),
         Type::List(inner) => format!("{{list, {}}}", type_to_erlang_term(inner)),
         Type::Tuple(types) => {
-            let types_str: Vec<String> = types.iter().map(|t| type_to_erlang_term(t)).collect();
+            let types_str: Vec<String> = types.iter().map(type_to_erlang_term).collect();
             format!("{{tuple, [{}]}}", types_str.join(", "))
         }
         Type::Named { name, type_args } => {
             if type_args.is_empty() {
                 format!("{{named, '{}'}}", escape_atom(name))
             } else {
-                let args_str: Vec<String> =
-                    type_args.iter().map(|t| type_to_erlang_term(t)).collect();
+                let args_str: Vec<String> = type_args.iter().map(type_to_erlang_term).collect();
                 format!(
                     "{{named, '{}', [{}]}}",
                     escape_atom(name),
@@ -544,7 +542,7 @@ pub fn type_to_erlang_term(ty: &Type) -> String {
         }
         Type::TypeVar(name) => format!("{{type_var, '{}'}}", escape_atom(name)),
         Type::Fn { params, ret } => {
-            let params_str: Vec<String> = params.iter().map(|t| type_to_erlang_term(t)).collect();
+            let params_str: Vec<String> = params.iter().map(type_to_erlang_term).collect();
             format!(
                 "{{fn, [{}], {}}}",
                 params_str.join(", "),
@@ -553,7 +551,7 @@ pub fn type_to_erlang_term(ty: &Type) -> String {
         }
         Type::AtomLiteral(a) => format!("{{atom_literal, '{}'}}", escape_atom(a)),
         Type::Union(types) => {
-            let types_str: Vec<String> = types.iter().map(|t| type_to_erlang_term(t)).collect();
+            let types_str: Vec<String> = types.iter().map(type_to_erlang_term).collect();
             format!("{{union, [{}]}}", types_str.join(", "))
         }
         Type::AssociatedType { base, name } => {
@@ -588,11 +586,7 @@ pub fn struct_def_to_erlang_term(s: &StructDef) -> String {
 
 /// Convert an enum definition to Erlang term format.
 pub fn enum_def_to_erlang_term(e: &EnumDef) -> String {
-    let variants_str: Vec<String> = e
-        .variants
-        .iter()
-        .map(|v| variant_def_to_erlang_term(v))
-        .collect();
+    let variants_str: Vec<String> = e.variants.iter().map(variant_def_to_erlang_term).collect();
     let type_params_str: Vec<String> = e
         .type_params
         .iter()
@@ -627,7 +621,7 @@ fn variant_def_to_erlang_term(v: &EnumVariant) -> String {
 
 /// Convert a function to Erlang term format.
 pub fn function_to_erlang_term(f: &Function) -> String {
-    let params_str: Vec<String> = f.params.iter().map(|p| param_to_erlang_term(p)).collect();
+    let params_str: Vec<String> = f.params.iter().map(param_to_erlang_term).collect();
     let return_type_str = f
         .return_type
         .as_ref()
@@ -638,11 +632,12 @@ pub fn function_to_erlang_term(f: &Function) -> String {
         .iter()
         .map(|tp| format!("'{}'", escape_atom(&tp.name)))
         .collect();
+    let params_list = format!("[{}]", params_str.join(", "));
     format!(
         "{{function, '{}', [{}], {}, {}, {}}}",
         escape_atom(&f.name),
         type_params_str.join(", "),
-        format!("[{}]", params_str.join(", ")),
+        params_list,
         return_type_str,
         block_to_erlang_term(&f.body)
     )
@@ -662,7 +657,7 @@ pub fn impl_block_to_erlang_term(impl_block: &ImplBlock) -> String {
     let methods_str: Vec<String> = impl_block
         .methods
         .iter()
-        .map(|m| function_to_erlang_term(m))
+        .map(function_to_erlang_term)
         .collect();
     format!(
         "{{impl, '{}', [{}]}}",
@@ -677,7 +672,7 @@ pub fn trait_impl_to_erlang_term(trait_impl: &TraitImpl) -> String {
     let methods_str: Vec<String> = trait_impl
         .methods
         .iter()
-        .map(|m| function_to_erlang_term(m))
+        .map(function_to_erlang_term)
         .collect();
     format!(
         "{{traitimpl, '{}', '{}', [{}]}}",

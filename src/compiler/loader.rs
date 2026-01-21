@@ -127,15 +127,15 @@ impl ModuleLoader {
         // Check if this is a bindings file - use just the filename
         let canonical_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
         for bindings_dir in &self.bindings_dirs {
-            if let Ok(canonical_bindings) = bindings_dir.canonicalize() {
-                if canonical_path.starts_with(&canonical_bindings) {
-                    // This is a bindings file - use just the filename as module name
-                    return path
-                        .file_stem()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("unknown")
-                        .to_string();
-                }
+            if let Ok(canonical_bindings) = bindings_dir.canonicalize()
+                && canonical_path.starts_with(&canonical_bindings)
+            {
+                // This is a bindings file - use just the filename as module name
+                return path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("unknown")
+                    .to_string();
             }
         }
 
@@ -150,12 +150,11 @@ impl ModuleLoader {
                     .unwrap_or("unknown");
 
                 // For mod.surreal files, use the parent directory name
-                if stem == "mod" {
-                    if let Some(parent) = path.parent() {
-                        if let Some(dir_name) = parent.file_name().and_then(|s| s.to_str()) {
-                            return dir_name.to_string();
-                        }
-                    }
+                if stem == "mod"
+                    && let Some(parent) = path.parent()
+                    && let Some(dir_name) = parent.file_name().and_then(|s| s.to_str())
+                {
+                    return dir_name.to_string();
                 }
 
                 return stem.to_string();
@@ -176,10 +175,10 @@ impl ModuleLoader {
         // Add directory components
         if let Some(parent) = relative.parent() {
             for component in parent.components() {
-                if let std::path::Component::Normal(name) = component {
-                    if let Some(s) = name.to_str() {
-                        parts.push(s.to_string());
-                    }
+                if let std::path::Component::Normal(name) = component
+                    && let Some(s) = name.to_str()
+                {
+                    parts.push(s.to_string());
                 }
             }
         }
@@ -351,10 +350,10 @@ impl ModuleLoader {
 
             // Add package prefix if we have a package context and the module
             // doesn't already have the prefix (e.g., wasn't already qualified)
-            if let Some(ref package) = self.package_name {
-                if !module.name.starts_with(&format!("{}::", package)) {
-                    module.name = format!("{}::{}", package, module.name);
-                }
+            if let Some(ref package) = self.package_name
+                && !module.name.starts_with(&format!("{}::", package))
+            {
+                module.name = format!("{}::{}", package, module.name);
             }
 
             let key = canonical.join(format!("#{}", module.name));
@@ -423,10 +422,10 @@ impl ModuleLoader {
 
         for file in &files {
             // Skip if already loaded
-            if let Ok(canonical) = file.canonicalize() {
-                if self.loaded.contains_key(&canonical) {
-                    continue;
-                }
+            if let Ok(canonical) = file.canonicalize()
+                && self.loaded.contains_key(&canonical)
+            {
+                continue;
             }
 
             // Load the file (this will also load its mod dependencies)

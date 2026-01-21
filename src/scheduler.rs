@@ -197,15 +197,15 @@ impl Scheduler {
         let mut to_wake = Vec::new();
 
         for (pid, process) in &mut self.processes {
-            if process.status == ProcessStatus::Waiting {
-                if let Some(ref mut t) = process.timeout {
-                    if *t > 0 {
-                        *t -= 1;
-                    }
-                    if *t == 0 {
-                        process.status = ProcessStatus::Ready;
-                        to_wake.push(*pid);
-                    }
+            if process.status == ProcessStatus::Waiting
+                && let Some(ref mut t) = process.timeout
+            {
+                if *t > 0 {
+                    *t -= 1;
+                }
+                if *t == 0 {
+                    process.status = ProcessStatus::Ready;
+                    to_wake.push(*pid);
                 }
             }
         }
@@ -368,12 +368,12 @@ impl Scheduler {
         }
 
         // If we used full budget but process isn't done, requeue it
-        if used >= budget {
-            if let Some(p) = self.processes.get(&pid) {
-                let code_len = self.get_code_len(p);
-                if p.status == ProcessStatus::Ready && p.pc < code_len {
-                    self.ready_queue.push_back(pid);
-                }
+        if used >= budget
+            && let Some(p) = self.processes.get(&pid)
+        {
+            let code_len = self.get_code_len(p);
+            if p.status == ProcessStatus::Ready && p.pc < code_len {
+                self.ready_queue.push_back(pid);
             }
         }
 
@@ -404,10 +404,10 @@ impl Scheduler {
                         parent.links.push(child_pid);
                     }
                 }
-                if let Some(child) = self.processes.get_mut(&child_pid) {
-                    if !child.links.contains(&pid) {
-                        child.links.push(pid);
-                    }
+                if let Some(child) = self.processes.get_mut(&child_pid)
+                    && !child.links.contains(&pid)
+                {
+                    child.links.push(pid);
                 }
 
                 ExecResult::Continue(1)
@@ -415,14 +415,14 @@ impl Scheduler {
 
             Instruction::Send { to, msg } => {
                 let target_pid = self.resolve_pid(pid, &to);
-                if let Some(target_pid) = target_pid {
-                    if let Some(target) = self.processes.get_mut(&target_pid) {
-                        target.mailbox.push_back(Message::User(msg));
-                        // Wake up if waiting
-                        if target.status == ProcessStatus::Waiting {
-                            target.status = ProcessStatus::Ready;
-                            self.ready_queue.push_back(target_pid);
-                        }
+                if let Some(target_pid) = target_pid
+                    && let Some(target) = self.processes.get_mut(&target_pid)
+                {
+                    target.mailbox.push_back(Message::User(msg));
+                    // Wake up if waiting
+                    if target.status == ProcessStatus::Waiting {
+                        target.status = ProcessStatus::Ready;
+                        self.ready_queue.push_back(target_pid);
                     }
                 }
                 ExecResult::Continue(1)
@@ -475,15 +475,15 @@ impl Scheduler {
                 };
 
                 // Add bidirectional link
-                if let Some(p) = self.processes.get_mut(&pid) {
-                    if !p.links.contains(&target_pid) {
-                        p.links.push(target_pid);
-                    }
+                if let Some(p) = self.processes.get_mut(&pid)
+                    && !p.links.contains(&target_pid)
+                {
+                    p.links.push(target_pid);
                 }
-                if let Some(t) = self.processes.get_mut(&target_pid) {
-                    if !t.links.contains(&pid) {
-                        t.links.push(pid);
-                    }
+                if let Some(t) = self.processes.get_mut(&target_pid)
+                    && !t.links.contains(&pid)
+                {
+                    t.links.push(pid);
                 }
 
                 ExecResult::Continue(1)
@@ -539,7 +539,6 @@ impl Scheduler {
                 let Value::Ref(ref_id) = process.registers[monitor_ref.0 as usize] else {
                     return ExecResult::Crash;
                 };
-                let ref_id = ref_id;
 
                 // Find and remove the monitor from caller's list
                 let target_pid = if let Some(p) = self.processes.get_mut(&pid) {
@@ -555,10 +554,10 @@ impl Scheduler {
                 };
 
                 // Remove from target's monitored_by list
-                if let Some(target_pid) = target_pid {
-                    if let Some(t) = self.processes.get_mut(&target_pid) {
-                        t.monitored_by.retain(|(r, _)| *r != ref_id);
-                    }
+                if let Some(target_pid) = target_pid
+                    && let Some(t) = self.processes.get_mut(&target_pid)
+                {
+                    t.monitored_by.retain(|(r, _)| *r != ref_id);
                 }
 
                 ExecResult::Continue(1)
@@ -1350,10 +1349,10 @@ impl Scheduler {
                 }
 
                 // No match found - set timeout and wait
-                if let Some(p) = self.processes.get_mut(&pid) {
-                    if p.timeout.is_none() {
-                        p.timeout = timeout.clone();
-                    }
+                if let Some(p) = self.processes.get_mut(&pid)
+                    && p.timeout.is_none()
+                {
+                    p.timeout = timeout;
                 }
                 ExecResult::Wait
             }
@@ -1910,7 +1909,7 @@ impl Scheduler {
                     match segment.bit_type {
                         crate::BitType::Integer => {
                             let size_bits = segment.size.unwrap_or(8);
-                            let size_bytes = (size_bits as usize + 7) / 8;
+                            let size_bytes = (size_bits as usize).div_ceil(8);
 
                             // Convert to bytes based on endianness
                             let bytes = match segment.endianness {
@@ -2140,7 +2139,7 @@ impl Scheduler {
                 let size_bits = segment.size.unwrap_or(8) as usize;
 
                 // Only support byte-aligned access for now
-                if bit_pos % 8 != 0 || size_bits % 8 != 0 {
+                if !bit_pos.is_multiple_of(8) || !size_bits.is_multiple_of(8) {
                     return ExecResult::Crash;
                 }
 
@@ -2205,7 +2204,7 @@ impl Scheduler {
                 let size_bits = segment.size.unwrap_or(8) as usize;
 
                 // Only support byte-aligned access for now
-                if bit_pos % 8 != 0 || size_bits % 8 != 0 {
+                if !bit_pos.is_multiple_of(8) || !size_bits.is_multiple_of(8) {
                     return ExecResult::Crash;
                 }
 
@@ -3201,6 +3200,7 @@ impl Default for Scheduler {
 }
 
 #[cfg(test)]
+#[allow(clippy::approx_constant)]
 mod tests {
     use super::*;
     use crate::{Operand, Register};

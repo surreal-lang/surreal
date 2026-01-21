@@ -395,11 +395,11 @@ fn parse_elixir_modules_with_specs(
         }
 
         // Track module declarations
-        if trimmed.starts_with("defmodule ") {
-            if let Some(name) = extract_module_name_from_line(trimmed) {
-                current_module = Some(name.clone());
-                modules.entry(name).or_insert_with(Vec::new);
-            }
+        if trimmed.starts_with("defmodule ")
+            && let Some(name) = extract_module_name_from_line(trimmed)
+        {
+            current_module = Some(name.clone());
+            modules.entry(name).or_default();
         }
 
         if trimmed.starts_with("@spec ") {
@@ -408,13 +408,10 @@ fn parse_elixir_modules_with_specs(
 
             // Check if spec is complete
             if is_elixir_spec_complete(&spec_text) {
-                if let Some(spec) = parse_elixir_single_spec(&spec_text, registry) {
-                    if let Some(ref module) = current_module {
-                        modules
-                            .entry(module.clone())
-                            .or_insert_with(Vec::new)
-                            .push(spec);
-                    }
+                if let Some(spec) = parse_elixir_single_spec(&spec_text, registry)
+                    && let Some(ref module) = current_module
+                {
+                    modules.entry(module.clone()).or_default().push(spec);
                 }
                 in_spec = false;
                 spec_text.clear();
@@ -424,13 +421,10 @@ fn parse_elixir_modules_with_specs(
             spec_text.push_str(trimmed);
 
             if is_elixir_spec_complete(&spec_text) {
-                if let Some(spec) = parse_elixir_single_spec(&spec_text, registry) {
-                    if let Some(ref module) = current_module {
-                        modules
-                            .entry(module.clone())
-                            .or_insert_with(Vec::new)
-                            .push(spec);
-                    }
+                if let Some(spec) = parse_elixir_single_spec(&spec_text, registry)
+                    && let Some(ref module) = current_module
+                {
+                    modules.entry(module.clone()).or_default().push(spec);
                 }
                 in_spec = false;
                 spec_text.clear();
@@ -652,24 +646,26 @@ fn parse_elixir_type(s: &str) -> ErlangType {
     }
 
     // Handle remote types: Module.type() or Module.type
-    if s.contains('.') && !s.starts_with(':') && !s.starts_with('"') {
-        if let Some(dot_pos) = s.rfind('.') {
-            let module = &s[..dot_pos];
-            let rest = &s[dot_pos + 1..];
-            let type_name = if let Some(paren_pos) = rest.find('(') {
-                &rest[..paren_pos]
-            } else {
-                rest
-            };
+    if s.contains('.')
+        && !s.starts_with(':')
+        && !s.starts_with('"')
+        && let Some(dot_pos) = s.rfind('.')
+    {
+        let module = &s[..dot_pos];
+        let rest = &s[dot_pos + 1..];
+        let type_name = if let Some(paren_pos) = rest.find('(') {
+            &rest[..paren_pos]
+        } else {
+            rest
+        };
 
-            // Handle common Elixir types
-            match (module, type_name) {
-                ("String", "t") => return ErlangType::Named("string".to_string()),
-                ("Integer", "t") => return ErlangType::Named("int".to_string()),
-                ("Atom", "t") => return ErlangType::Named("atom".to_string()),
-                ("Exception", "t") => return ErlangType::Any,
-                _ => return ErlangType::Remote(module.to_string(), type_name.to_string()),
-            }
+        // Handle common Elixir types
+        match (module, type_name) {
+            ("String", "t") => return ErlangType::Named("string".to_string()),
+            ("Integer", "t") => return ErlangType::Named("int".to_string()),
+            ("Atom", "t") => return ErlangType::Named("atom".to_string()),
+            ("Exception", "t") => return ErlangType::Any,
+            _ => return ErlangType::Remote(module.to_string(), type_name.to_string()),
         }
     }
 
@@ -680,44 +676,44 @@ fn parse_elixir_type(s: &str) -> ErlangType {
     }
 
     // Handle parameterized types: name(args)
-    if let Some(paren_pos) = s.find('(') {
-        if s.ends_with(')') {
-            let name = &s[..paren_pos];
-            let args_str = &s[paren_pos + 1..s.len() - 1];
+    if let Some(paren_pos) = s.find('(')
+        && s.ends_with(')')
+    {
+        let name = &s[..paren_pos];
+        let args_str = &s[paren_pos + 1..s.len() - 1];
 
-            match name {
-                "list" => {
-                    if args_str.is_empty() {
-                        return ErlangType::List(Box::new(ErlangType::Any));
-                    }
-                    return ErlangType::List(Box::new(parse_elixir_type(args_str)));
+        match name {
+            "list" => {
+                if args_str.is_empty() {
+                    return ErlangType::List(Box::new(ErlangType::Any));
                 }
-                "nonempty_list" => {
-                    if args_str.is_empty() {
-                        return ErlangType::List(Box::new(ErlangType::Any));
-                    }
-                    return ErlangType::List(Box::new(parse_elixir_type(args_str)));
+                return ErlangType::List(Box::new(parse_elixir_type(args_str)));
+            }
+            "nonempty_list" => {
+                if args_str.is_empty() {
+                    return ErlangType::List(Box::new(ErlangType::Any));
                 }
-                // Handle basic types with () suffix
-                "any" | "term" => return ErlangType::Any,
-                "atom" => return ErlangType::Named("atom".to_string()),
-                "boolean" => return ErlangType::Named("boolean".to_string()),
-                "integer" | "non_neg_integer" | "pos_integer" | "neg_integer" | "number" => {
-                    return ErlangType::Named("int".to_string());
-                }
-                "float" => return ErlangType::Named("float".to_string()),
-                "binary" | "bitstring" => return ErlangType::Named("binary".to_string()),
-                "pid" => return ErlangType::Named("pid".to_string()),
-                "reference" => return ErlangType::Named("ref".to_string()),
-                "map" => return ErlangType::Named("map".to_string()),
-                "tuple" => return ErlangType::Any,
-                "iodata" | "iolist" => return ErlangType::Any,
-                "charlist" => return ErlangType::Named("string".to_string()),
-                "keyword" => return ErlangType::List(Box::new(ErlangType::Any)),
-                "no_return" => return ErlangType::Any,
-                _ => {
-                    return ErlangType::Named(name.to_string());
-                }
+                return ErlangType::List(Box::new(parse_elixir_type(args_str)));
+            }
+            // Handle basic types with () suffix
+            "any" | "term" => return ErlangType::Any,
+            "atom" => return ErlangType::Named("atom".to_string()),
+            "boolean" => return ErlangType::Named("boolean".to_string()),
+            "integer" | "non_neg_integer" | "pos_integer" | "neg_integer" | "number" => {
+                return ErlangType::Named("int".to_string());
+            }
+            "float" => return ErlangType::Named("float".to_string()),
+            "binary" | "bitstring" => return ErlangType::Named("binary".to_string()),
+            "pid" => return ErlangType::Named("pid".to_string()),
+            "reference" => return ErlangType::Named("ref".to_string()),
+            "map" => return ErlangType::Named("map".to_string()),
+            "tuple" => return ErlangType::Any,
+            "iodata" | "iolist" => return ErlangType::Any,
+            "charlist" => return ErlangType::Named("string".to_string()),
+            "keyword" => return ErlangType::List(Box::new(ErlangType::Any)),
+            "no_return" => return ErlangType::Any,
+            _ => {
+                return ErlangType::Named(name.to_string());
             }
         }
     }
@@ -831,23 +827,23 @@ fn parse_elixir_struct_fields(s: &str) -> Vec<(String, ErlangType)> {
             fields.push((name, ty));
         }
         // Handle "required(:field) => type" (map type spec)
-        else if field.starts_with("required(") || field.starts_with("optional(") {
-            if let Some(arrow_pos) = field.find("=>") {
-                let key_part = &field[..arrow_pos];
-                let type_str = field[arrow_pos + 2..].trim();
+        else if (field.starts_with("required(") || field.starts_with("optional("))
+            && let Some(arrow_pos) = field.find("=>")
+        {
+            let key_part = &field[..arrow_pos];
+            let type_str = field[arrow_pos + 2..].trim();
 
-                // Extract field name from required(:field) or optional(:field)
-                let name = key_part
-                    .trim_start_matches("required(")
-                    .trim_start_matches("optional(")
-                    .trim_end_matches(')')
-                    .trim()
-                    .trim_start_matches(':')
-                    .to_string();
+            // Extract field name from required(:field) or optional(:field)
+            let name = key_part
+                .trim_start_matches("required(")
+                .trim_start_matches("optional(")
+                .trim_end_matches(')')
+                .trim()
+                .trim_start_matches(':')
+                .to_string();
 
-                let ty = parse_elixir_type(type_str);
-                fields.push((name, ty));
-            }
+            let ty = parse_elixir_type(type_str);
+            fields.push((name, ty));
         }
     }
 
@@ -916,10 +912,10 @@ fn parse_elixir_structs_multi(source: &str) -> HashMap<String, Vec<ElixirStruct>
         }
 
         // Track module declarations
-        if trimmed.starts_with("defmodule ") {
-            if let Some(name) = extract_module_name_from_line(trimmed) {
-                current_module = Some(name);
-            }
+        if trimmed.starts_with("defmodule ")
+            && let Some(name) = extract_module_name_from_line(trimmed)
+        {
+            current_module = Some(name);
         }
 
         if trimmed.starts_with("defstruct ") || trimmed == "defstruct" {
@@ -928,13 +924,10 @@ fn parse_elixir_structs_multi(source: &str) -> HashMap<String, Vec<ElixirStruct>
 
             // Check if defstruct is complete (single line)
             if is_defstruct_complete(&defstruct_text) {
-                if let Some(ref module) = current_module {
-                    if let Some(st) = parse_single_defstruct(&defstruct_text, module) {
-                        structs
-                            .entry(module.clone())
-                            .or_insert_with(Vec::new)
-                            .push(st);
-                    }
+                if let Some(ref module) = current_module
+                    && let Some(st) = parse_single_defstruct(&defstruct_text, module)
+                {
+                    structs.entry(module.clone()).or_default().push(st);
                 }
                 in_defstruct = false;
                 defstruct_text.clear();
@@ -944,13 +937,10 @@ fn parse_elixir_structs_multi(source: &str) -> HashMap<String, Vec<ElixirStruct>
             defstruct_text.push_str(trimmed);
 
             if is_defstruct_complete(&defstruct_text) {
-                if let Some(ref module) = current_module {
-                    if let Some(st) = parse_single_defstruct(&defstruct_text, module) {
-                        structs
-                            .entry(module.clone())
-                            .or_insert_with(Vec::new)
-                            .push(st);
-                    }
+                if let Some(ref module) = current_module
+                    && let Some(st) = parse_single_defstruct(&defstruct_text, module)
+                {
+                    structs.entry(module.clone()).or_default().push(st);
                 }
                 in_defstruct = false;
                 defstruct_text.clear();
@@ -1634,13 +1624,13 @@ fn detect_ok_error_pattern(types: &[ErlangType]) -> Option<(ErlangType, ErlangTy
     let mut err_type = None;
 
     for ty in types {
-        if let ErlangType::Tuple(elements) = ty {
-            if elements.len() == 2 {
-                if is_ok_atom(&elements[0]) {
-                    ok_type = Some(elements[1].clone());
-                } else if is_error_atom(&elements[0]) {
-                    err_type = Some(elements[1].clone());
-                }
+        if let ErlangType::Tuple(elements) = ty
+            && elements.len() == 2
+        {
+            if is_ok_atom(&elements[0]) {
+                ok_type = Some(elements[1].clone());
+            } else if is_error_atom(&elements[0]) {
+                err_type = Some(elements[1].clone());
             }
         }
     }
@@ -1794,84 +1784,83 @@ fn parse_type(s: &str) -> ErlangType {
     }
 
     // Handle remote types: module:type() or module:type
-    if s.contains(':') && !s.starts_with(':') {
-        if let Some(colon_pos) = s.find(':') {
-            let module = &s[..colon_pos];
-            let rest = &s[colon_pos + 1..];
-            let type_name = if let Some(paren_pos) = rest.find('(') {
-                &rest[..paren_pos]
-            } else {
-                rest
-            };
-            return ErlangType::Remote(module.to_string(), type_name.to_string());
-        }
+    if s.contains(':')
+        && !s.starts_with(':')
+        && let Some(colon_pos) = s.find(':')
+    {
+        let module = &s[..colon_pos];
+        let rest = &s[colon_pos + 1..];
+        let type_name = if let Some(paren_pos) = rest.find('(') {
+            &rest[..paren_pos]
+        } else {
+            rest
+        };
+        return ErlangType::Remote(module.to_string(), type_name.to_string());
     }
 
     // Handle parameterized types: name(args)
-    if let Some(paren_pos) = s.find('(') {
-        if s.ends_with(')') {
-            let name = &s[..paren_pos];
-            let args_str = &s[paren_pos + 1..s.len() - 1];
+    if let Some(paren_pos) = s.find('(')
+        && s.ends_with(')')
+    {
+        let name = &s[..paren_pos];
+        let args_str = &s[paren_pos + 1..s.len() - 1];
 
-            match name {
-                "list" | "nonempty_list" => {
-                    if args_str.is_empty() {
-                        return ErlangType::List(Box::new(ErlangType::Any));
-                    }
-                    return ErlangType::List(Box::new(parse_type(args_str)));
-                }
-                "fun" => {
-                    return parse_fun_type(args_str);
-                }
-                "function" => {
-                    return ErlangType::Fun {
-                        params: vec![],
-                        ret: Box::new(ErlangType::Any),
-                    };
-                }
-                "maybe_improper_list"
-                | "nonempty_maybe_improper_list"
-                | "nonempty_improper_list" => {
+        match name {
+            "list" | "nonempty_list" => {
+                if args_str.is_empty() {
                     return ErlangType::List(Box::new(ErlangType::Any));
                 }
-                // Handle basic types with () suffix
-                "integer" | "non_neg_integer" | "pos_integer" | "neg_integer" | "number" => {
-                    return ErlangType::Named("int".to_string());
-                }
-                "atom" | "module" => {
-                    return ErlangType::Named("atom".to_string());
-                }
-                "boolean" => {
-                    return ErlangType::Named("boolean".to_string());
-                }
-                "binary" | "bitstring" => {
-                    return ErlangType::Named("binary".to_string());
-                }
-                "float" => {
-                    return ErlangType::Named("float".to_string());
-                }
-                "string" => {
-                    return ErlangType::Named("string".to_string());
-                }
-                "pid" => {
-                    return ErlangType::Named("pid".to_string());
-                }
-                "reference" | "ref" => {
-                    return ErlangType::Named("ref".to_string());
-                }
-                "map" => {
-                    return ErlangType::Named("map".to_string());
-                }
-                "any" | "term" => {
-                    return ErlangType::Any;
-                }
-                "tuple" | "iodata" | "iolist" | "no_return" | "none" => {
-                    return ErlangType::Any;
-                }
-                _ => {
-                    // Other parameterized types
-                    return ErlangType::Named(name.to_string());
-                }
+                return ErlangType::List(Box::new(parse_type(args_str)));
+            }
+            "fun" => {
+                return parse_fun_type(args_str);
+            }
+            "function" => {
+                return ErlangType::Fun {
+                    params: vec![],
+                    ret: Box::new(ErlangType::Any),
+                };
+            }
+            "maybe_improper_list" | "nonempty_maybe_improper_list" | "nonempty_improper_list" => {
+                return ErlangType::List(Box::new(ErlangType::Any));
+            }
+            // Handle basic types with () suffix
+            "integer" | "non_neg_integer" | "pos_integer" | "neg_integer" | "number" => {
+                return ErlangType::Named("int".to_string());
+            }
+            "atom" | "module" => {
+                return ErlangType::Named("atom".to_string());
+            }
+            "boolean" => {
+                return ErlangType::Named("boolean".to_string());
+            }
+            "binary" | "bitstring" => {
+                return ErlangType::Named("binary".to_string());
+            }
+            "float" => {
+                return ErlangType::Named("float".to_string());
+            }
+            "string" => {
+                return ErlangType::Named("string".to_string());
+            }
+            "pid" => {
+                return ErlangType::Named("pid".to_string());
+            }
+            "reference" | "ref" => {
+                return ErlangType::Named("ref".to_string());
+            }
+            "map" => {
+                return ErlangType::Named("map".to_string());
+            }
+            "any" | "term" => {
+                return ErlangType::Any;
+            }
+            "tuple" | "iodata" | "iolist" | "no_return" | "none" => {
+                return ErlangType::Any;
+            }
+            _ => {
+                // Other parameterized types
+                return ErlangType::Named(name.to_string());
             }
         }
     }
@@ -1938,35 +1927,35 @@ fn parse_type_list(s: &str) -> Vec<ErlangType> {
 fn parse_fun_type(s: &str) -> ErlangType {
     let s = s.trim();
 
-    if s.starts_with('(') {
-        if let Some(arrow_pos) = s.find("->") {
-            let mut depth = 0;
-            let mut params_end = 0;
-            for (i, c) in s.char_indices() {
-                match c {
-                    '(' => depth += 1,
-                    ')' => {
-                        depth -= 1;
-                        if depth == 0 {
-                            params_end = i;
-                            break;
-                        }
+    if s.starts_with('(')
+        && let Some(arrow_pos) = s.find("->")
+    {
+        let mut depth = 0;
+        let mut params_end = 0;
+        for (i, c) in s.char_indices() {
+            match c {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        params_end = i;
+                        break;
                     }
-                    _ => {}
                 }
+                _ => {}
             }
-
-            let params_str = &s[1..params_end];
-            let ret_str = &s[arrow_pos + 2..];
-
-            let params = parse_type_list(params_str);
-            let ret = parse_type(ret_str);
-
-            return ErlangType::Fun {
-                params,
-                ret: Box::new(ret),
-            };
         }
+
+        let params_str = &s[1..params_end];
+        let ret_str = &s[arrow_pos + 2..];
+
+        let params = parse_type_list(params_str);
+        let ret = parse_type(ret_str);
+
+        return ErlangType::Fun {
+            params,
+            ret: Box::new(ret),
+        };
     }
 
     ErlangType::Fun {
@@ -2050,11 +2039,11 @@ fn camel_to_snake(s: &str) -> String {
 /// Handles Elixir modules (Elixir.Foo.Bar -> foo_bar) and other special cases.
 fn sanitize_module_name(name: &str) -> String {
     // Handle Elixir modules: Elixir.Foo.BarBaz -> foo_bar_baz
-    if name.starts_with("Elixir.") {
-        let without_prefix = &name[7..]; // Remove "Elixir."
+    if let Some(without_prefix) = name.strip_prefix("Elixir.") {
+        // Remove "Elixir."
         return without_prefix
             .split('.')
-            .map(|s| camel_to_snake(s))
+            .map(camel_to_snake)
             .collect::<Vec<_>>()
             .join("_");
     }
@@ -2066,7 +2055,7 @@ fn sanitize_module_name(name: &str) -> String {
     if name.contains('.') {
         let sanitized = name
             .split('.')
-            .map(|s| camel_to_snake(s))
+            .map(camel_to_snake)
             .collect::<Vec<_>>()
             .join("_");
         return sanitize_identifier(&sanitized);
@@ -2266,7 +2255,7 @@ fn generate_surreal(modules: &HashMap<String, ModuleInfo>) -> String {
     }
 
     if has_type_comments {
-        output.push_str("\n");
+        output.push('\n');
     }
 
     // Then generate extern mod declarations with functions

@@ -692,13 +692,13 @@ impl<'source> Parser<'source> {
         }
 
         // Check for module-qualified name: module::Type
-        if let Some(Token::Ident(module_name)) = self.peek().cloned() {
-            if self.peek_next() == Some(&Token::ColonColon) {
-                self.advance(); // consume module name
-                self.advance(); // consume ::
-                let type_name = self.expect_type_ident()?;
-                return Ok(format!("{}::{}", module_name, type_name));
-            }
+        if let Some(Token::Ident(module_name)) = self.peek().cloned()
+            && self.peek_next() == Some(&Token::ColonColon)
+        {
+            self.advance(); // consume module name
+            self.advance(); // consume ::
+            let type_name = self.expect_type_ident()?;
+            return Ok(format!("{}::{}", module_name, type_name));
         }
         // Otherwise, just a simple type identifier
         self.expect_type_ident()
@@ -905,10 +905,10 @@ impl<'source> Parser<'source> {
         if self.pos + 2 >= self.tokens.len() {
             return false;
         }
-        match &self.tokens[self.pos + 2].token {
-            Token::Ident(_) | Token::TypeIdent(_) | Token::Star | Token::LBrace => true,
-            _ => false,
-        }
+        matches!(
+            &self.tokens[self.pos + 2].token,
+            Token::Ident(_) | Token::TypeIdent(_) | Token::Star | Token::LBrace
+        )
     }
 
     /// Parse a use declaration: `use foo::bar;` or `use foo::{a, b};` or `use foo::*;`
@@ -1860,81 +1860,77 @@ impl<'source> Parser<'source> {
 
                 // Check for enum variant after module-qualified path: mod::Type::Variant or mod::Type::Variant(args)
                 // The path looks like ["mod", "Type", "Variant"] where Type and Variant are both uppercase
-                if is_type_segment {
-                    if let Expr::Path { ref segments } = spanned_expr.expr {
-                        // Check if this looks like mod::Type::Variant (at least 3 segments, last two uppercase)
-                        if segments.len() >= 3 {
-                            let type_idx = segments.len() - 2;
-                            let variant_idx = segments.len() - 1;
-                            let type_is_upper = segments[type_idx]
-                                .chars()
-                                .next()
-                                .map(|c| c.is_uppercase())
-                                .unwrap_or(false);
-                            let variant_is_upper = segments[variant_idx]
-                                .chars()
-                                .next()
-                                .map(|c| c.is_uppercase())
-                                .unwrap_or(false);
-                            if type_is_upper && variant_is_upper {
-                                // This is mod::Type::Variant - treat as enum variant
-                                let variant = segments[variant_idx].clone();
-                                let type_path = segments[..variant_idx].join("::");
+                if is_type_segment && let Expr::Path { ref segments } = spanned_expr.expr {
+                    // Check if this looks like mod::Type::Variant (at least 3 segments, last two uppercase)
+                    if segments.len() >= 3 {
+                        let type_idx = segments.len() - 2;
+                        let variant_idx = segments.len() - 1;
+                        let type_is_upper = segments[type_idx]
+                            .chars()
+                            .next()
+                            .map(|c| c.is_uppercase())
+                            .unwrap_or(false);
+                        let variant_is_upper = segments[variant_idx]
+                            .chars()
+                            .next()
+                            .map(|c| c.is_uppercase())
+                            .unwrap_or(false);
+                        if type_is_upper && variant_is_upper {
+                            // This is mod::Type::Variant - treat as enum variant
+                            let variant = segments[variant_idx].clone();
+                            let type_path = segments[..variant_idx].join("::");
 
-                                // Check for tuple args
-                                let args = if self.check(&Token::LParen) {
-                                    self.advance();
-                                    let mut args = Vec::new();
-                                    if !self.check(&Token::RParen) {
-                                        loop {
-                                            args.push(self.parse_expr()?);
-                                            if !self.check(&Token::Comma) {
-                                                break;
-                                            }
-                                            self.advance();
+                            // Check for tuple args
+                            let args = if self.check(&Token::LParen) {
+                                self.advance();
+                                let mut args = Vec::new();
+                                if !self.check(&Token::RParen) {
+                                    loop {
+                                        args.push(self.parse_expr()?);
+                                        if !self.check(&Token::Comma) {
+                                            break;
                                         }
+                                        self.advance();
                                     }
-                                    self.expect(&Token::RParen)?;
-                                    EnumVariantArgs::Tuple(args)
-                                } else if self.check(&Token::LBrace) {
-                                    // Struct variant: mod::Type::Variant { field: value } or { field } shorthand
-                                    self.advance();
-                                    let mut fields = Vec::new();
-                                    if !self.check(&Token::RBrace) {
-                                        loop {
-                                            let field_name = self.expect_ident()?;
-                                            // Support shorthand: `{ x }` is equivalent to `{ x: x }`
-                                            let field_value = if self.check(&Token::Colon) {
-                                                self.advance();
-                                                self.parse_expr()?
-                                            } else {
-                                                SpannedExpr::unspanned(Expr::Ident(
-                                                    field_name.clone(),
-                                                ))
-                                            };
-                                            fields.push((field_name, field_value));
-                                            if !self.check(&Token::Comma) {
-                                                break;
-                                            }
+                                }
+                                self.expect(&Token::RParen)?;
+                                EnumVariantArgs::Tuple(args)
+                            } else if self.check(&Token::LBrace) {
+                                // Struct variant: mod::Type::Variant { field: value } or { field } shorthand
+                                self.advance();
+                                let mut fields = Vec::new();
+                                if !self.check(&Token::RBrace) {
+                                    loop {
+                                        let field_name = self.expect_ident()?;
+                                        // Support shorthand: `{ x }` is equivalent to `{ x: x }`
+                                        let field_value = if self.check(&Token::Colon) {
                                             self.advance();
+                                            self.parse_expr()?
+                                        } else {
+                                            SpannedExpr::unspanned(Expr::Ident(field_name.clone()))
+                                        };
+                                        fields.push((field_name, field_value));
+                                        if !self.check(&Token::Comma) {
+                                            break;
                                         }
+                                        self.advance();
                                     }
-                                    self.expect(&Token::RBrace)?;
-                                    EnumVariantArgs::Struct(fields)
-                                } else {
-                                    EnumVariantArgs::Unit
-                                };
+                                }
+                                self.expect(&Token::RBrace)?;
+                                EnumVariantArgs::Struct(fields)
+                            } else {
+                                EnumVariantArgs::Unit
+                            };
 
-                                let end = self.previous_span().end;
-                                spanned_expr = SpannedExpr::new(
-                                    Expr::EnumVariant {
-                                        type_name: Some(type_path),
-                                        variant,
-                                        args,
-                                    },
-                                    start..end,
-                                );
-                            }
+                            let end = self.previous_span().end;
+                            spanned_expr = SpannedExpr::new(
+                                Expr::EnumVariant {
+                                    type_name: Some(type_path),
+                                    variant,
+                                    args,
+                                },
+                                start..end,
+                            );
                         }
                     }
                 }
@@ -2423,24 +2419,24 @@ impl<'source> Parser<'source> {
 
             // Check for atom: or "string": shorthand syntax
             // Look for ident: or string: pattern (but not ::)
-            if let Some((key_expr, is_shorthand)) = self.try_parse_map_key_shorthand()? {
-                if is_shorthand {
-                    // It's a map with shorthand syntax
-                    let value = self.parse_expr()?;
-                    let mut pairs = vec![(SpannedExpr::unspanned(key_expr), value)];
+            if let Some((key_expr, is_shorthand)) = self.try_parse_map_key_shorthand()?
+                && is_shorthand
+            {
+                // It's a map with shorthand syntax
+                let value = self.parse_expr()?;
+                let mut pairs = vec![(SpannedExpr::unspanned(key_expr), value)];
 
-                    while self.check(&Token::Comma) {
-                        self.advance();
-                        if self.check(&Token::RBrace) {
-                            break;
-                        }
-                        let (key, value) = self.parse_map_entry_spanned()?;
-                        pairs.push((key, value));
+                while self.check(&Token::Comma) {
+                    self.advance();
+                    if self.check(&Token::RBrace) {
+                        break;
                     }
-                    self.expect(&Token::RBrace)?;
-                    let end = self.previous_span().end;
-                    return Ok(SpannedExpr::new(Expr::MapLiteral(pairs), start..end));
+                    let (key, value) = self.parse_map_entry_spanned()?;
+                    pairs.push((key, value));
                 }
+                self.expect(&Token::RBrace)?;
+                let end = self.previous_span().end;
+                return Ok(SpannedExpr::new(Expr::MapLiteral(pairs), start..end));
             }
 
             // Try to determine if this is a map or block
@@ -4054,16 +4050,15 @@ mod tests {
             {
                 count += 1;
                 // Check for prelude Result at position 1
-                if let Some(Item::Enum(e)) = iter.next() {
-                    if e.name == "Result"
-                        && !e.is_pub
-                        && e.variants.len() == 2
-                        && e.variants[0].name == "Ok"
-                        && e.variants[1].name == "Err"
-                        && type_param_names(&e.type_params) == vec!["T", "E"]
-                    {
-                        count += 1;
-                    }
+                if let Some(Item::Enum(e)) = iter.next()
+                    && e.name == "Result"
+                    && !e.is_pub
+                    && e.variants.len() == 2
+                    && e.variants[0].name == "Ok"
+                    && e.variants[1].name == "Err"
+                    && type_param_names(&e.type_params) == vec!["T", "E"]
+                {
+                    count += 1;
                 }
             } else if e.name == "Result"
                 && !e.is_pub
@@ -4865,10 +4860,10 @@ mod tests {
             }
 
             // Check second statement: let y = call::<int, String>(x);
-            if let Stmt::Let { value, .. } = &f.body.stmts[1] {
-                if let Expr::Call { type_args, .. } = value.inner() {
-                    assert_eq!(type_args.len(), 2);
-                }
+            if let Stmt::Let { value, .. } = &f.body.stmts[1]
+                && let Expr::Call { type_args, .. } = value.inner()
+            {
+                assert_eq!(type_args.len(), 2);
             }
         } else {
             panic!("expected function");
@@ -6035,7 +6030,7 @@ mod repl_edit {
         assert_eq!(modules.len(), 1);
         assert_eq!(modules[0].name, "repl_edit");
         // Should have Option, Result (prelude) + add function
-        assert!(user_items(&modules[0]).len() >= 1);
+        assert!(!user_items(&modules[0]).is_empty());
     }
 
     #[test]

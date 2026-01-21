@@ -17,10 +17,10 @@ use crate::compiler::lexer::Span;
 /// Extract Erlang record name from #[record = "name"] attribute.
 fn get_record_name(attrs: &[Attribute]) -> Option<String> {
     for attr in attrs {
-        if attr.name == "record" {
-            if let AttributeArgs::Eq(name) = &attr.args {
-                return Some(name.clone());
-            }
+        if attr.name == "record"
+            && let AttributeArgs::Eq(name) = &attr.args
+        {
+            return Some(name.clone());
         }
     }
     None
@@ -564,10 +564,10 @@ impl TypeEnv {
             return Some(info);
         }
         // Try looking up just the last segment for module-qualified names
-        if let Some(simple_name) = name.rsplit("::").next() {
-            if let Some(info) = self.enums.get(simple_name) {
-                return Some(info);
-            }
+        if let Some(simple_name) = name.rsplit("::").next()
+            && let Some(info) = self.enums.get(simple_name)
+        {
+            return Some(info);
         }
         None
     }
@@ -905,10 +905,10 @@ impl TypeChecker {
         match ty {
             Ty::Infer(id) => {
                 // Check the cache first
-                if let Ok(cache) = self.substitution_cache.read() {
-                    if let Some(cached) = cache.get(id) {
-                        return cached.clone();
-                    }
+                if let Ok(cache) = self.substitution_cache.read()
+                    && let Some(cached) = cache.get(id)
+                {
+                    return cached.clone();
                 }
 
                 // Not in cache, resolve it
@@ -1259,10 +1259,10 @@ impl TypeChecker {
             },
             ast::Type::AssociatedType { base, name } => {
                 // Try to resolve Self::X using associated type bindings
-                if base == "Self" {
-                    if let Some(resolved) = self.env.associated_types.get(name) {
-                        return resolved.clone();
-                    }
+                if base == "Self"
+                    && let Some(resolved) = self.env.associated_types.get(name)
+                {
+                    return resolved.clone();
                 }
                 // If not resolvable, keep as unresolved associated type
                 Ty::AssociatedType {
@@ -1476,10 +1476,10 @@ impl TypeChecker {
             .attrs
             .iter()
             .find_map(|attr| {
-                if attr.name == "name" {
-                    if let AttributeArgs::Eq(value) = &attr.args {
-                        return Some(value.clone());
-                    }
+                if attr.name == "name"
+                    && let AttributeArgs::Eq(value) = &attr.args
+                {
+                    return Some(value.clone());
                 }
                 None
             })
@@ -1505,10 +1505,10 @@ impl TypeChecker {
                         .attrs
                         .iter()
                         .find_map(|attr| {
-                            if attr.name == "name" {
-                                if let AttributeArgs::Eq(value) = &attr.args {
-                                    return Some(value.clone());
-                                }
+                            if attr.name == "name"
+                                && let AttributeArgs::Eq(value) = &attr.args
+                            {
+                                return Some(value.clone());
                             }
                             None
                         })
@@ -1628,7 +1628,7 @@ impl TypeChecker {
                 // Check if the module path refers to an extern module or stdlib module
                 // e.g., `use jason::encode;` where `jason` is an extern module
                 // e.g., `use logger::info;` where `logger` is a stdlib module
-                if module.segments.len() >= 1 && module.prefix == PathPrefix::None {
+                if !module.segments.is_empty() && module.prefix == PathPrefix::None {
                     let first_segment = &module.segments[0];
                     // Register imports from both extern and stdlib modules
                     if Self::is_stdlib_module(first_segment)
@@ -1644,7 +1644,7 @@ impl TypeChecker {
                 // Check if the module path refers to an extern module or stdlib module
                 // e.g., `use jason::{encode, decode};`
                 // e.g., `use logger::{info, warn};`
-                if module.segments.len() >= 1 && module.prefix == PathPrefix::None {
+                if !module.segments.is_empty() && module.prefix == PathPrefix::None {
                     let first_segment = &module.segments[0];
                     // Register imports from both extern and stdlib modules
                     if Self::is_stdlib_module(first_segment)
@@ -1664,7 +1664,7 @@ impl TypeChecker {
             }
             UseTree::Glob { module } => {
                 // Glob imports: `use jason::*;` imports all functions from the module
-                if module.segments.len() >= 1 && module.prefix == PathPrefix::None {
+                if !module.segments.is_empty() && module.prefix == PathPrefix::None {
                     let first_segment = &module.segments[0];
                     if Self::is_stdlib_module(first_segment)
                         || self.env.is_extern_module(first_segment)
@@ -1756,8 +1756,7 @@ impl TypeChecker {
         self.current_function_span = Some(func.span.clone());
 
         // Set type parameter bounds for this function (for checking calls within generic functions)
-        let old_type_param_bounds =
-            std::mem::replace(&mut self.current_type_param_bounds, HashMap::new());
+        let old_type_param_bounds = std::mem::take(&mut self.current_type_param_bounds);
         for type_param in &func.type_params {
             self.current_type_param_bounds
                 .insert(type_param.name.clone(), type_param.bounds.clone());
@@ -1919,7 +1918,7 @@ impl TypeChecker {
                     let expected = self.ast_type_to_ty(ann_ty);
                     if !self.types_compatible(&value_ty, &expected) {
                         self.error(TypeError::with_help(
-                            format!("type mismatch in let binding"),
+                            "type mismatch in let binding".to_string(),
                             format!("expected {}, found {}", expected, value_ty),
                         ));
                     }
@@ -2167,11 +2166,8 @@ impl TypeChecker {
                         // (e.g., :ok with atom → atom, :ok with :ok → :ok)
                         if matches!(then_ty, Ty::AtomLiteral(_)) && matches!(else_ty, Ty::Atom) {
                             Ok(else_ty)
-                        } else if matches!(else_ty, Ty::AtomLiteral(_))
-                            && matches!(then_ty, Ty::Atom)
-                        {
-                            Ok(then_ty)
                         } else {
+                            // If else_ty is an AtomLiteral and then_ty is Atom, or any other case
                             Ok(then_ty)
                         }
                     } else {
@@ -2400,16 +2396,16 @@ impl TypeChecker {
             // Field access
             Expr::FieldAccess { expr, field } => {
                 let ty = self.infer_expr(expr)?;
-                if let Ty::Named { name, .. } = &ty {
-                    if let Some(info) = self.env.get_struct(name).cloned() {
-                        if let Some((_, field_ty)) = info.fields.iter().find(|(n, _)| n == field) {
-                            return Ok(field_ty.clone());
-                        } else {
-                            self.error(TypeError::new(format!(
-                                "struct '{}' has no field '{}'",
-                                name, field
-                            )));
-                        }
+                if let Ty::Named { name, .. } = &ty
+                    && let Some(info) = self.env.get_struct(name).cloned()
+                {
+                    if let Some((_, field_ty)) = info.fields.iter().find(|(n, _)| n == field) {
+                        return Ok(field_ty.clone());
+                    } else {
+                        self.error(TypeError::new(format!(
+                            "struct '{}' has no field '{}'",
+                            name, field
+                        )));
                     }
                 }
                 Ok(Ty::Any)
@@ -2449,11 +2445,11 @@ impl TypeChecker {
                             }
                             Ok(args[0].clone())
                         }
-                        "Result" if args.len() >= 1 => {
+                        "Result" if !args.is_empty() => {
                             // Result<T> with no explicit error type - just return T
                             Ok(args[0].clone())
                         }
-                        "Option" if args.len() >= 1 => {
+                        "Option" if !args.is_empty() => {
                             // Option<T> - the ? operator returns T
                             // Check that function return type is Option<_>
                             if let Some(ret_ty) = &self.current_return_type {
@@ -2503,13 +2499,13 @@ impl TypeChecker {
                     Ty::Unit
                 };
 
-                if let Some(expected) = &self.current_return_type {
-                    if !self.types_compatible(&ret_ty, expected) {
-                        self.error(TypeError::with_help(
-                            "return type mismatch",
-                            format!("expected {}, found {}", expected, ret_ty),
-                        ));
-                    }
+                if let Some(expected) = &self.current_return_type
+                    && !self.types_compatible(&ret_ty, expected)
+                {
+                    self.error(TypeError::with_help(
+                        "return type mismatch",
+                        format!("expected {}, found {}", expected, ret_ty),
+                    ));
                 }
 
                 Ok(Ty::Unit) // return expression itself is unit
@@ -3157,38 +3153,38 @@ impl TypeChecker {
         method: &str,
         args: &[SpannedExpr],
     ) -> TypeResult<Ty> {
-        if let Ty::Named { name, .. } = recv_ty {
-            if let Some(info) = self.env.get_method(name, method).cloned() {
-                // Instantiate generic method with fresh inference variables
-                let instantiated = self.instantiate_function(&info);
+        if let Ty::Named { name, .. } = recv_ty
+            && let Some(info) = self.env.get_method(name, method).cloned()
+        {
+            // Instantiate generic method with fresh inference variables
+            let instantiated = self.instantiate_function(&info);
 
-                // Check argument count (excluding self)
-                let expected_args = instantiated.params.len().saturating_sub(1);
-                if args.len() != expected_args {
-                    self.error(TypeError::new(format!(
-                        "method '{}' expects {} arguments, got {}",
-                        method,
-                        expected_args,
-                        args.len()
-                    )));
-                }
-
-                // Check argument types and unify
-                for (arg, (_, param_ty)) in args.iter().zip(instantiated.params.iter().skip(1)) {
-                    let arg_ty = self.infer_expr(arg)?;
-                    if self.unify(&arg_ty, param_ty).is_err()
-                        && !self.types_compatible(&arg_ty, param_ty)
-                    {
-                        self.error(TypeError::with_help(
-                            format!("type mismatch in method call '{}'", method),
-                            format!("expected {}, found {}", param_ty, arg_ty),
-                        ));
-                    }
-                }
-
-                // Apply substitutions to return type
-                return Ok(self.apply_substitutions(&instantiated.ret));
+            // Check argument count (excluding self)
+            let expected_args = instantiated.params.len().saturating_sub(1);
+            if args.len() != expected_args {
+                self.error(TypeError::new(format!(
+                    "method '{}' expects {} arguments, got {}",
+                    method,
+                    expected_args,
+                    args.len()
+                )));
             }
+
+            // Check argument types and unify
+            for (arg, (_, param_ty)) in args.iter().zip(instantiated.params.iter().skip(1)) {
+                let arg_ty = self.infer_expr(arg)?;
+                if self.unify(&arg_ty, param_ty).is_err()
+                    && !self.types_compatible(&arg_ty, param_ty)
+                {
+                    self.error(TypeError::with_help(
+                        format!("type mismatch in method call '{}'", method),
+                        format!("expected {}, found {}", param_ty, arg_ty),
+                    ));
+                }
+            }
+
+            // Apply substitutions to return type
+            return Ok(self.apply_substitutions(&instantiated.ret));
         }
 
         // Unknown method - check args and return Any
@@ -3286,10 +3282,10 @@ impl TypeChecker {
 
         // Check the cache for previously computed results
         let cache_key = (ty1.clone(), ty2.clone());
-        if let Ok(cache) = self.env.type_compat_cache.read() {
-            if let Some(&result) = cache.get(&cache_key) {
-                return result;
-            }
+        if let Ok(cache) = self.env.type_compat_cache.read()
+            && let Some(&result) = cache.get(&cache_key)
+        {
+            return result;
         }
 
         let result = match (ty1, ty2) {
@@ -3911,113 +3907,46 @@ impl TypeChecker {
                     args.iter().map(|a| self.annotate_expr(a)).collect();
 
                 // Check if this is a call to an extern module: module::func(args)
-                if let Expr::Path { segments } = func.inner() {
-                    if segments.len() == 2 {
-                        let module = &segments[0];
-                        let func_name = &segments[1];
+                if let Expr::Path { segments } = func.inner()
+                    && segments.len() == 2
+                {
+                    let module = &segments[0];
+                    let func_name = &segments[1];
 
-                        // Only transform to ExternCall if it's an extern module but NOT a stdlib module.
-                        // Stdlib modules (io, logger, etc.) have Surreal wrapper implementations that should be called.
-                        if self.env.is_extern_module(module) && !Self::is_stdlib_module(module) {
-                            // Resolve module alias to full path for code generation
-                            let resolved_module = self.env.resolve_module_alias(module).to_string();
-
-                            // Transform to ExternCall with Result wrapping if needed
-                            let arity = args.len();
-                            if let Some(info) = self
-                                .env
-                                .get_extern_function(module, func_name, arity)
-                                .cloned()
-                            {
-                                // Check for Result<T, E> return type
-                                if let Ty::Named {
-                                    name,
-                                    args: type_args,
-                                    ..
-                                } = &info.ret
-                                {
-                                    if name == "Result" && type_args.len() == 2 {
-                                        let is_unit_ok = matches!(&type_args[0], Ty::Unit);
-                                        return self.transform_extern_to_result(
-                                            &resolved_module,
-                                            func_name,
-                                            annotated_args,
-                                            is_unit_ok,
-                                            span.clone(),
-                                        );
-                                    }
-                                    if name == "Option" && type_args.len() == 1 {
-                                        return self.transform_extern_to_option(
-                                            &resolved_module,
-                                            func_name,
-                                            annotated_args,
-                                            span.clone(),
-                                        );
-                                    }
-                                }
-                            }
-
-                            // Plain extern call without Result/Option transformation
-                            return SpannedExpr::new(
-                                Expr::ExternCall {
-                                    module: resolved_module,
-                                    function: func_name.clone(),
-                                    args: annotated_args,
-                                },
-                                span.clone(),
-                            );
-                        }
-                    }
-                }
-
-                // Check if this is an imported function: `use logger::info; info(msg)`
-                // or `use jason::encode; encode(data)`
-                if let Expr::Ident(name) = func.inner() {
-                    if let Some((module, func_name)) = self.env.get_extern_import(name).cloned() {
-                        // If this is a stdlib module import, transform to Path call
-                        // so it gets the surreal:: prefix in codegen
-                        if Self::is_stdlib_module(&module) {
-                            return SpannedExpr::new(
-                                Expr::Call {
-                                    func: SpannedExpr::boxed(Expr::Path {
-                                        segments: vec![module, func_name],
-                                    }),
-                                    type_args: type_args.clone(),
-                                    inferred_type_args: vec![],
-                                    args: annotated_args,
-                                },
-                                span.clone(),
-                            );
-                        }
+                    // Only transform to ExternCall if it's an extern module but NOT a stdlib module.
+                    // Stdlib modules (io, logger, etc.) have Surreal wrapper implementations that should be called.
+                    if self.env.is_extern_module(module) && !Self::is_stdlib_module(module) {
+                        // Resolve module alias to full path for code generation
+                        let resolved_module = self.env.resolve_module_alias(module).to_string();
 
                         // Transform to ExternCall with Result wrapping if needed
                         let arity = args.len();
                         if let Some(info) = self
                             .env
-                            .get_extern_function(&module, &func_name, arity)
+                            .get_extern_function(module, func_name, arity)
                             .cloned()
                         {
                             // Check for Result<T, E> return type
                             if let Ty::Named {
-                                name: type_name,
+                                name,
                                 args: type_args,
                                 ..
                             } = &info.ret
                             {
-                                if type_name == "Result" && type_args.len() == 2 {
+                                if name == "Result" && type_args.len() == 2 {
                                     let is_unit_ok = matches!(&type_args[0], Ty::Unit);
                                     return self.transform_extern_to_result(
-                                        &module,
-                                        &func_name,
+                                        &resolved_module,
+                                        func_name,
                                         annotated_args,
                                         is_unit_ok,
                                         span.clone(),
                                     );
                                 }
-                                if type_name == "Option" && type_args.len() == 1 {
+                                if name == "Option" && type_args.len() == 1 {
                                     return self.transform_extern_to_option(
-                                        &module,
-                                        &func_name,
+                                        &resolved_module,
+                                        func_name,
                                         annotated_args,
                                         span.clone(),
                                     );
@@ -4028,13 +3957,80 @@ impl TypeChecker {
                         // Plain extern call without Result/Option transformation
                         return SpannedExpr::new(
                             Expr::ExternCall {
-                                module,
-                                function: func_name,
+                                module: resolved_module,
+                                function: func_name.clone(),
                                 args: annotated_args,
                             },
                             span.clone(),
                         );
                     }
+                }
+
+                // Check if this is an imported function: `use logger::info; info(msg)`
+                // or `use jason::encode; encode(data)`
+                if let Expr::Ident(name) = func.inner()
+                    && let Some((module, func_name)) = self.env.get_extern_import(name).cloned()
+                {
+                    // If this is a stdlib module import, transform to Path call
+                    // so it gets the surreal:: prefix in codegen
+                    if Self::is_stdlib_module(&module) {
+                        return SpannedExpr::new(
+                            Expr::Call {
+                                func: SpannedExpr::boxed(Expr::Path {
+                                    segments: vec![module, func_name],
+                                }),
+                                type_args: type_args.clone(),
+                                inferred_type_args: vec![],
+                                args: annotated_args,
+                            },
+                            span.clone(),
+                        );
+                    }
+
+                    // Transform to ExternCall with Result wrapping if needed
+                    let arity = args.len();
+                    if let Some(info) = self
+                        .env
+                        .get_extern_function(&module, &func_name, arity)
+                        .cloned()
+                    {
+                        // Check for Result<T, E> return type
+                        if let Ty::Named {
+                            name: type_name,
+                            args: type_args,
+                            ..
+                        } = &info.ret
+                        {
+                            if type_name == "Result" && type_args.len() == 2 {
+                                let is_unit_ok = matches!(&type_args[0], Ty::Unit);
+                                return self.transform_extern_to_result(
+                                    &module,
+                                    &func_name,
+                                    annotated_args,
+                                    is_unit_ok,
+                                    span.clone(),
+                                );
+                            }
+                            if type_name == "Option" && type_args.len() == 1 {
+                                return self.transform_extern_to_option(
+                                    &module,
+                                    &func_name,
+                                    annotated_args,
+                                    span.clone(),
+                                );
+                            }
+                        }
+                    }
+
+                    // Plain extern call without Result/Option transformation
+                    return SpannedExpr::new(
+                        Expr::ExternCall {
+                            module,
+                            function: func_name,
+                            args: annotated_args,
+                        },
+                        span.clone(),
+                    );
                 }
 
                 let annotated_func = Box::new(self.annotate_expr(func));
@@ -4280,9 +4276,9 @@ impl TypeChecker {
                     .map(|seg| ast::BitStringSegment {
                         value: Box::new(self.annotate_expr(&seg.value)),
                         size: seg.size.clone(), // size is Box<Expr>, not SpannedExpr - just clone it
-                        segment_type: seg.segment_type.clone(),
-                        endianness: seg.endianness.clone(),
-                        signedness: seg.signedness.clone(),
+                        segment_type: seg.segment_type,
+                        endianness: seg.endianness,
+                        signedness: seg.signedness,
                     })
                     .collect(),
             ),
@@ -5134,10 +5130,11 @@ impl MethodResolver {
             Expr::Try { expr } => {
                 // Return the inner type of Result<T, _> or Option<T>
                 let inner_ty = self.infer_expr_type(expr);
-                if let Ty::Named { name, args, .. } = &inner_ty {
-                    if (name == "Result" || name == "Option") && !args.is_empty() {
-                        return args[0].clone();
-                    }
+                if let Ty::Named { name, args, .. } = &inner_ty
+                    && (name == "Result" || name == "Option")
+                    && !args.is_empty()
+                {
+                    return args[0].clone();
                 }
                 Ty::Any
             }
@@ -5237,6 +5234,7 @@ impl MethodResolver {
     }
 
     /// Convert AST type to internal Ty (simplified version for resolver).
+    #[allow(clippy::only_used_in_recursion)]
     fn ast_type_to_ty(&self, ast_ty: &ast::Type) -> Ty {
         match ast_ty {
             ast::Type::Int => Ty::Int,

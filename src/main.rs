@@ -69,10 +69,10 @@ fn load_stdlib_uncached() -> StdlibData {
         let mut reg = registry.write().unwrap();
         for module in &modules {
             for item in &module.items {
-                if let Item::Function(func) = item {
-                    if !func.type_params.is_empty() {
-                        reg.register(&module.name, func);
-                    }
+                if let Item::Function(func) = item
+                    && !func.type_params.is_empty()
+                {
+                    reg.register(&module.name, func);
                 }
             }
         }
@@ -359,10 +359,10 @@ fn cmd_stdlib(force: bool) -> ExitCode {
     if force {
         // Remove existing stdlib beams to force recompilation
         let output_dir = stdlib_beam_dir();
-        if output_dir.exists() {
-            if let Err(e) = fs::remove_dir_all(&output_dir) {
-                eprintln!("Warning: Failed to clean stdlib directory: {}", e);
-            }
+        if output_dir.exists()
+            && let Err(e) = fs::remove_dir_all(&output_dir)
+        {
+            eprintln!("Warning: Failed to clean stdlib directory: {}", e);
         }
     }
 
@@ -553,10 +553,11 @@ fn cmd_build(
     );
 
     // Generate .app file if compilation succeeded
-    if result == ExitCode::SUCCESS && target == "beam" {
-        if let Err(e) = generate_app_file(&build_dir, &config, &module_names) {
-            eprintln!("Warning: Failed to generate .app file: {}", e);
-        }
+    if result == ExitCode::SUCCESS
+        && target == "beam"
+        && let Err(e) = generate_app_file(&build_dir, &config, &module_names)
+    {
+        eprintln!("Warning: Failed to generate .app file: {}", e);
     }
 
     result
@@ -575,73 +576,73 @@ fn build_standalone_file(
     }
 
     // Check if this file is part of a project (surreal.toml in parent directories)
-    if let Some(project_root) = find_project_root(source_file) {
-        if let Ok(config) = ProjectConfig::load(&project_root.join("surreal.toml")) {
-            // This is a project file - use project mode
-            let src_dir = config.src_dir(&project_root);
-            let build_dir = output
-                .map(|p| p.to_path_buf())
-                .unwrap_or_else(|| config.beam_dir(&project_root));
+    if let Some(project_root) = find_project_root(source_file)
+        && let Ok(config) = ProjectConfig::load(&project_root.join("surreal.toml"))
+    {
+        // This is a project file - use project mode
+        let src_dir = config.src_dir(&project_root);
+        let build_dir = output
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| config.beam_dir(&project_root));
 
-            if let Err(e) = fs::create_dir_all(&build_dir) {
-                eprintln!("Error creating build directory: {}", e);
-                return ExitCode::from(1);
-            }
-
-            // Compile stdlib first
-            if let Err(e) = compile_stdlib() {
-                eprintln!("Warning: {}", e);
-            }
-
-            println!("Compiling {}...", config.package.name);
-
-            let mut loader =
-                ModuleLoader::with_package(config.package.name.clone(), src_dir.clone());
-
-            // Add _build/bindings/ to search path for auto-generated dependency bindings
-            let bindings_dir = project_root.join("_build").join("bindings");
-            loader.add_bindings_dir(bindings_dir);
-
-            if let Err(e) = loader.load_all_in_dir(&src_dir) {
-                eprintln!("Error loading modules: {}", e);
-                return ExitCode::from(1);
-            }
-
-            // Collect module names before compilation
-            let modules = loader.into_modules();
-            let module_names: Vec<String> = modules.iter().map(|m| m.name.clone()).collect();
-
-            // Resolve features
-            let resolved_features = config.resolve_features(features);
-            let compile_options = CompileOptions::with_features(resolved_features);
-
-            // Get dependency ebin paths for loading macros from dependencies
-            let deps_manager = DepsManager::new(project_root.clone(), config.clone());
-            let dep_ebin_paths = deps_manager.dep_ebin_paths();
-
-            // Get dependency names for module resolution
-            let dependency_names: std::collections::HashSet<String> =
-                config.dependencies.keys().cloned().collect();
-
-            let result = compile_modules_with_options(
-                modules,
-                &build_dir,
-                target,
-                Some(&config.package.name),
-                &compile_options,
-                &dep_ebin_paths,
-                &dependency_names,
-            );
-
-            // Generate .app file if compilation succeeded
-            if result == ExitCode::SUCCESS && target == "beam" {
-                if let Err(e) = generate_app_file(&build_dir, &config, &module_names) {
-                    eprintln!("Warning: Failed to generate .app file: {}", e);
-                }
-            }
-
-            return result;
+        if let Err(e) = fs::create_dir_all(&build_dir) {
+            eprintln!("Error creating build directory: {}", e);
+            return ExitCode::from(1);
         }
+
+        // Compile stdlib first
+        if let Err(e) = compile_stdlib() {
+            eprintln!("Warning: {}", e);
+        }
+
+        println!("Compiling {}...", config.package.name);
+
+        let mut loader = ModuleLoader::with_package(config.package.name.clone(), src_dir.clone());
+
+        // Add _build/bindings/ to search path for auto-generated dependency bindings
+        let bindings_dir = project_root.join("_build").join("bindings");
+        loader.add_bindings_dir(bindings_dir);
+
+        if let Err(e) = loader.load_all_in_dir(&src_dir) {
+            eprintln!("Error loading modules: {}", e);
+            return ExitCode::from(1);
+        }
+
+        // Collect module names before compilation
+        let modules = loader.into_modules();
+        let module_names: Vec<String> = modules.iter().map(|m| m.name.clone()).collect();
+
+        // Resolve features
+        let resolved_features = config.resolve_features(features);
+        let compile_options = CompileOptions::with_features(resolved_features);
+
+        // Get dependency ebin paths for loading macros from dependencies
+        let deps_manager = DepsManager::new(project_root.clone(), config.clone());
+        let dep_ebin_paths = deps_manager.dep_ebin_paths();
+
+        // Get dependency names for module resolution
+        let dependency_names: std::collections::HashSet<String> =
+            config.dependencies.keys().cloned().collect();
+
+        let result = compile_modules_with_options(
+            modules,
+            &build_dir,
+            target,
+            Some(&config.package.name),
+            &compile_options,
+            &dep_ebin_paths,
+            &dependency_names,
+        );
+
+        // Generate .app file if compilation succeeded
+        if result == ExitCode::SUCCESS
+            && target == "beam"
+            && let Err(e) = generate_app_file(&build_dir, &config, &module_names)
+        {
+            eprintln!("Warning: Failed to generate .app file: {}", e);
+        }
+
+        return result;
     }
 
     // Compile stdlib first (even for standalone files)
@@ -830,15 +831,14 @@ fn compile_modules_with_registry(
             .unwrap_or(false);
         if !is_stdlib {
             // Try to find source code for rich diagnostics
-            if let Some(module_name) = &warning.module {
-                if let Some(module) = modules.iter().find(|m| &m.name == module_name) {
-                    if let Some(ref source) = module.source {
-                        let compiler_warning =
-                            CompilerWarning::from_warning(module_name, source, warning.clone());
-                        eprintln!("{:?}", miette::Report::new(compiler_warning));
-                        continue;
-                    }
-                }
+            if let Some(module_name) = &warning.module
+                && let Some(module) = modules.iter().find(|m| &m.name == module_name)
+                && let Some(ref source) = module.source
+            {
+                let compiler_warning =
+                    CompilerWarning::from_warning(module_name, source, warning.clone());
+                eprintln!("{:?}", miette::Report::new(compiler_warning));
+                continue;
             }
             // Fallback: simple warning without source context
             eprintln!("  warning: {}", warning.message);
@@ -1134,12 +1134,11 @@ fn compile_modules_with_registry(
     }
 
     // Generate .macros file if we have macros and a package name
-    if !project_macros.is_empty() {
-        if let Some(pkg_name) = package_name {
-            if let Err(e) = generate_macros_file(build_dir, pkg_name, &project_macros) {
-                eprintln!("Warning: Failed to generate .macros file: {}", e);
-            }
-        }
+    if !project_macros.is_empty()
+        && let Some(pkg_name) = package_name
+        && let Err(e) = generate_macros_file(build_dir, pkg_name, &project_macros)
+    {
+        eprintln!("Warning: Failed to generate .macros file: {}", e);
     }
 
     println!();
@@ -1149,6 +1148,7 @@ fn compile_modules_with_registry(
 }
 
 /// Compile modules to Core Erlang and optionally BEAM, with registry and compile options.
+#[allow(clippy::too_many_arguments)]
 fn compile_modules_with_registry_and_options(
     modules: Vec<Module>,
     build_dir: &Path,
@@ -1271,15 +1271,14 @@ fn compile_modules_with_registry_and_options(
             .unwrap_or(false);
         if !is_stdlib {
             // Try to find source code for rich diagnostics
-            if let Some(module_name) = &warning.module {
-                if let Some(module) = modules.iter().find(|m| &m.name == module_name) {
-                    if let Some(ref source) = module.source {
-                        let compiler_warning =
-                            CompilerWarning::from_warning(module_name, source, warning.clone());
-                        eprintln!("{:?}", miette::Report::new(compiler_warning));
-                        continue;
-                    }
-                }
+            if let Some(module_name) = &warning.module
+                && let Some(module) = modules.iter().find(|m| &m.name == module_name)
+                && let Some(ref source) = module.source
+            {
+                let compiler_warning =
+                    CompilerWarning::from_warning(module_name, source, warning.clone());
+                eprintln!("{:?}", miette::Report::new(compiler_warning));
+                continue;
             }
             // Fallback: simple warning without source context
             eprintln!("  warning: {}", warning.message);
@@ -1611,12 +1610,11 @@ fn compile_modules_with_registry_and_options(
     }
 
     // Generate .macros file if we have macros and a package name
-    if !project_macros.is_empty() {
-        if let Some(pkg_name) = package_name {
-            if let Err(e) = generate_macros_file(build_dir, pkg_name, &project_macros) {
-                eprintln!("Warning: Failed to generate .macros file: {}", e);
-            }
-        }
+    if !project_macros.is_empty()
+        && let Some(pkg_name) = package_name
+        && let Err(e) = generate_macros_file(build_dir, pkg_name, &project_macros)
+    {
+        eprintln!("Warning: Failed to generate .macros file: {}", e);
     }
 
     println!();
@@ -1663,7 +1661,7 @@ fn generate_app_file(
         .join(", ");
 
     // Get dependency application names
-    let deps: Vec<String> = config.dependencies.keys().map(|k| k.clone()).collect();
+    let deps: Vec<String> = config.dependencies.keys().cloned().collect();
 
     let deps_str = deps
         .iter()
@@ -1777,7 +1775,7 @@ fn load_dependency_macros(macro_registry: &mut MacroRegistry, dep_ebin_paths: &[
         if let Ok(entries) = fs::read_dir(ebin_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().map_or(false, |ext| ext == "macros") {
+                if path.extension().is_some_and(|ext| ext == "macros") {
                     // Extract package name from filename (e.g., "serde.macros" -> "serde")
                     let package_name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
 
@@ -1812,18 +1810,18 @@ fn load_dependency_macros(macro_registry: &mut MacroRegistry, dep_ebin_paths: &[
 /// Find the stdlib directory relative to the executable or current directory.
 fn find_stdlib_dir() -> Option<PathBuf> {
     // Try relative to executable first
-    if let Ok(exe_path) = std::env::current_exe() {
-        if let Some(exe_dir) = exe_path.parent() {
-            // Check ../../stdlib (for target/debug/surreal -> stdlib/)
-            let stdlib = exe_dir.join("../../stdlib");
-            if stdlib.exists() {
-                return Some(stdlib.canonicalize().unwrap_or(stdlib));
-            }
-            // Check alongside executable
-            let stdlib = exe_dir.join("stdlib");
-            if stdlib.exists() {
-                return Some(stdlib);
-            }
+    if let Ok(exe_path) = std::env::current_exe()
+        && let Some(exe_dir) = exe_path.parent()
+    {
+        // Check ../../stdlib (for target/debug/surreal -> stdlib/)
+        let stdlib = exe_dir.join("../../stdlib");
+        if stdlib.exists() {
+            return Some(stdlib.canonicalize().unwrap_or(stdlib));
+        }
+        // Check alongside executable
+        let stdlib = exe_dir.join("stdlib");
+        if stdlib.exists() {
+            return Some(stdlib);
         }
     }
 
@@ -1852,18 +1850,18 @@ fn find_stdlib_dir() -> Option<PathBuf> {
 /// Find the stubs directory relative to the executable or current directory.
 fn find_stubs_dir() -> Option<PathBuf> {
     // Try relative to executable first
-    if let Ok(exe_path) = std::env::current_exe() {
-        if let Some(exe_dir) = exe_path.parent() {
-            // Check ../../stubs (for target/debug/surreal -> stubs/)
-            let stubs = exe_dir.join("../../stubs");
-            if stubs.exists() {
-                return Some(stubs.canonicalize().unwrap_or(stubs));
-            }
-            // Check alongside executable
-            let stubs = exe_dir.join("stubs");
-            if stubs.exists() {
-                return Some(stubs);
-            }
+    if let Ok(exe_path) = std::env::current_exe()
+        && let Some(exe_dir) = exe_path.parent()
+    {
+        // Check ../../stubs (for target/debug/surreal -> stubs/)
+        let stubs = exe_dir.join("../../stubs");
+        if stubs.exists() {
+            return Some(stubs.canonicalize().unwrap_or(stubs));
+        }
+        // Check alongside executable
+        let stubs = exe_dir.join("stubs");
+        if stubs.exists() {
+            return Some(stubs);
         }
     }
 
@@ -1982,19 +1980,19 @@ fn load_stub_modules() -> Vec<Module> {
 fn stdlib_beam_dir() -> PathBuf {
     // Use target/stdlib relative to executable for compiled stdlib .beam files
     // This ensures stdlib is found regardless of working directory
-    if let Ok(exe_path) = std::env::current_exe() {
-        if let Some(exe_dir) = exe_path.parent() {
-            // Executable is at target/release/surreal or target/debug/surreal
-            // Stdlib should be at target/stdlib
-            let stdlib_path = exe_dir.join("../stdlib");
-            // Canonicalize to resolve .. and ensure consistent path comparison
-            if let Ok(canonical) = stdlib_path.canonicalize() {
-                return canonical;
-            }
-            // If canonicalize fails (dir doesn't exist yet), create it and return the path
-            let _ = fs::create_dir_all(&stdlib_path);
-            return stdlib_path.canonicalize().unwrap_or(stdlib_path);
+    if let Ok(exe_path) = std::env::current_exe()
+        && let Some(exe_dir) = exe_path.parent()
+    {
+        // Executable is at target/release/surreal or target/debug/surreal
+        // Stdlib should be at target/stdlib
+        let stdlib_path = exe_dir.join("../stdlib");
+        // Canonicalize to resolve .. and ensure consistent path comparison
+        if let Ok(canonical) = stdlib_path.canonicalize() {
+            return canonical;
         }
+        // If canonicalize fails (dir doesn't exist yet), create it and return the path
+        let _ = fs::create_dir_all(&stdlib_path);
+        return stdlib_path.canonicalize().unwrap_or(stdlib_path);
     }
     // Fallback to relative path
     PathBuf::from("target/stdlib")
@@ -2028,11 +2026,11 @@ fn compile_stdlib() -> Result<PathBuf, String> {
             // Check if source is newer than beam
             let src_modified = path.metadata().and_then(|m| m.modified()).ok();
             let beam_modified = beam_file.metadata().and_then(|m| m.modified()).ok();
-            if let (Some(src), Some(beam)) = (src_modified, beam_modified) {
-                if src > beam {
-                    needs_compile = true;
-                    break;
-                }
+            if let (Some(src), Some(beam)) = (src_modified, beam_modified)
+                && src > beam
+            {
+                needs_compile = true;
+                break;
             }
         }
     }
@@ -2108,6 +2106,7 @@ fn extract_module_name(source_file: &Path) -> Option<String> {
 }
 
 /// Build and run the project or a standalone file.
+#[allow(clippy::too_many_arguments)]
 fn cmd_run(
     file: Option<&Path>,
     function: Option<&str>,
@@ -2543,10 +2542,10 @@ fn command_exists(cmd: &str) -> bool {
 /// Supports both `#[macro]` and `#[derive(Name)]` attributes.
 fn has_macro_functions(module: &Module) -> bool {
     for item in &module.items {
-        if let Item::Function(func) = item {
-            if is_macro(&func.attrs) || is_derive_macro(&func.attrs) {
-                return true;
-            }
+        if let Item::Function(func) = item
+            && (is_macro(&func.attrs) || is_derive_macro(&func.attrs))
+        {
+            return true;
         }
     }
     false
@@ -2573,6 +2572,7 @@ fn get_macro_functions(module: &Module) -> Vec<(String, String)> {
 
 /// Compile a single module to BEAM (for macro modules).
 /// Returns the path to the compiled .beam file on success.
+#[allow(clippy::too_many_arguments)]
 fn compile_module_to_beam(
     module: &Module,
     build_dir: &Path,
@@ -2701,16 +2701,16 @@ fn cmd_test(filter: Option<&str>, features: &[String]) -> ExitCode {
     let mut test_functions: Vec<(String, String)> = Vec::new(); // (module_name, function_name)
     for module in &modules {
         for item in &module.items {
-            if let Item::Function(func) = item {
-                if cfg::is_test(&func.attrs) {
-                    // Apply filter if provided
-                    if let Some(pattern) = filter {
-                        if !func.name.contains(pattern) {
-                            continue;
-                        }
-                    }
-                    test_functions.push((module.name.clone(), func.name.clone()));
+            if let Item::Function(func) = item
+                && cfg::is_test(&func.attrs)
+            {
+                // Apply filter if provided
+                if let Some(pattern) = filter
+                    && !func.name.contains(pattern)
+                {
+                    continue;
                 }
+                test_functions.push((module.name.clone(), func.name.clone()));
             }
         }
     }
@@ -2825,20 +2825,20 @@ fn cmd_test(filter: Option<&str>, features: &[String]) -> ExitCode {
             Ok(out) => {
                 if out.status.success() {
                     passed += 1;
-                    println!("  {} {}::{} ... ok", "\u{2713}", module_name, func_name);
+                    println!("  \u{2713} {}::{} ... ok", module_name, func_name);
                 } else {
                     failed += 1;
                     let stderr = String::from_utf8_lossy(&out.stdout).to_string();
                     failures.push((module_name.clone(), func_name.clone(), stderr));
-                    println!("  {} {}::{} ... FAILED", "\u{2717}", module_name, func_name);
+                    println!("  \u{2717} {}::{} ... FAILED", module_name, func_name);
                 }
             }
             Err(e) => {
                 failed += 1;
                 failures.push((module_name.clone(), func_name.clone(), e.to_string()));
                 println!(
-                    "  {} {}::{} ... FAILED ({})",
-                    "\u{2717}", module_name, func_name, e
+                    "  \u{2717} {}::{} ... FAILED ({})",
+                    module_name, func_name, e
                 );
             }
         }

@@ -16,10 +16,10 @@ pub fn handle_hover(
     let offset = line_index.position_to_offset(position)?;
 
     // First try to find a specific symbol at the position
-    if let Some(symbol) = find_symbol_at_offset(module, offset) {
-        if let Some(hover) = hover_for_symbol(&symbol, module, stdlib_modules, line_index) {
-            return Some(hover);
-        }
+    if let Some(symbol) = find_symbol_at_offset(module, offset)
+        && let Some(hover) = hover_for_symbol(&symbol, module, stdlib_modules, line_index)
+    {
+        return Some(hover);
     }
 
     // Fall back to showing context info
@@ -163,25 +163,24 @@ fn find_variable_type(
         if let Item::Function(func) = item {
             // Check parameters
             for param in &func.params {
-                if let Pattern::Ident(name) = &param.pattern {
-                    if name == var_name {
-                        return Some(format_type(&param.ty.ty));
-                    }
+                if let Pattern::Ident(name) = &param.pattern
+                    && name == var_name
+                {
+                    return Some(format_type(&param.ty.ty));
                 }
             }
 
             // Check let bindings in the body
             for stmt in &func.body.stmts {
-                if let crate::compiler::Stmt::Let { pattern, ty, .. } = stmt {
-                    if let Pattern::Ident(name) = pattern {
-                        if name == var_name {
-                            if let Some(t) = ty {
-                                return Some(format_type(&t.ty));
-                            }
-                            // No explicit type annotation - could try to infer
-                            return None;
-                        }
+                if let crate::compiler::Stmt::Let { pattern, ty, .. } = stmt
+                    && let Pattern::Ident(name) = pattern
+                    && name == var_name
+                {
+                    if let Some(t) = ty {
+                        return Some(format_type(&t.ty));
                     }
+                    // No explicit type annotation - could try to infer
+                    return None;
                 }
             }
         }
@@ -212,10 +211,10 @@ fn find_function_in_modules<'a>(
     func_name: &str,
 ) -> Option<&'a Function> {
     for module in modules {
-        if module.name.ends_with(mod_name) || module.name == format!("surreal::{}", mod_name) {
-            if let Some(func) = find_function(module, func_name) {
-                return Some(func);
-            }
+        if (module.name.ends_with(mod_name) || module.name == format!("surreal::{}", mod_name))
+            && let Some(func) = find_function(module, func_name)
+        {
+            return Some(func);
         }
     }
     None
@@ -226,10 +225,10 @@ fn find_struct<'a>(
     struct_name: &str,
 ) -> Option<&'a crate::compiler::StructDef> {
     for item in &module.items {
-        if let Item::Struct(s) = item {
-            if s.name == struct_name {
-                return Some(s);
-            }
+        if let Item::Struct(s) = item
+            && s.name == struct_name
+        {
+            return Some(s);
         }
     }
     None

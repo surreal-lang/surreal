@@ -14,10 +14,8 @@ use crate::config::CompileOptions;
 /// - All cfg attributes evaluate to true
 pub fn should_include(attrs: &[Attribute], options: &CompileOptions) -> bool {
     for attr in attrs {
-        if attr.name == "cfg" {
-            if !evaluate_cfg_attr(attr, options) {
-                return false;
-            }
+        if attr.name == "cfg" && !evaluate_cfg_attr(attr, options) {
+            return false;
         }
     }
     true
@@ -43,12 +41,11 @@ pub fn is_proc_macro_derive(attrs: &[Attribute]) -> bool {
 /// Returns None if no valid proc_macro_derive attribute is found.
 pub fn get_proc_macro_derive_name(attrs: &[Attribute]) -> Option<String> {
     for attr in attrs {
-        if attr.name == "proc_macro_derive" {
-            if let AttributeArgs::Parenthesized(args) = &attr.args {
-                if let Some(AttributeArg::Ident(name)) = args.first() {
-                    return Some(name.clone());
-                }
-            }
+        if attr.name == "proc_macro_derive"
+            && let AttributeArgs::Parenthesized(args) = &attr.args
+            && let Some(AttributeArg::Ident(name)) = args.first()
+        {
+            return Some(name.clone());
         }
     }
     None
@@ -64,11 +61,11 @@ pub fn is_derive_macro(attrs: &[Attribute]) -> bool {
     }
     // Fall back to old-style #[derive(Name)] on functions
     attrs.iter().any(|attr| {
-        if attr.name == "derive" {
-            if let AttributeArgs::Parenthesized(args) = &attr.args {
-                // #[derive(Name)] - single identifier arg means this defines a derive macro
-                return args.len() == 1 && matches!(&args[0], AttributeArg::Ident(_));
-            }
+        if attr.name == "derive"
+            && let AttributeArgs::Parenthesized(args) = &attr.args
+        {
+            // #[derive(Name)] - single identifier arg means this defines a derive macro
+            return args.len() == 1 && matches!(&args[0], AttributeArg::Ident(_));
         }
         false
     })
@@ -84,14 +81,12 @@ pub fn get_derive_macro_name(attrs: &[Attribute]) -> Option<String> {
     }
     // Fall back to old-style #[derive(Name)]
     for attr in attrs {
-        if attr.name == "derive" {
-            if let AttributeArgs::Parenthesized(args) = &attr.args {
-                if args.len() == 1 {
-                    if let AttributeArg::Ident(name) = &args[0] {
-                        return Some(name.clone());
-                    }
-                }
-            }
+        if attr.name == "derive"
+            && let AttributeArgs::Parenthesized(args) = &attr.args
+            && args.len() == 1
+            && let AttributeArg::Ident(name) = &args[0]
+        {
+            return Some(name.clone());
         }
     }
     None
@@ -100,14 +95,12 @@ pub fn get_derive_macro_name(attrs: &[Attribute]) -> Option<String> {
 /// Check if an item has `#[cfg(test)]` attribute.
 pub fn is_cfg_test(attrs: &[Attribute]) -> bool {
     attrs.iter().any(|attr| {
-        if attr.name == "cfg" {
-            if let AttributeArgs::Parenthesized(args) = &attr.args {
-                if args.len() == 1 {
-                    if let AttributeArg::Ident(ident) = &args[0] {
-                        return ident == "test";
-                    }
-                }
-            }
+        if attr.name == "cfg"
+            && let AttributeArgs::Parenthesized(args) = &attr.args
+            && args.len() == 1
+            && let AttributeArg::Ident(ident) = &args[0]
+        {
+            return ident == "test";
         }
         false
     })

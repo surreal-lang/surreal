@@ -50,14 +50,12 @@ pub fn handle_goto_definition(
                 // Search stdlib modules
                 for stdlib_mod in stdlib_modules {
                     // Check for module name match (could be surreal::io, io, etc.)
-                    if stdlib_mod.name.ends_with(mod_name)
-                        || stdlib_mod.name == format!("surreal::{}", mod_name)
-                    {
-                        if let Some(response) =
+                    if (stdlib_mod.name.ends_with(mod_name)
+                        || stdlib_mod.name == format!("surreal::{}", mod_name))
+                        && let Some(response) =
                             find_function_in_module(stdlib_mod, &name, line_index, uri)
-                        {
-                            return Some(response);
-                        }
+                    {
+                        return Some(response);
                     }
                 }
 
@@ -129,14 +127,14 @@ fn find_struct_in_module(
     use crate::compiler::Item;
 
     for item in &module.items {
-        if let Item::Struct(s) = item {
-            if s.name == struct_name {
-                let range = line_index.span_to_range(s.span.clone())?;
-                return Some(GotoDefinitionResponse::Scalar(Location {
-                    uri: uri.clone(),
-                    range,
-                }));
-            }
+        if let Item::Struct(s) = item
+            && s.name == struct_name
+        {
+            let range = line_index.span_to_range(s.span.clone())?;
+            return Some(GotoDefinitionResponse::Scalar(Location {
+                uri: uri.clone(),
+                range,
+            }));
         }
     }
     None

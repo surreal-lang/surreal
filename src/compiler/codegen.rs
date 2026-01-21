@@ -359,12 +359,12 @@ impl Codegen {
                     || then_block
                         .expr
                         .as_ref()
-                        .map_or(false, |e| Self::contains_call(e))
-                    || else_block.as_ref().map_or(false, |b| {
+                        .is_some_and(|e| Self::contains_call(e))
+                    || else_block.as_ref().is_some_and(|b| {
                         b.stmts.iter().any(|s| match s {
                             Stmt::Let { value, .. } => Self::contains_call(value),
                             Stmt::Expr { expr: e, .. } => Self::contains_call(e),
-                        }) || b.expr.as_ref().map_or(false, |e| Self::contains_call(e))
+                        }) || b.expr.as_ref().is_some_and(|e| Self::contains_call(e))
                     })
             }
             Expr::Match { expr, arms } => {
@@ -374,10 +374,7 @@ impl Codegen {
                 block.stmts.iter().any(|s| match s {
                     Stmt::Let { value, .. } => Self::contains_call(value),
                     Stmt::Expr { expr: e, .. } => Self::contains_call(e),
-                }) || block
-                    .expr
-                    .as_ref()
-                    .map_or(false, |e| Self::contains_call(e))
+                }) || block.expr.as_ref().is_some_and(|e| Self::contains_call(e))
             }
             Expr::Tuple(elems) | Expr::List(elems) => elems.iter().any(|e| Self::contains_call(e)),
             Expr::ListCons { head, tail } => Self::contains_call(head) || Self::contains_call(tail),
@@ -742,10 +739,10 @@ impl Codegen {
                         }
 
                         // Patch guard jump if present
-                        if arm.guard.is_some() {
-                            if let Some(guard_jump) = self.pending_jumps.pop() {
-                                self.patch_jump(guard_jump, next_arm);
-                            }
+                        if arm.guard.is_some()
+                            && let Some(guard_jump) = self.pending_jumps.pop()
+                        {
+                            self.patch_jump(guard_jump, next_arm);
                         }
 
                         // Reset register allocation for next arm
@@ -1137,10 +1134,10 @@ impl Codegen {
 
             Expr::Path { segments } => {
                 // Path expression (like Module::function) - return as identifier for now
-                if segments.len() == 1 {
-                    if let Some(reg) = self.regs.lookup(&segments[0]) {
-                        return Ok(reg);
-                    }
+                if segments.len() == 1
+                    && let Some(reg) = self.regs.lookup(&segments[0])
+                {
+                    return Ok(reg);
                 }
                 Err(CodegenError::new(format!(
                     "cannot use path as value: {}",
@@ -1638,7 +1635,7 @@ impl Codegen {
                     if let AstPattern::Int(n) = seg.value.as_ref() {
                         let size = if let Some(size_expr) = &seg.size {
                             if let Expr::Int(s) = size_expr.as_ref() {
-                                (*s as usize + 7) / 8
+                                (*s as usize).div_ceil(8)
                             } else {
                                 1
                             }
