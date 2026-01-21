@@ -10,13 +10,23 @@ init() ->
     erlang:load_nif(SoName, 0).
 
 find_nif_lib() ->
-    %% Try priv dir first (installed as app), then development paths
-    case code:priv_dir(surreal_compiler) of
-        {error, _} ->
-            %% Not installed as app, try development paths
-            find_dev_path();
-        Dir ->
-            filename:join(Dir, "libsurreal_native")
+    %% First check development paths (for local dev without downloading)
+    case find_dev_path() of
+        {ok, Path} ->
+            Path;
+        not_found ->
+            %% Try priv dir (installed as app)
+            case code:priv_dir(surreal_compiler) of
+                {error, _} ->
+                    %% Not installed - try to download
+                    ensure_downloaded();
+                Dir ->
+                    PrivPath = filename:join(Dir, "libsurreal_native"),
+                    case nif_exists(PrivPath) of
+                        true -> PrivPath;
+                        false -> ensure_downloaded()
+                    end
+            end
     end.
 
 find_dev_path() ->
@@ -30,13 +40,27 @@ find_dev_path() ->
     find_first_existing(Paths).
 
 find_first_existing([Path | Rest]) ->
-    case filelib:is_file(Path ++ ".so") orelse filelib:is_file(Path ++ ".dylib") of
-        true -> Path;
+    case nif_exists(Path) of
+        true -> {ok, Path};
         false -> find_first_existing(Rest)
     end;
 find_first_existing([]) ->
-    %% Last resort - return a path and let load_nif fail with a clear error
-    "libsurreal_native".
+    not_found.
+
+nif_exists(BasePath) ->
+    filelib:is_file(BasePath ++ ".so") orelse
+    filelib:is_file(BasePath ++ ".dylib") orelse
+    filelib:is_file(BasePath ++ ".dll").
+
+ensure_downloaded() ->
+    case surreal_nif_downloader:ensure_nif() of
+        {ok, Path} ->
+            Path;
+        {error, Reason} ->
+            %% Log error and return path anyway - load_nif will give a clear error
+            io:format("Warning: Failed to download NIF: ~p~n", [Reason]),
+            surreal_nif_downloader:nif_path()
+    end.
 
 %% Parse Surreal source code and return module information.
 %% Returns: {ok, [{ModuleName, [{FuncName, Arity}, ...]}]} | {error, Reason}

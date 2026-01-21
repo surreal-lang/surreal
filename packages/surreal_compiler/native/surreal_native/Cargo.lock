@@ -2151,7 +2151,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b7401a30af6cb5818bb64852270bb722533397edcfc7344954a38f420819ece2"
 
 [[package]]
-name = "surreal"
+name = "surreal-lang"
 version = "0.1.0"
 dependencies = [
  "clap",
@@ -2185,7 +2185,7 @@ name = "surreal_native"
 version = "0.1.0"
 dependencies = [
  "rustler",
- "surreal",
+ "surreal-lang",
 ]
 
 [[package]]

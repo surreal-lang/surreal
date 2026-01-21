@@ -1,7 +1,25 @@
 [package]
-name = "surreal"
+name = "surreal-lang"
 version = "0.1.0"
 edition = "2024"
+description = "A programming language with Rust-like syntax and Erlang-style concurrency"
+license = "MIT"
+repository = "https://github.com/surreal-lang/surreal"
+homepage = "https://github.com/surreal-lang/surreal"
+documentation = "https://docs.rs/surreal-lang"
+readme = "README.md"
+keywords = ["compiler", "programming-language", "erlang", "beam", "concurrency"]
+categories = ["compilers", "development-tools"]
+authors = ["Sonny Scroggin <sonny@scrogson.com>"]
+exclude = [
+    ".github/",
+    "packages/",
+    "stdlib/",
+    "tests/",
+    "examples/",
+    "docs/",
+    ".beads/",
+]
 
 [[bin]]
 name = "surreal"

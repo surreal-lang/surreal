@@ -1,7 +1,7 @@
 //! Pattern building for Core Erlang AST.
 
 use rustler::{Atom, Encoder, Env, NifResult, Term};
-use surreal::compiler::Pattern;
+use surreal_lang::compiler::Pattern;
 use crate::atoms;
 
 /// Build a pattern for matching.

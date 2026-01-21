@@ -1,10 +1,26 @@
 {application, surreal_compiler,
- [{description, "Surreal programming language compiler"},
+ [{description, "Surreal programming language compiler - Rust-like syntax with Erlang-style concurrency"},
   {vsn, "0.1.0"},
   {registered, []},
-  {applications, [kernel, stdlib, compiler]},
+  {applications, [kernel, stdlib, compiler, inets, ssl]},
   {env, []},
   {modules, []},
+
+  %% Hex.pm metadata
   {licenses, ["MIT"]},
-  {links, [{"GitHub", "https://github.com/surreal-lang/surreal"}]}
+  {links, [
+      {"GitHub", "https://github.com/surreal-lang/surreal"},
+      {"Documentation", "https://hexdocs.pm/surreal_compiler"}
+  ]},
+  {files, [
+      "src",
+      "include",
+      "priv/.gitkeep",
+      "rebar.config",
+      "rebar.lock",
+      "README.md",
+      "LICENSE"
+  ]},
+  {build_tools, ["rebar3"]},
+  {maintainers, ["Sonny Scroggin"]}
  ]}.

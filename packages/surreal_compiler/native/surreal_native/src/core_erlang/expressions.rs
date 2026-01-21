@@ -1,7 +1,7 @@
 //! Expression building for Core Erlang AST.
 
 use rustler::{Atom, Encoder, Env, NifResult, Term};
-use surreal::compiler::{BinOp, Block, Expr, MatchArm, SpannedExpr, Stmt, UnaryOp};
+use surreal_lang::compiler::{BinOp, Block, Expr, MatchArm, SpannedExpr, Stmt, UnaryOp};
 use crate::atoms;
 use super::context::BuildContext;
 use super::patterns::build_pattern;

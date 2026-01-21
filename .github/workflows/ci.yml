@@ -1,0 +1,134 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  rust-checks:
+    name: Rust Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features
+
+      - name: Run tests
+        run: cargo test --all-features
+
+  erlang-tests:
+    name: Erlang Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Erlang
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27.0'
+          rebar3-version: '3.24'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-action@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            packages/surreal_compiler/native/surreal_native/target
+          key: ${{ runner.os }}-cargo-nif-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-nif-
+
+      - name: Cache rebar3
+        uses: actions/cache@v4
+        with:
+          path: |
+            packages/surreal_compiler/_build
+          key: ${{ runner.os }}-rebar3-${{ hashFiles('**/rebar.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-rebar3-
+
+      - name: Build NIF
+        working-directory: packages/surreal_compiler
+        run: |
+          cargo build --release --manifest-path=native/surreal_native/Cargo.toml
+          mkdir -p priv
+          cp native/surreal_native/target/release/libsurreal_native.so priv/libsurreal_native.so
+
+      - name: Compile Erlang
+        working-directory: packages/surreal_compiler
+        run: rebar3 compile
+
+      - name: Run Erlang tests
+        working-directory: packages/surreal_compiler
+        run: rebar3 eunit
+
+  build-matrix:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: macos-13
+            target: x86_64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-cargo-
+
+      - name: Build CLI
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Build NIF
+        working-directory: packages/surreal_compiler/native/surreal_native
+        run: cargo build --release --target ${{ matrix.target }}

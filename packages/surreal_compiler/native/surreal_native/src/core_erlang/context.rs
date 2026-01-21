@@ -11,10 +11,10 @@ pub struct BuildContext {
 
 impl BuildContext {
     /// Create a new BuildContext from a Surreal module.
-    pub fn new(module: &surreal::compiler::Module) -> Self {
+    pub fn new(module: &surreal_lang::compiler::Module) -> Self {
         let mut local_functions = HashMap::new();
         for item in &module.items {
-            if let surreal::compiler::Item::Function(f) = item {
+            if let surreal_lang::compiler::Item::Function(f) = item {
                 local_functions.insert(f.name.clone(), f.params.len());
             }
         }

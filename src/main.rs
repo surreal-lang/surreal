@@ -178,6 +178,11 @@ enum Commands {
         #[command(subcommand)]
         action: DepsAction,
     },
+    /// Manage NIF (Native Implemented Functions)
+    Nif {
+        #[command(subcommand)]
+        action: NifAction,
+    },
     /// Rebuild the stdlib (compiles all stdlib files in a single pass)
     Stdlib {
         /// Force rebuild even if up to date
@@ -196,6 +201,18 @@ enum DepsAction {
     Compile,
     /// Generate bindings for dependencies
     Bindgen,
+}
+
+#[derive(Subcommand)]
+enum NifAction {
+    /// Fetch precompiled NIF for the current platform
+    Fetch {
+        /// Force re-download even if NIF exists
+        #[arg(long, short)]
+        force: bool,
+    },
+    /// Show NIF status (installed version, platform info)
+    Status,
 }
 
 mod bindgen;
@@ -237,6 +254,7 @@ fn main() -> ExitCode {
             repl::run_shell()
         }
         Commands::Deps { action } => cmd_deps(action),
+        Commands::Nif { action } => cmd_nif(action),
         Commands::Stdlib { force } => cmd_stdlib(force),
         Commands::Lsp => {
             let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");

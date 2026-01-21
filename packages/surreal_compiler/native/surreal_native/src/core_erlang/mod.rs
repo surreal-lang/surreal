@@ -10,7 +10,7 @@ pub use expressions::build_block;
 pub use primitives::{build_c_literal, build_c_var, build_c_var_simple};
 
 use rustler::{Encoder, Env, NifResult, Term};
-use surreal::compiler::{Function, Item, Module, Pattern};
+use surreal_lang::compiler::{Function, Item, Module, Pattern};
 use crate::atoms;
 
 /// Build the complete Core Erlang AST for a module.

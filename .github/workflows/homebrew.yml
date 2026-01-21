@@ -1,0 +1,19 @@
+name: Update Homebrew
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  update-homebrew:
+    name: Update Homebrew Formula
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update Homebrew formula
+        uses: dawidd6/action-homebrew-bump-formula@v4
+        with:
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          tap: surreal-lang/homebrew-surreal
+          formula: surreal
+          tag: ${{ github.event.release.tag_name }}
+          # The action will automatically calculate SHA256 from the release assets
