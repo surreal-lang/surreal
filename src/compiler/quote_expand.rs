@@ -54,7 +54,7 @@ fn expand_block_quotes(block: &mut Block) {
         expand_stmt_quotes(stmt);
     }
     if let Some(expr) = &mut block.expr {
-        *expr = Box::new(expand_expr_quotes_spanned(expr.as_ref().clone()));
+        **expr = expand_expr_quotes_spanned(expr.as_ref().clone());
     }
 }
 
