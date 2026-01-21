@@ -2,13 +2,13 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::Module;
 use crate::compiler::ast::{
     BinOp, BitEndianness, BitSegmentType, BitSignedness, BitStringSegment, Block,
     EnumPatternFields, EnumVariantArgs, Expr, Function, Item, Module as AstModule,
     Pattern as AstPattern, SpannedExpr, Stmt, UnaryOp, UseDecl, UseTree,
 };
 use crate::instruction::{Instruction, Operand, Pattern as VmPattern, Register, Source};
-use crate::Module;
 
 /// Code generation error.
 #[derive(Debug, Clone)]
@@ -79,8 +79,7 @@ impl RegisterAllocator {
 
     /// Save current state (for nested scopes).
     fn save(&mut self) {
-        self.saved_states
-            .push((self.next_reg, self.locals.clone()));
+        self.saved_states.push((self.next_reg, self.locals.clone()));
     }
 
     /// Restore previous state.
@@ -130,7 +129,11 @@ impl Codegen {
     /// Collect imports from a UseDecl into the imports map.
     fn collect_imports(&mut self, use_decl: &UseDecl) {
         match &use_decl.tree {
-            UseTree::Path { module, name, rename } => {
+            UseTree::Path {
+                module,
+                name,
+                rename,
+            } => {
                 let local_name = rename.as_ref().unwrap_or(name).clone();
                 // Convert ModulePath to string for the imports map
                 let module_str = module.to_unresolved_string();
@@ -145,7 +148,8 @@ impl Codegen {
                 let module_str = module.to_unresolved_string();
                 for item in items {
                     let local_name = item.rename.as_ref().unwrap_or(&item.name).clone();
-                    self.imports.insert(local_name, (module_str.clone(), item.name.clone()));
+                    self.imports
+                        .insert(local_name, (module_str.clone(), item.name.clone()));
                 }
             }
         }
@@ -295,8 +299,7 @@ impl Codegen {
         self.emit(Instruction::Return);
 
         // Record function
-        self.functions
-            .insert((func.name.clone(), arity), entry);
+        self.functions.insert((func.name.clone(), arity), entry);
 
         if func.is_pub {
             self.exports.push((func.name.clone(), arity));
@@ -320,7 +323,10 @@ impl Codegen {
         } else {
             // Return unit (represented as empty tuple or 0)
             let reg = self.regs.alloc();
-            self.emit(Instruction::LoadInt { value: 0, dest: reg });
+            self.emit(Instruction::LoadInt {
+                value: 0,
+                dest: reg,
+            });
             reg
         };
 
@@ -331,16 +337,29 @@ impl Codegen {
     /// Check if an expression contains a function call (which could clobber registers).
     fn contains_call(expr: &Expr) -> bool {
         match expr {
-            Expr::Call { .. } | Expr::Spawn(_) | Expr::SpawnClosure(_) | Expr::Pipe { .. } | Expr::ExternCall { .. } => true,
-            Expr::Binary { left, right, .. } => Self::contains_call(left) || Self::contains_call(right),
+            Expr::Call { .. }
+            | Expr::Spawn(_)
+            | Expr::SpawnClosure(_)
+            | Expr::Pipe { .. }
+            | Expr::ExternCall { .. } => true,
+            Expr::Binary { left, right, .. } => {
+                Self::contains_call(left) || Self::contains_call(right)
+            }
             Expr::Unary { expr, .. } => Self::contains_call(expr),
-            Expr::If { cond, then_block, else_block } => {
+            Expr::If {
+                cond,
+                then_block,
+                else_block,
+            } => {
                 Self::contains_call(cond)
                     || then_block.stmts.iter().any(|s| match s {
                         Stmt::Let { value, .. } => Self::contains_call(value),
                         Stmt::Expr { expr: e, .. } => Self::contains_call(e),
                     })
-                    || then_block.expr.as_ref().map_or(false, |e| Self::contains_call(e))
+                    || then_block
+                        .expr
+                        .as_ref()
+                        .map_or(false, |e| Self::contains_call(e))
                     || else_block.as_ref().map_or(false, |b| {
                         b.stmts.iter().any(|s| match s {
                             Stmt::Let { value, .. } => Self::contains_call(value),
@@ -349,23 +368,29 @@ impl Codegen {
                     })
             }
             Expr::Match { expr, arms } => {
-                Self::contains_call(expr)
-                    || arms.iter().any(|arm| Self::contains_call(&arm.body))
+                Self::contains_call(expr) || arms.iter().any(|arm| Self::contains_call(&arm.body))
             }
             Expr::Block(block) => {
                 block.stmts.iter().any(|s| match s {
                     Stmt::Let { value, .. } => Self::contains_call(value),
                     Stmt::Expr { expr: e, .. } => Self::contains_call(e),
-                }) || block.expr.as_ref().map_or(false, |e| Self::contains_call(e))
+                }) || block
+                    .expr
+                    .as_ref()
+                    .map_or(false, |e| Self::contains_call(e))
             }
             Expr::Tuple(elems) | Expr::List(elems) => elems.iter().any(|e| Self::contains_call(e)),
             Expr::ListCons { head, tail } => Self::contains_call(head) || Self::contains_call(tail),
-            Expr::MapLiteral(pairs) => pairs.iter().any(|(k, v)| Self::contains_call(k) || Self::contains_call(v)),
+            Expr::MapLiteral(pairs) => pairs
+                .iter()
+                .any(|(k, v)| Self::contains_call(k) || Self::contains_call(v)),
             Expr::StructInit { fields, .. } => fields.iter().any(|(_, e)| Self::contains_call(e)),
             Expr::EnumVariant { args, .. } => match args {
                 EnumVariantArgs::Unit => false,
                 EnumVariantArgs::Tuple(exprs) => exprs.iter().any(|e| Self::contains_call(e)),
-                EnumVariantArgs::Struct(fields) => fields.iter().any(|(_, e)| Self::contains_call(e)),
+                EnumVariantArgs::Struct(fields) => {
+                    fields.iter().any(|(_, e)| Self::contains_call(e))
+                }
             },
             Expr::FieldAccess { expr, .. } => Self::contains_call(expr),
             Expr::Try { expr } => Self::contains_call(expr),
@@ -1299,7 +1324,10 @@ impl Codegen {
                     self.compile_expr(v)?
                 } else {
                     let reg = self.regs.alloc();
-                    self.emit(Instruction::LoadInt { value: 0, dest: reg });
+                    self.emit(Instruction::LoadInt {
+                        value: 0,
+                        dest: reg,
+                    });
                     reg
                 };
 
@@ -1463,18 +1491,20 @@ impl Codegen {
             }
 
             // Quote/Unquote should be expanded before codegen
-            Expr::Quote(_) | Expr::Unquote(_) | Expr::UnquoteSplice(_) | Expr::UnquoteAtom(_) | Expr::UnquoteFieldAccess { .. } | Expr::QuoteItem(_) | Expr::QuoteRepetition { .. } => {
-                Err(CodegenError::new(
-                    "quote/unquote expressions should be expanded before codegen",
-                ))
-            }
+            Expr::Quote(_)
+            | Expr::Unquote(_)
+            | Expr::UnquoteSplice(_)
+            | Expr::UnquoteAtom(_)
+            | Expr::UnquoteFieldAccess { .. }
+            | Expr::QuoteItem(_)
+            | Expr::QuoteRepetition { .. } => Err(CodegenError::new(
+                "quote/unquote expressions should be expanded before codegen",
+            )),
 
             // For loop - not yet implemented for WASM target
-            Expr::For { .. } => {
-                Err(CodegenError::new(
-                    "for loops are not yet implemented for WASM target",
-                ))
-            }
+            Expr::For { .. } => Err(CodegenError::new(
+                "for loops are not yet implemented for WASM target",
+            )),
         }
     }
 
@@ -1693,10 +1723,7 @@ impl Codegen {
     }
 
     /// Convert AST bit segment specs to VM BitSegment.
-    fn ast_to_vm_bit_segment(
-        &self,
-        seg: &BitStringSegment<Box<AstPattern>>,
-    ) -> crate::BitSegment {
+    fn ast_to_vm_bit_segment(&self, seg: &BitStringSegment<Box<AstPattern>>) -> crate::BitSegment {
         let bit_type = match seg.segment_type {
             BitSegmentType::Integer => crate::BitType::Integer,
             BitSegmentType::Float => crate::BitType::Float,

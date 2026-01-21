@@ -11,7 +11,11 @@ use std::path::Path;
 use std::process::ExitCode;
 
 /// Main entry point for the bindgen command.
-pub fn cmd_bindgen(files: &[std::path::PathBuf], output: Option<&Path>, _module: Option<&str>) -> ExitCode {
+pub fn cmd_bindgen(
+    files: &[std::path::PathBuf],
+    output: Option<&Path>,
+    _module: Option<&str>,
+) -> ExitCode {
     let mut all_modules: HashMap<String, ModuleInfo> = HashMap::new();
 
     for file in files {
@@ -67,7 +71,8 @@ pub fn cmd_bindgen(files: &[std::path::PathBuf], output: Option<&Path>, _module:
         let (module_name, type_defs, specs, records, structs) = if is_header {
             // Parse Erlang header file (.hrl)
             // Header files typically don't have a module declaration, use filename
-            let module_name = file.file_stem()
+            let module_name = file
+                .file_stem()
                 .and_then(|s| s.to_str())
                 .unwrap_or("unknown")
                 .to_string();
@@ -79,13 +84,12 @@ pub fn cmd_bindgen(files: &[std::path::PathBuf], output: Option<&Path>, _module:
             (module_name, type_defs, Vec::new(), records, Vec::new())
         } else {
             // Parse Erlang source file (.erl)
-            let module_name = extract_module_name(&source)
-                .unwrap_or_else(|| {
-                    file.file_stem()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("unknown")
-                        .to_string()
-                });
+            let module_name = extract_module_name(&source).unwrap_or_else(|| {
+                file.file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("unknown")
+                    .to_string()
+            });
 
             let type_defs = parse_type_defs(&source);
             let records = parse_erlang_records(&source);
@@ -178,7 +182,9 @@ struct TypeRegistry {
 
 impl TypeRegistry {
     fn new() -> Self {
-        Self { types: HashMap::new() }
+        Self {
+            types: HashMap::new(),
+        }
     }
 
     fn register(&mut self, typedef: ErlangTypeDef) {
@@ -210,7 +216,10 @@ enum ErlangType {
     /// {A, B, C}
     Tuple(Vec<ErlangType>),
     /// fun((A, B) -> C)
-    Fun { params: Vec<ErlangType>, ret: Box<ErlangType> },
+    Fun {
+        params: Vec<ErlangType>,
+        ret: Box<ErlangType>,
+    },
     /// Type variable like T, A, Number
     Var(String),
     /// Union type: A | B
@@ -222,7 +231,10 @@ enum ErlangType {
     /// Remote type like module:type()
     Remote(String, String),
     /// Struct type %Module{field1: type1, field2: type2}
-    Struct { module: String, fields: Vec<(String, ErlangType)> },
+    Struct {
+        module: String,
+        fields: Vec<(String, ErlangType)>,
+    },
     /// any() or term()
     Any,
 }
@@ -254,7 +266,8 @@ fn extract_elixir_module_name(source: &str) -> Option<String> {
             // defmodule Foo.Bar do
             let rest = trimmed.strip_prefix("defmodule ")?.trim();
             // Find the end of module name (before 'do' or ',')
-            let end = rest.find(" do")
+            let end = rest
+                .find(" do")
                 .or_else(|| rest.find(','))
                 .unwrap_or(rest.len());
             let module_name = rest[..end].trim();
@@ -280,7 +293,10 @@ fn parse_elixir_type_defs(source: &str) -> Vec<ErlangTypeDef> {
         }
 
         // Look for @type or @typep or @opaque
-        if trimmed.starts_with("@type ") || trimmed.starts_with("@typep ") || trimmed.starts_with("@opaque ") {
+        if trimmed.starts_with("@type ")
+            || trimmed.starts_with("@typep ")
+            || trimmed.starts_with("@opaque ")
+        {
             in_type = true;
             type_text = trimmed.to_string();
 
@@ -320,7 +336,8 @@ fn is_elixir_type_complete(text: &str) -> bool {
 fn parse_elixir_single_type_def(text: &str) -> Option<ErlangTypeDef> {
     // Format: @type name :: definition
     // Or: @type name(param) :: definition
-    let text = text.trim_start_matches("@type")
+    let text = text
+        .trim_start_matches("@type")
         .trim_start_matches("@typep")
         .trim_start_matches("@opaque")
         .trim();
@@ -393,7 +410,10 @@ fn parse_elixir_modules_with_specs(
             if is_elixir_spec_complete(&spec_text) {
                 if let Some(spec) = parse_elixir_single_spec(&spec_text, registry) {
                     if let Some(ref module) = current_module {
-                        modules.entry(module.clone()).or_insert_with(Vec::new).push(spec);
+                        modules
+                            .entry(module.clone())
+                            .or_insert_with(Vec::new)
+                            .push(spec);
                     }
                 }
                 in_spec = false;
@@ -406,7 +426,10 @@ fn parse_elixir_modules_with_specs(
             if is_elixir_spec_complete(&spec_text) {
                 if let Some(spec) = parse_elixir_single_spec(&spec_text, registry) {
                     if let Some(ref module) = current_module {
-                        modules.entry(module.clone()).or_insert_with(Vec::new).push(spec);
+                        modules
+                            .entry(module.clone())
+                            .or_insert_with(Vec::new)
+                            .push(spec);
                     }
                 }
                 in_spec = false;
@@ -591,14 +614,14 @@ fn parse_elixir_type(s: &str) -> ErlangType {
 
     // Handle tuple {A, B, C}
     if s.starts_with('{') && s.ends_with('}') {
-        let inner = &s[1..s.len()-1];
+        let inner = &s[1..s.len() - 1];
         let elements = parse_elixir_type_list(inner);
         return ErlangType::Tuple(elements);
     }
 
     // Handle list [T]
     if s.starts_with('[') && s.ends_with(']') {
-        let inner = &s[1..s.len()-1];
+        let inner = &s[1..s.len() - 1];
         if inner.is_empty() {
             return ErlangType::List(Box::new(ErlangType::Any));
         }
@@ -609,7 +632,7 @@ fn parse_elixir_type(s: &str) -> ErlangType {
     if s.starts_with("%{") || s == "map()" || s == "map" {
         // Check if it has typed fields: %{key: type, ...}
         if s.starts_with("%{") && s.ends_with('}') {
-            let inner = &s[2..s.len()-1].trim();
+            let inner = &s[2..s.len() - 1].trim();
             if !inner.is_empty() && inner.contains("::") {
                 let fields = parse_elixir_struct_fields(inner);
                 if !fields.is_empty() {
@@ -707,11 +730,14 @@ fn parse_elixir_type(s: &str) -> ErlangType {
         "true" => ErlangType::AtomLiteral("true".to_string()),
         "false" => ErlangType::AtomLiteral("false".to_string()),
         "nil" => ErlangType::AtomLiteral("nil".to_string()),
-        "integer" | "integer()" | "non_neg_integer" | "non_neg_integer()" |
-        "pos_integer" | "pos_integer()" | "neg_integer" | "neg_integer()" |
-        "number" | "number()" => ErlangType::Named("int".to_string()),
+        "integer" | "integer()" | "non_neg_integer" | "non_neg_integer()" | "pos_integer"
+        | "pos_integer()" | "neg_integer" | "neg_integer()" | "number" | "number()" => {
+            ErlangType::Named("int".to_string())
+        }
         "float" | "float()" => ErlangType::Named("float".to_string()),
-        "binary" | "binary()" | "bitstring" | "bitstring()" => ErlangType::Named("binary".to_string()),
+        "binary" | "binary()" | "bitstring" | "bitstring()" => {
+            ErlangType::Named("binary".to_string())
+        }
         "pid" | "pid()" => ErlangType::Named("pid".to_string()),
         "reference" | "reference()" => ErlangType::Named("ref".to_string()),
         "map" | "map()" => ErlangType::Named("map".to_string()),
@@ -767,7 +793,7 @@ fn parse_elixir_struct_type(s: &str) -> ErlangType {
 
     // Parse fields from {field: type, ...}
     let fields = if fields_part.starts_with('{') && fields_part.ends_with('}') {
-        let inner = &fields_part[1..fields_part.len()-1];
+        let inner = &fields_part[1..fields_part.len() - 1];
         if inner.is_empty() {
             Vec::new()
         } else {
@@ -904,7 +930,10 @@ fn parse_elixir_structs_multi(source: &str) -> HashMap<String, Vec<ElixirStruct>
             if is_defstruct_complete(&defstruct_text) {
                 if let Some(ref module) = current_module {
                     if let Some(st) = parse_single_defstruct(&defstruct_text, module) {
-                        structs.entry(module.clone()).or_insert_with(Vec::new).push(st);
+                        structs
+                            .entry(module.clone())
+                            .or_insert_with(Vec::new)
+                            .push(st);
                     }
                 }
                 in_defstruct = false;
@@ -917,7 +946,10 @@ fn parse_elixir_structs_multi(source: &str) -> HashMap<String, Vec<ElixirStruct>
             if is_defstruct_complete(&defstruct_text) {
                 if let Some(ref module) = current_module {
                     if let Some(st) = parse_single_defstruct(&defstruct_text, module) {
-                        structs.entry(module.clone()).or_insert_with(Vec::new).push(st);
+                        structs
+                            .entry(module.clone())
+                            .or_insert_with(Vec::new)
+                            .push(st);
                     }
                 }
                 in_defstruct = false;
@@ -1040,7 +1072,8 @@ fn parse_type_defs(source: &str) -> Vec<ErlangTypeDef> {
 fn parse_single_type_def(text: &str) -> Option<ErlangTypeDef> {
     // Format: -type name() :: definition.
     // Or: -type name(Param) :: definition.
-    let text = text.trim_start_matches("-type")
+    let text = text
+        .trim_start_matches("-type")
         .trim_start_matches("-opaque")
         .trim();
     let text = text.trim_end_matches('.');
@@ -1270,7 +1303,11 @@ fn parse_single_spec(spec: &str, registry: &TypeRegistry) -> Option<ErlangSpec> 
 }
 
 /// Parse parameter list with names.
-fn parse_param_list(s: &str, type_var_map: &HashMap<String, ErlangType>, registry: &TypeRegistry) -> Vec<(String, ErlangType)> {
+fn parse_param_list(
+    s: &str,
+    type_var_map: &HashMap<String, ErlangType>,
+    registry: &TypeRegistry,
+) -> Vec<(String, ErlangType)> {
     if s.trim().is_empty() {
         return Vec::new();
     }
@@ -1323,11 +1360,22 @@ fn sanitize_param_name(name: &str) -> String {
     // Replace any invalid characters with underscores
     let name: String = name
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
 
     // Ensure it doesn't start with a digit
-    if name.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(true) {
+    if name
+        .chars()
+        .next()
+        .map(|c| c.is_ascii_digit())
+        .unwrap_or(true)
+    {
         format!("arg_{}", name)
     } else {
         name
@@ -1378,29 +1426,37 @@ fn resolve_type_vars_inner(
                 ErlangType::Any
             }
         }
-        ErlangType::List(inner) => {
-            ErlangType::List(Box::new(resolve_type_vars_inner(inner, type_var_map, visited)))
-        }
-        ErlangType::Tuple(elements) => {
-            ErlangType::Tuple(elements.iter().map(|e| resolve_type_vars_inner(e, type_var_map, visited)).collect())
-        }
-        ErlangType::Fun { params, ret } => {
-            ErlangType::Fun {
-                params: params.iter().map(|p| resolve_type_vars_inner(p, type_var_map, visited)).collect(),
-                ret: Box::new(resolve_type_vars_inner(ret, type_var_map, visited)),
-            }
-        }
-        ErlangType::Union(types) => {
-            ErlangType::Union(types.iter().map(|t| resolve_type_vars_inner(t, type_var_map, visited)).collect())
-        }
-        ErlangType::Struct { module, fields } => {
-            ErlangType::Struct {
-                module: module.clone(),
-                fields: fields.iter()
-                    .map(|(n, t)| (n.clone(), resolve_type_vars_inner(t, type_var_map, visited)))
-                    .collect(),
-            }
-        }
+        ErlangType::List(inner) => ErlangType::List(Box::new(resolve_type_vars_inner(
+            inner,
+            type_var_map,
+            visited,
+        ))),
+        ErlangType::Tuple(elements) => ErlangType::Tuple(
+            elements
+                .iter()
+                .map(|e| resolve_type_vars_inner(e, type_var_map, visited))
+                .collect(),
+        ),
+        ErlangType::Fun { params, ret } => ErlangType::Fun {
+            params: params
+                .iter()
+                .map(|p| resolve_type_vars_inner(p, type_var_map, visited))
+                .collect(),
+            ret: Box::new(resolve_type_vars_inner(ret, type_var_map, visited)),
+        },
+        ErlangType::Union(types) => ErlangType::Union(
+            types
+                .iter()
+                .map(|t| resolve_type_vars_inner(t, type_var_map, visited))
+                .collect(),
+        ),
+        ErlangType::Struct { module, fields } => ErlangType::Struct {
+            module: module.clone(),
+            fields: fields
+                .iter()
+                .map(|(n, t)| (n.clone(), resolve_type_vars_inner(t, type_var_map, visited)))
+                .collect(),
+        },
         _ => ty.clone(),
     }
 }
@@ -1431,32 +1487,36 @@ fn resolve_type_refs_inner(
                 ty.clone()
             }
         }
-        ErlangType::Remote(module, name) => {
-            resolve_remote_type(module, name)
-        }
+        ErlangType::Remote(module, name) => resolve_remote_type(module, name),
         ErlangType::List(inner) => {
             ErlangType::List(Box::new(resolve_type_refs_inner(inner, registry, visited)))
         }
-        ErlangType::Tuple(elements) => {
-            ErlangType::Tuple(elements.iter().map(|e| resolve_type_refs_inner(e, registry, visited)).collect())
-        }
-        ErlangType::Fun { params, ret } => {
-            ErlangType::Fun {
-                params: params.iter().map(|p| resolve_type_refs_inner(p, registry, visited)).collect(),
-                ret: Box::new(resolve_type_refs_inner(ret, registry, visited)),
-            }
-        }
-        ErlangType::Union(types) => {
-            ErlangType::Union(types.iter().map(|t| resolve_type_refs_inner(t, registry, visited)).collect())
-        }
-        ErlangType::Struct { module, fields } => {
-            ErlangType::Struct {
-                module: module.clone(),
-                fields: fields.iter()
-                    .map(|(n, t)| (n.clone(), resolve_type_refs_inner(t, registry, visited)))
-                    .collect(),
-            }
-        }
+        ErlangType::Tuple(elements) => ErlangType::Tuple(
+            elements
+                .iter()
+                .map(|e| resolve_type_refs_inner(e, registry, visited))
+                .collect(),
+        ),
+        ErlangType::Fun { params, ret } => ErlangType::Fun {
+            params: params
+                .iter()
+                .map(|p| resolve_type_refs_inner(p, registry, visited))
+                .collect(),
+            ret: Box::new(resolve_type_refs_inner(ret, registry, visited)),
+        },
+        ErlangType::Union(types) => ErlangType::Union(
+            types
+                .iter()
+                .map(|t| resolve_type_refs_inner(t, registry, visited))
+                .collect(),
+        ),
+        ErlangType::Struct { module, fields } => ErlangType::Struct {
+            module: module.clone(),
+            fields: fields
+                .iter()
+                .map(|(n, t)| (n.clone(), resolve_type_refs_inner(t, registry, visited)))
+                .collect(),
+        },
         _ => ty.clone(),
     }
 }
@@ -1489,9 +1549,10 @@ fn resolve_remote_type(module: &str, name: &str) -> ErlangType {
         ]),
 
         // file module
-        ("file", "filename") | ("file", "name") | ("file", "name_all") | ("file", "filename_all") => {
-            ErlangType::Named("string".into())
-        }
+        ("file", "filename")
+        | ("file", "name")
+        | ("file", "name_all")
+        | ("file", "filename_all") => ErlangType::Named("string".into()),
         ("file", "posix") => ErlangType::Named("atom".into()),
         ("file", "io_device") => ErlangType::Named("any".into()),
 
@@ -1528,10 +1589,7 @@ fn detect_result_option_pattern(ty: ErlangType) -> ErlangType {
 
             // Try to detect ok | {error, E} -> Result<(), E>
             if let Some(err_type) = detect_ok_atom_error_pattern(&types) {
-                return ErlangType::Result(
-                    Box::new(ErlangType::Tuple(vec![])),
-                    Box::new(err_type),
-                );
+                return ErlangType::Result(Box::new(ErlangType::Tuple(vec![])), Box::new(err_type));
             }
 
             // Try to detect T | undefined -> Option<T>
@@ -1604,7 +1662,9 @@ fn detect_ok_atom_error_pattern(types: &[ErlangType]) -> Option<ErlangType> {
 
     for ty in types {
         match ty {
-            ErlangType::AtomLiteral(name) | ErlangType::Named(name) if name == "ok" || name == "atom" => {
+            ErlangType::AtomLiteral(name) | ErlangType::Named(name)
+                if name == "ok" || name == "atom" =>
+            {
                 // Bare 'ok' atom
                 has_ok_atom = true;
             }
@@ -1634,7 +1694,8 @@ fn detect_undefined_pattern(types: &[ErlangType]) -> Option<ErlangType> {
     for ty in types {
         match ty {
             ErlangType::AtomLiteral(name) | ErlangType::Named(name)
-                if name == "undefined" || name == "nil" => {
+                if name == "undefined" || name == "nil" =>
+            {
                 undefined_found = true;
             }
             _ => {
@@ -1643,11 +1704,7 @@ fn detect_undefined_pattern(types: &[ErlangType]) -> Option<ErlangType> {
         }
     }
 
-    if undefined_found {
-        other_type
-    } else {
-        None
-    }
+    if undefined_found { other_type } else { None }
 }
 
 fn is_ok_atom(ty: &ErlangType) -> bool {
@@ -1694,7 +1751,7 @@ fn parse_type(s: &str) -> ErlangType {
 
     // Check for atom literals BEFORE stripping quotes
     if s.starts_with('\'') && s.ends_with('\'') && s.len() > 2 {
-        let atom_name = &s[1..s.len()-1];
+        let atom_name = &s[1..s.len() - 1];
         return ErlangType::AtomLiteral(atom_name.to_string());
     }
 
@@ -1722,14 +1779,14 @@ fn parse_type(s: &str) -> ErlangType {
 
     // Handle tuple {A, B, C}
     if s.starts_with('{') && s.ends_with('}') {
-        let inner = &s[1..s.len()-1];
+        let inner = &s[1..s.len() - 1];
         let elements = parse_type_list(inner);
         return ErlangType::Tuple(elements);
     }
 
     // Handle list [T]
     if s.starts_with('[') && s.ends_with(']') {
-        let inner = &s[1..s.len()-1];
+        let inner = &s[1..s.len() - 1];
         if inner.is_empty() {
             return ErlangType::List(Box::new(ErlangType::Any));
         }
@@ -1772,7 +1829,9 @@ fn parse_type(s: &str) -> ErlangType {
                         ret: Box::new(ErlangType::Any),
                     };
                 }
-                "maybe_improper_list" | "nonempty_maybe_improper_list" | "nonempty_improper_list" => {
+                "maybe_improper_list"
+                | "nonempty_maybe_improper_list"
+                | "nonempty_improper_list" => {
                     return ErlangType::List(Box::new(ErlangType::Any));
                 }
                 // Handle basic types with () suffix
@@ -1918,20 +1977,54 @@ fn parse_fun_type(s: &str) -> ErlangType {
 
 /// Check if a type name is a known Surreal type.
 fn is_known_surreal_type(name: &str) -> bool {
-    matches!(name,
-        "int" | "float" | "string" | "atom" | "bool" | "pid" | "ref" |
-        "binary" | "map" | "any"
+    matches!(
+        name,
+        "int" | "float" | "string" | "atom" | "bool" | "pid" | "ref" | "binary" | "map" | "any"
     )
 }
 
 /// Check if a name conflicts with Surreal keywords.
 fn is_surreal_keyword(name: &str) -> bool {
-    matches!(name,
-        "binary" | "fn" | "let" | "mut" | "if" | "else" | "match" | "struct" |
-        "enum" | "mod" | "pub" | "self" | "spawn" | "receive" | "after" |
-        "return" | "use" | "as" | "impl" | "trait" | "for" | "when" | "true" |
-        "false" | "extern" | "type" | "string" | "int" | "bool" | "float" |
-        "integer" | "atom" | "pid" | "ref" | "map" | "list" | "tuple" | "bytes"
+    matches!(
+        name,
+        "binary"
+            | "fn"
+            | "let"
+            | "mut"
+            | "if"
+            | "else"
+            | "match"
+            | "struct"
+            | "enum"
+            | "mod"
+            | "pub"
+            | "self"
+            | "spawn"
+            | "receive"
+            | "after"
+            | "return"
+            | "use"
+            | "as"
+            | "impl"
+            | "trait"
+            | "for"
+            | "when"
+            | "true"
+            | "false"
+            | "extern"
+            | "type"
+            | "string"
+            | "int"
+            | "bool"
+            | "float"
+            | "integer"
+            | "atom"
+            | "pid"
+            | "ref"
+            | "map"
+            | "list"
+            | "tuple"
+            | "bytes"
     )
 }
 
@@ -2028,7 +2121,14 @@ fn capitalize_first(s: &str) -> String {
 fn is_surreal_function_keyword(name: &str) -> bool {
     matches!(
         name,
-        "fn" | "let" | "mut" | "if" | "else" | "match" | "enum" | "mod" | "pub"
+        "fn" | "let"
+            | "mut"
+            | "if"
+            | "else"
+            | "match"
+            | "enum"
+            | "mod"
+            | "pub"
             | "self"
             | "spawn"
             | "receive"
@@ -2142,7 +2242,9 @@ fn generate_surreal(modules: &HashMap<String, ModuleInfo>) -> String {
             }
 
             if !has_type_comments {
-                output.push_str("// Type declarations (for documentation - extern type not yet supported):\n");
+                output.push_str(
+                    "// Type declarations (for documentation - extern type not yet supported):\n",
+                );
                 has_type_comments = true;
             }
 
@@ -2234,7 +2336,9 @@ fn erlang_type_to_surreal(ty: &ErlangType) -> String {
         ErlangType::Named(name) => {
             match name.as_str() {
                 // Primitives stay lowercase
-                "integer" | "non_neg_integer" | "pos_integer" | "neg_integer" | "number" => "int".to_string(),
+                "integer" | "non_neg_integer" | "pos_integer" | "neg_integer" | "number" => {
+                    "int".to_string()
+                }
                 "boolean" => "bool".to_string(),
                 "float" => "float".to_string(),
                 "byte" | "char" | "arity" => "int".to_string(),
@@ -2288,7 +2392,11 @@ fn erlang_type_to_surreal(ty: &ErlangType) -> String {
         }
         ErlangType::Fun { params, ret } => {
             let param_types: Vec<String> = params.iter().map(erlang_type_to_surreal).collect();
-            format!("fn({}) -> {}", param_types.join(", "), erlang_type_to_surreal(ret))
+            format!(
+                "fn({}) -> {}",
+                param_types.join(", "),
+                erlang_type_to_surreal(ret)
+            )
         }
         ErlangType::Union(types) => {
             // First try to detect Result/Option pattern
@@ -2300,10 +2408,12 @@ fn erlang_type_to_surreal(ty: &ErlangType) -> String {
             // Filter out undefined for Option-like types
             let non_undefined: Vec<_> = types
                 .iter()
-                .filter(|t| !matches!(t,
-                    ErlangType::AtomLiteral(n) | ErlangType::Named(n)
-                    if n == "undefined" || n == "nil"
-                ))
+                .filter(|t| {
+                    !matches!(t,
+                        ErlangType::AtomLiteral(n) | ErlangType::Named(n)
+                        if n == "undefined" || n == "nil"
+                    )
+                })
                 .collect();
 
             if non_undefined.len() == 1 {
@@ -2313,7 +2423,11 @@ fn erlang_type_to_surreal(ty: &ErlangType) -> String {
             }
         }
         ErlangType::Result(ok_ty, err_ty) => {
-            format!("Result<{}, {}>", erlang_type_to_surreal(ok_ty), erlang_type_to_surreal(err_ty))
+            format!(
+                "Result<{}, {}>",
+                erlang_type_to_surreal(ok_ty),
+                erlang_type_to_surreal(err_ty)
+            )
         }
         ErlangType::Option(inner) => {
             format!("Option<{}>", erlang_type_to_surreal(inner))
@@ -2349,7 +2463,11 @@ mod tests {
     #[test]
     fn test_parse_simple_spec() {
         let registry = TypeRegistry::new();
-        let spec = parse_single_spec("-spec abs(Number) -> integer() when Number :: integer().", &registry).unwrap();
+        let spec = parse_single_spec(
+            "-spec abs(Number) -> integer() when Number :: integer().",
+            &registry,
+        )
+        .unwrap();
         assert_eq!(spec.name, "abs");
         assert_eq!(spec.params.len(), 1);
     }
@@ -2365,7 +2483,11 @@ mod tests {
     #[test]
     fn test_parse_list_type() {
         let registry = TypeRegistry::new();
-        let spec = parse_single_spec("-spec reverse(List1) -> List2 when List1 :: [T], List2 :: [T].", &registry).unwrap();
+        let spec = parse_single_spec(
+            "-spec reverse(List1) -> List2 when List1 :: [T], List2 :: [T].",
+            &registry,
+        )
+        .unwrap();
         assert_eq!(spec.name, "reverse");
         assert_eq!(spec.params.len(), 1);
     }
@@ -2373,7 +2495,11 @@ mod tests {
     #[test]
     fn test_parse_fun_type() {
         let registry = TypeRegistry::new();
-        let spec = parse_single_spec("-spec map(Fun, List1) -> List2 when Fun :: fun((A) -> B), List1 :: [A], List2 :: [B].", &registry).unwrap();
+        let spec = parse_single_spec(
+            "-spec map(Fun, List1) -> List2 when Fun :: fun((A) -> B), List1 :: [A], List2 :: [B].",
+            &registry,
+        )
+        .unwrap();
         assert_eq!(spec.name, "map");
         assert_eq!(spec.params.len(), 2);
     }
@@ -2404,7 +2530,9 @@ mod tests {
     fn test_unit_result_pattern() {
         let ty = parse_type("ok | {error, Reason}");
         let detected = detect_result_option_pattern(ty);
-        assert!(matches!(detected, ErlangType::Result(ok_ty, _) if matches!(*ok_ty, ErlangType::Tuple(ref v) if v.is_empty())));
+        assert!(
+            matches!(detected, ErlangType::Result(ok_ty, _) if matches!(*ok_ty, ErlangType::Tuple(ref v) if v.is_empty()))
+        );
     }
 
     #[test]
@@ -2442,13 +2570,25 @@ mod tests {
         // Elixir.Jason -> jason
         assert_eq!(sanitize_module_name("Elixir.Jason"), "jason");
         // Elixir.Jason.Encoder -> jason_encoder
-        assert_eq!(sanitize_module_name("Elixir.Jason.Encoder"), "jason_encoder");
+        assert_eq!(
+            sanitize_module_name("Elixir.Jason.Encoder"),
+            "jason_encoder"
+        );
         // Elixir.Phoenix.Controller -> phoenix_controller
-        assert_eq!(sanitize_module_name("Elixir.Phoenix.Controller"), "phoenix_controller");
+        assert_eq!(
+            sanitize_module_name("Elixir.Phoenix.Controller"),
+            "phoenix_controller"
+        );
         // CamelCase within segments: Elixir.Jason.EncodeError -> jason_encode_error
-        assert_eq!(sanitize_module_name("Elixir.Jason.EncodeError"), "jason_encode_error");
+        assert_eq!(
+            sanitize_module_name("Elixir.Jason.EncodeError"),
+            "jason_encode_error"
+        );
         // Multiple words: Elixir.Phoenix.LiveView -> phoenix_live_view
-        assert_eq!(sanitize_module_name("Elixir.Phoenix.LiveView"), "phoenix_live_view");
+        assert_eq!(
+            sanitize_module_name("Elixir.Phoenix.LiveView"),
+            "phoenix_live_view"
+        );
     }
 
     #[test]
@@ -2535,85 +2675,118 @@ mod tests {
     fn test_generate_function_name_attribute() {
         // Test that #[name = "..."] is generated for functions with ! or ?
         let mut modules = HashMap::new();
-        modules.insert("Elixir.Jason".to_string(), ModuleInfo {
-            specs: vec![
-                ErlangSpec {
-                    name: "encode".to_string(),
-                    params: vec![("input".to_string(), ErlangType::Any)],
-                    return_type: ErlangType::Any,
-                },
-                ErlangSpec {
-                    name: "encode!".to_string(),
-                    params: vec![("input".to_string(), ErlangType::Any)],
-                    return_type: ErlangType::Any,
-                },
-            ],
-            type_defs: Vec::new(),
-            records: Vec::new(),
-            structs: Vec::new(),
-        });
+        modules.insert(
+            "Elixir.Jason".to_string(),
+            ModuleInfo {
+                specs: vec![
+                    ErlangSpec {
+                        name: "encode".to_string(),
+                        params: vec![("input".to_string(), ErlangType::Any)],
+                        return_type: ErlangType::Any,
+                    },
+                    ErlangSpec {
+                        name: "encode!".to_string(),
+                        params: vec![("input".to_string(), ErlangType::Any)],
+                        return_type: ErlangType::Any,
+                    },
+                ],
+                type_defs: Vec::new(),
+                records: Vec::new(),
+                structs: Vec::new(),
+            },
+        );
 
         let output = generate_surreal(&modules);
 
         // Should have function name attribute for encode!
-        assert!(output.contains("#[name = \"encode!\"]"),
-            "Expected function #[name = \"encode!\"], got:\n{}", output);
+        assert!(
+            output.contains("#[name = \"encode!\"]"),
+            "Expected function #[name = \"encode!\"], got:\n{}",
+            output
+        );
         // Should use sanitized function name
-        assert!(output.contains("fn encode_bang("),
-            "Expected 'fn encode_bang', got:\n{}", output);
+        assert!(
+            output.contains("fn encode_bang("),
+            "Expected 'fn encode_bang', got:\n{}",
+            output
+        );
         // Regular encode should not have attribute
-        assert!(output.contains("fn encode("),
-            "Expected 'fn encode', got:\n{}", output);
+        assert!(
+            output.contains("fn encode("),
+            "Expected 'fn encode', got:\n{}",
+            output
+        );
     }
 
     #[test]
     fn test_generate_name_attribute() {
         // Test that #[name = "..."] is generated when names differ
         let mut modules = HashMap::new();
-        modules.insert("Elixir.Jason".to_string(), ModuleInfo {
-            specs: vec![ErlangSpec {
-                name: "encode".to_string(),
-                params: vec![("input".to_string(), ErlangType::Any)],
-                return_type: ErlangType::Any,
-            }],
-            type_defs: Vec::new(),
-            records: Vec::new(),
-            structs: Vec::new(),
-        });
+        modules.insert(
+            "Elixir.Jason".to_string(),
+            ModuleInfo {
+                specs: vec![ErlangSpec {
+                    name: "encode".to_string(),
+                    params: vec![("input".to_string(), ErlangType::Any)],
+                    return_type: ErlangType::Any,
+                }],
+                type_defs: Vec::new(),
+                records: Vec::new(),
+                structs: Vec::new(),
+            },
+        );
 
         let output = generate_surreal(&modules);
 
         // Should contain #[name = "Elixir.Jason"]
-        assert!(output.contains("#[name = \"Elixir.Jason\"]"),
-            "Expected #[name = \"Elixir.Jason\"], got:\n{}", output);
+        assert!(
+            output.contains("#[name = \"Elixir.Jason\"]"),
+            "Expected #[name = \"Elixir.Jason\"], got:\n{}",
+            output
+        );
         // Should use sanitized name 'jason'
-        assert!(output.contains("extern mod jason"),
-            "Expected 'extern mod jason', got:\n{}", output);
+        assert!(
+            output.contains("extern mod jason"),
+            "Expected 'extern mod jason', got:\n{}",
+            output
+        );
     }
 
     #[test]
     fn test_no_name_attribute_for_simple_modules() {
         // Test that #[name = "..."] is NOT generated when names match
         let mut modules = HashMap::new();
-        modules.insert("lists".to_string(), ModuleInfo {
-            specs: vec![ErlangSpec {
-                name: "reverse".to_string(),
-                params: vec![("list".to_string(), ErlangType::List(Box::new(ErlangType::Any)))],
-                return_type: ErlangType::List(Box::new(ErlangType::Any)),
-            }],
-            type_defs: Vec::new(),
-            records: Vec::new(),
-            structs: Vec::new(),
-        });
+        modules.insert(
+            "lists".to_string(),
+            ModuleInfo {
+                specs: vec![ErlangSpec {
+                    name: "reverse".to_string(),
+                    params: vec![(
+                        "list".to_string(),
+                        ErlangType::List(Box::new(ErlangType::Any)),
+                    )],
+                    return_type: ErlangType::List(Box::new(ErlangType::Any)),
+                }],
+                type_defs: Vec::new(),
+                records: Vec::new(),
+                structs: Vec::new(),
+            },
+        );
 
         let output = generate_surreal(&modules);
 
         // Should NOT contain #[name = "lists"]
-        assert!(!output.contains("#[name ="),
-            "Should not have #[name = ...] for simple module, got:\n{}", output);
+        assert!(
+            !output.contains("#[name ="),
+            "Should not have #[name = ...] for simple module, got:\n{}",
+            output
+        );
         // Should use simple name
-        assert!(output.contains("extern mod lists"),
-            "Expected 'extern mod lists', got:\n{}", output);
+        assert!(
+            output.contains("extern mod lists"),
+            "Expected 'extern mod lists', got:\n{}",
+            output
+        );
     }
 
     #[test]
@@ -2637,8 +2810,9 @@ mod tests {
         let registry = TypeRegistry::new();
         let spec = parse_elixir_single_spec(
             "@spec encode(term()) :: {:ok, String.t()} | {:error, Exception.t()}",
-            &registry
-        ).unwrap();
+            &registry,
+        )
+        .unwrap();
         assert_eq!(spec.name, "encode");
         assert_eq!(spec.params.len(), 1);
         assert!(matches!(spec.return_type, ErlangType::Result(_, _)));
@@ -2649,8 +2823,9 @@ mod tests {
         let registry = TypeRegistry::new();
         let spec = parse_elixir_single_spec(
             "@spec decode(input :: binary()) :: {:ok, term()} | {:error, Exception.t()}",
-            &registry
-        ).unwrap();
+            &registry,
+        )
+        .unwrap();
         assert_eq!(spec.name, "decode");
         assert_eq!(spec.params.len(), 1);
         assert_eq!(spec.params[0].0, "input");
@@ -2661,7 +2836,10 @@ mod tests {
         assert!(matches!(parse_elixir_type("String.t()"), ErlangType::Named(n) if n == "string"));
         assert!(matches!(parse_elixir_type("integer()"), ErlangType::Named(n) if n == "int"));
         assert!(matches!(parse_elixir_type(":ok"), ErlangType::AtomLiteral(n) if n == "ok"));
-        assert!(matches!(parse_elixir_type("[binary()]"), ErlangType::List(_)));
+        assert!(matches!(
+            parse_elixir_type("[binary()]"),
+            ErlangType::List(_)
+        ));
     }
 
     #[test]
@@ -2701,7 +2879,9 @@ mod tests {
 
     #[test]
     fn test_parse_erlang_record_with_defaults() {
-        let records = parse_erlang_records("-record(config, {timeout = 5000 :: integer(), host :: string()}).");
+        let records = parse_erlang_records(
+            "-record(config, {timeout = 5000 :: integer(), host :: string()}).",
+        );
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].name, "config");
         assert_eq!(records[0].fields.len(), 2);
@@ -2746,93 +2926,127 @@ mod tests {
     #[test]
     fn test_generate_extern_type_for_record() {
         let mut modules = HashMap::new();
-        modules.insert("test".to_string(), ModuleInfo {
-            specs: Vec::new(),
-            type_defs: Vec::new(),
-            records: vec![ErlangRecord {
-                name: "person".to_string(),
-                fields: vec![
-                    ("name".to_string(), ErlangType::Named("string".to_string())),
-                    ("age".to_string(), ErlangType::Named("int".to_string())),
-                ],
-            }],
-            structs: Vec::new(),
-        });
+        modules.insert(
+            "test".to_string(),
+            ModuleInfo {
+                specs: Vec::new(),
+                type_defs: Vec::new(),
+                records: vec![ErlangRecord {
+                    name: "person".to_string(),
+                    fields: vec![
+                        ("name".to_string(), ErlangType::Named("string".to_string())),
+                        ("age".to_string(), ErlangType::Named("int".to_string())),
+                    ],
+                }],
+                structs: Vec::new(),
+            },
+        );
 
         let output = generate_surreal(&modules);
         // Records are now generated as actual structs with #[record] attribute
-        assert!(output.contains("#[record = \"person\"]"),
-            "Expected #[record] attribute, got:\n{}", output);
-        assert!(output.contains("pub struct Person {"),
-            "Expected struct declaration with capitalized name, got:\n{}", output);
-        assert!(output.contains("name: String,"),
-            "Expected name field, got:\n{}", output);
-        assert!(output.contains("age: int,"),
-            "Expected age field (int stays lowercase), got:\n{}", output);
+        assert!(
+            output.contains("#[record = \"person\"]"),
+            "Expected #[record] attribute, got:\n{}",
+            output
+        );
+        assert!(
+            output.contains("pub struct Person {"),
+            "Expected struct declaration with capitalized name, got:\n{}",
+            output
+        );
+        assert!(
+            output.contains("name: String,"),
+            "Expected name field, got:\n{}",
+            output
+        );
+        assert!(
+            output.contains("age: int,"),
+            "Expected age field (int stays lowercase), got:\n{}",
+            output
+        );
     }
 
     #[test]
     fn test_generate_extern_type_for_struct() {
         let mut modules = HashMap::new();
-        modules.insert("Elixir.Jason.Error".to_string(), ModuleInfo {
-            specs: Vec::new(),
-            type_defs: Vec::new(),
-            records: Vec::new(),
-            structs: vec![ElixirStruct {
-                module: "Jason.Error".to_string(),
-                fields: vec![
-                    ("message".to_string(), ErlangType::Named("string".to_string())),
-                ],
-            }],
-        });
+        modules.insert(
+            "Elixir.Jason.Error".to_string(),
+            ModuleInfo {
+                specs: Vec::new(),
+                type_defs: Vec::new(),
+                records: Vec::new(),
+                structs: vec![ElixirStruct {
+                    module: "Jason.Error".to_string(),
+                    fields: vec![(
+                        "message".to_string(),
+                        ErlangType::Named("string".to_string()),
+                    )],
+                }],
+            },
+        );
 
         let output = generate_surreal(&modules);
         // Types are generated as comments since extern type isn't supported yet
-        assert!(output.contains("// extern type jason_error = struct {"),
-            "Expected commented extern type declaration, got:\n{}", output);
-        assert!(output.contains("//     message: String,"),
-            "Expected message field, got:\n{}", output);
+        assert!(
+            output.contains("// extern type jason_error = struct {"),
+            "Expected commented extern type declaration, got:\n{}",
+            output
+        );
+        assert!(
+            output.contains("//     message: String,"),
+            "Expected message field, got:\n{}",
+            output
+        );
     }
 }
 
 #[cfg(test)]
 mod test_map_parsing {
     use super::*;
-    
+
     #[test]
     fn test_parse_erlang_map_type() {
         let ty = parse_type("#{method := binary()}");
         println!("Parsed type: {:?}", ty);
-        assert!(matches!(ty, ErlangType::Named(ref n) if n == "map"), 
-            "Expected Named(map), got {:?}", ty);
+        assert!(
+            matches!(ty, ErlangType::Named(ref n) if n == "map"),
+            "Expected Named(map), got {:?}",
+            ty
+        );
     }
-    
+
     #[test]
     fn test_type_resolution_for_req() {
         // Parse a type definition like -type req() :: #{...}
         let td = parse_single_type_def("-type req() :: #{method := binary()}.").unwrap();
         println!("Type def: {:?}", td);
         assert_eq!(td.name, "req");
-        assert!(matches!(td.definition, ErlangType::Named(ref n) if n == "map"),
-            "Expected definition to be Named(map), got {:?}", td.definition);
-        
+        assert!(
+            matches!(td.definition, ErlangType::Named(ref n) if n == "map"),
+            "Expected definition to be Named(map), got {:?}",
+            td.definition
+        );
+
         // Register and resolve
         let mut registry = TypeRegistry::new();
         registry.register(td);
-        
+
         let ty = parse_type("req()");
         println!("Before resolve: {:?}", ty);
         let resolved = resolve_type_refs(&ty, &registry);
         println!("After resolve: {:?}", resolved);
-        assert!(matches!(resolved, ErlangType::Named(ref n) if n == "map"),
-            "Expected resolved to be Named(map), got {:?}", resolved);
+        assert!(
+            matches!(resolved, ErlangType::Named(ref n) if n == "map"),
+            "Expected resolved to be Named(map), got {:?}",
+            resolved
+        );
     }
 }
 
 #[cfg(test)]
 mod test_multiline {
     use super::*;
-    
+
     #[test]
     fn test_multiline_map_type_def() {
         let source = r#"
@@ -2844,25 +3058,28 @@ mod test_multiline {
 -spec method(req()) -> binary().
 method(Req) -> maps:get(method, Req).
 "#;
-        
+
         let type_defs = parse_type_defs(source);
         println!("Type defs: {:?}", type_defs);
         assert!(!type_defs.is_empty(), "Should have parsed type defs");
-        
+
         let req_def = type_defs.iter().find(|td| td.name == "req");
         println!("req type def: {:?}", req_def);
         assert!(req_def.is_some(), "Should have found req type");
-        
+
         let req_def = req_def.unwrap();
-        assert!(matches!(req_def.definition, ErlangType::Named(ref n) if n == "map"),
-            "Expected req() to be a map, got {:?}", req_def.definition);
+        assert!(
+            matches!(req_def.definition, ErlangType::Named(ref n) if n == "map"),
+            "Expected req() to be a map, got {:?}",
+            req_def.definition
+        );
     }
 }
 
 #[cfg(test)]
 mod test_full_flow {
     use super::*;
-    
+
     #[test]
     fn test_full_spec_resolution() {
         let source = r#"
@@ -2874,22 +3091,22 @@ mod test_full_flow {
 -spec method(req()) -> binary().
 method(Req) -> maps:get(method, Req).
 "#;
-        
+
         let type_defs = parse_type_defs(source);
         let mut registry = TypeRegistry::new();
         for td in &type_defs {
             registry.register(td.clone());
         }
-        
+
         let specs = parse_specs(source, &registry);
         println!("Specs: {:?}", specs);
-        
+
         let method_spec = specs.iter().find(|s| s.name == "method");
         assert!(method_spec.is_some(), "Should have found method spec");
-        
+
         let method_spec = method_spec.unwrap();
         println!("Method spec params: {:?}", method_spec.params);
-        
+
         // The param type should be resolved to map, then to Map
         let param_type = &method_spec.params[0].1;
         let surreal_type = erlang_type_to_surreal(param_type);

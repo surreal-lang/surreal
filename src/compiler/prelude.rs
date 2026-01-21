@@ -13,11 +13,16 @@ pub fn prelude_items() -> Vec<Item> {
         Item::Enum(EnumDef {
             attrs: vec![],
             name: "Option".to_string(),
-            type_params: vec![TypeParam { name: "T".to_string(), bounds: vec![] }],
+            type_params: vec![TypeParam {
+                name: "T".to_string(),
+                bounds: vec![],
+            }],
             variants: vec![
                 EnumVariant {
                     name: "Some".to_string(),
-                    kind: VariantKind::Tuple(vec![SpannedType::unspanned(Type::TypeVar("T".to_string()))]),
+                    kind: VariantKind::Tuple(vec![SpannedType::unspanned(Type::TypeVar(
+                        "T".to_string(),
+                    ))]),
                 },
                 EnumVariant {
                     name: "None".to_string(),
@@ -32,17 +37,27 @@ pub fn prelude_items() -> Vec<Item> {
             attrs: vec![],
             name: "Result".to_string(),
             type_params: vec![
-                TypeParam { name: "T".to_string(), bounds: vec![] },
-                TypeParam { name: "E".to_string(), bounds: vec![] },
+                TypeParam {
+                    name: "T".to_string(),
+                    bounds: vec![],
+                },
+                TypeParam {
+                    name: "E".to_string(),
+                    bounds: vec![],
+                },
             ],
             variants: vec![
                 EnumVariant {
                     name: "Ok".to_string(),
-                    kind: VariantKind::Tuple(vec![SpannedType::unspanned(Type::TypeVar("T".to_string()))]),
+                    kind: VariantKind::Tuple(vec![SpannedType::unspanned(Type::TypeVar(
+                        "T".to_string(),
+                    ))]),
                 },
                 EnumVariant {
                     name: "Err".to_string(),
-                    kind: VariantKind::Tuple(vec![SpannedType::unspanned(Type::TypeVar("E".to_string()))]),
+                    kind: VariantKind::Tuple(vec![SpannedType::unspanned(Type::TypeVar(
+                        "E".to_string(),
+                    ))]),
                 },
             ],
             is_pub: false, // Private - each module gets its own copy
@@ -115,7 +130,10 @@ mod tests {
         let existing = vec![Item::Enum(EnumDef {
             attrs: vec![],
             name: "Option".to_string(),
-            type_params: vec![TypeParam { name: "T".to_string(), bounds: vec![] }],
+            type_params: vec![TypeParam {
+                name: "T".to_string(),
+                bounds: vec![],
+            }],
             variants: vec![],
             is_pub: false,
             span: 0..0,

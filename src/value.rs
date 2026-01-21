@@ -269,14 +269,32 @@ impl PartialEq for Value {
             (Value::Tuple(a), Value::Tuple(b)) => a == b,
             (Value::List(a), Value::List(b)) => a == b,
             (Value::Map(a), Value::Map(b)) => a == b,
-            (Value::Fun { module: m1, function: f1, arity: a1 },
-             Value::Fun { module: m2, function: f2, arity: a2 }) => {
-                m1 == m2 && f1 == f2 && a1 == a2
-            }
-            (Value::Closure { module: m1, function: f1, arity: a1, captured: c1 },
-             Value::Closure { module: m2, function: f2, arity: a2, captured: c2 }) => {
-                m1 == m2 && f1 == f2 && a1 == a2 && c1 == c2
-            }
+            (
+                Value::Fun {
+                    module: m1,
+                    function: f1,
+                    arity: a1,
+                },
+                Value::Fun {
+                    module: m2,
+                    function: f2,
+                    arity: a2,
+                },
+            ) => m1 == m2 && f1 == f2 && a1 == a2,
+            (
+                Value::Closure {
+                    module: m1,
+                    function: f1,
+                    arity: a1,
+                    captured: c1,
+                },
+                Value::Closure {
+                    module: m2,
+                    function: f2,
+                    arity: a2,
+                    captured: c2,
+                },
+            ) => m1 == m2 && f1 == f2 && a1 == a2 && c1 == c2,
             (Value::None, Value::None) => true,
             _ => false,
         }

@@ -390,12 +390,11 @@ mod tests {
     #[test]
     #[ignore]
     fn test_macro_expand_simple() {
-        use crate::compiler::ast_serde;
         use crate::compiler::ast::*;
+        use crate::compiler::ast_serde;
 
         // Path to the compiled test_macro.beam
-        let beam_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures");
+        let beam_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
 
         let mut expander = MacroExpander::new(vec![beam_path]);
         expander.ensure_running().expect("Failed to start BEAM");

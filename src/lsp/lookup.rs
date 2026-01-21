@@ -43,20 +43,11 @@ pub enum SymbolInfo {
         call_span: Span,
     },
     /// A function definition
-    FunctionDef {
-        name: String,
-        span: Span,
-    },
+    FunctionDef { name: String, span: Span },
     /// A field access
-    FieldAccess {
-        field: String,
-        span: Span,
-    },
+    FieldAccess { field: String, span: Span },
     /// A struct name
-    StructRef {
-        name: String,
-        span: Span,
-    },
+    StructRef { name: String, span: Span },
 }
 
 /// Scope tracking for variable resolution.
@@ -211,7 +202,10 @@ impl ReferenceCollector {
         if is_definition && !self.include_definition {
             return;
         }
-        self.references.push(ReferenceInfo { span, is_definition });
+        self.references.push(ReferenceInfo {
+            span,
+            is_definition,
+        });
     }
 }
 
@@ -408,9 +402,7 @@ fn collect_refs_in_expr(collector: &mut ReferenceCollector, expr: &SpannedExpr) 
             }
         }
 
-        Expr::MethodCall {
-            receiver, args, ..
-        } => {
+        Expr::MethodCall { receiver, args, .. } => {
             collect_refs_in_expr(collector, receiver);
             for arg in args {
                 collect_refs_in_expr(collector, arg);
@@ -533,21 +525,19 @@ fn collect_refs_in_expr(collector: &mut ReferenceCollector, expr: &SpannedExpr) 
             collect_refs_in_expr(collector, tail);
         }
 
-        Expr::EnumVariant { args, .. } => {
-            match args {
-                EnumVariantArgs::Tuple(exprs) => {
-                    for e in exprs {
-                        collect_refs_in_expr(collector, e);
-                    }
+        Expr::EnumVariant { args, .. } => match args {
+            EnumVariantArgs::Tuple(exprs) => {
+                for e in exprs {
+                    collect_refs_in_expr(collector, e);
                 }
-                EnumVariantArgs::Struct(fields) => {
-                    for (_, e) in fields {
-                        collect_refs_in_expr(collector, e);
-                    }
-                }
-                EnumVariantArgs::Unit => {}
             }
-        }
+            EnumVariantArgs::Struct(fields) => {
+                for (_, e) in fields {
+                    collect_refs_in_expr(collector, e);
+                }
+            }
+            EnumVariantArgs::Unit => {}
+        },
 
         _ => {}
     }
@@ -582,7 +572,11 @@ fn collect_refs_in_for_clause(collector: &mut ReferenceCollector, clause: &ForCl
     }
 }
 
-fn collect_pattern_bindings(collector: &mut ReferenceCollector, pattern: &Pattern, def_span: &Span) {
+fn collect_pattern_bindings(
+    collector: &mut ReferenceCollector,
+    pattern: &Pattern,
+    def_span: &Span,
+) {
     match pattern {
         Pattern::Ident(name) => {
             collector.define_variable(name.clone(), def_span.clone());
@@ -601,21 +595,19 @@ fn collect_pattern_bindings(collector: &mut ReferenceCollector, pattern: &Patter
                 collect_pattern_bindings(collector, pat, def_span);
             }
         }
-        Pattern::Enum { fields, .. } => {
-            match fields {
-                EnumPatternFields::Tuple(pats) => {
-                    for pat in pats {
-                        collect_pattern_bindings(collector, pat, def_span);
-                    }
+        Pattern::Enum { fields, .. } => match fields {
+            EnumPatternFields::Tuple(pats) => {
+                for pat in pats {
+                    collect_pattern_bindings(collector, pat, def_span);
                 }
-                EnumPatternFields::Struct(field_pats) => {
-                    for (_, pat) in field_pats {
-                        collect_pattern_bindings(collector, pat, def_span);
-                    }
-                }
-                EnumPatternFields::Unit => {}
             }
-        }
+            EnumPatternFields::Struct(field_pats) => {
+                for (_, pat) in field_pats {
+                    collect_pattern_bindings(collector, pat, def_span);
+                }
+            }
+            EnumPatternFields::Unit => {}
+        },
         _ => {}
     }
 }
@@ -827,7 +819,11 @@ fn collect_func_refs_in_expr(collector: &mut ReferenceCollector, expr: &SpannedE
             collect_func_refs_in_block(collector, block);
         }
 
-        Expr::Send { to, msg } | Expr::Pipe { left: to, right: msg } => {
+        Expr::Send { to, msg }
+        | Expr::Pipe {
+            left: to,
+            right: msg,
+        } => {
             collect_func_refs_in_expr(collector, to);
             collect_func_refs_in_expr(collector, msg);
         }
@@ -848,21 +844,19 @@ fn collect_func_refs_in_expr(collector: &mut ReferenceCollector, expr: &SpannedE
             collect_func_refs_in_expr(collector, inner);
         }
 
-        Expr::EnumVariant { args, .. } => {
-            match args {
-                EnumVariantArgs::Tuple(exprs) => {
-                    for e in exprs {
-                        collect_func_refs_in_expr(collector, e);
-                    }
+        Expr::EnumVariant { args, .. } => match args {
+            EnumVariantArgs::Tuple(exprs) => {
+                for e in exprs {
+                    collect_func_refs_in_expr(collector, e);
                 }
-                EnumVariantArgs::Struct(fields) => {
-                    for (_, e) in fields {
-                        collect_func_refs_in_expr(collector, e);
-                    }
-                }
-                EnumVariantArgs::Unit => {}
             }
-        }
+            EnumVariantArgs::Struct(fields) => {
+                for (_, e) in fields {
+                    collect_func_refs_in_expr(collector, e);
+                }
+            }
+            EnumVariantArgs::Unit => {}
+        },
 
         _ => {}
     }
@@ -949,9 +943,7 @@ fn collect_struct_refs_in_expr(collector: &mut ReferenceCollector, expr: &Spanne
             }
         }
 
-        Expr::MethodCall {
-            receiver, args, ..
-        } => {
+        Expr::MethodCall { receiver, args, .. } => {
             collect_struct_refs_in_expr(collector, receiver);
             for arg in args {
                 collect_struct_refs_in_expr(collector, arg);
@@ -1035,7 +1027,11 @@ fn collect_struct_refs_in_expr(collector: &mut ReferenceCollector, expr: &Spanne
             collect_struct_refs_in_block(collector, block);
         }
 
-        Expr::Send { to, msg } | Expr::Pipe { left: to, right: msg } => {
+        Expr::Send { to, msg }
+        | Expr::Pipe {
+            left: to,
+            right: msg,
+        } => {
             collect_struct_refs_in_expr(collector, to);
             collect_struct_refs_in_expr(collector, msg);
         }
@@ -1056,21 +1052,19 @@ fn collect_struct_refs_in_expr(collector: &mut ReferenceCollector, expr: &Spanne
             collect_struct_refs_in_expr(collector, inner);
         }
 
-        Expr::EnumVariant { args, .. } => {
-            match args {
-                EnumVariantArgs::Tuple(exprs) => {
-                    for e in exprs {
-                        collect_struct_refs_in_expr(collector, e);
-                    }
+        Expr::EnumVariant { args, .. } => match args {
+            EnumVariantArgs::Tuple(exprs) => {
+                for e in exprs {
+                    collect_struct_refs_in_expr(collector, e);
                 }
-                EnumVariantArgs::Struct(fields) => {
-                    for (_, e) in fields {
-                        collect_struct_refs_in_expr(collector, e);
-                    }
-                }
-                EnumVariantArgs::Unit => {}
             }
-        }
+            EnumVariantArgs::Struct(fields) => {
+                for (_, e) in fields {
+                    collect_struct_refs_in_expr(collector, e);
+                }
+            }
+            EnumVariantArgs::Unit => {}
+        },
 
         _ => {}
     }
@@ -1469,27 +1463,25 @@ fn visit_expr(ctx: &mut LookupContext, expr: &SpannedExpr) {
             visit_expr(ctx, tail);
         }
 
-        Expr::EnumVariant { args, .. } => {
-            match args {
-                EnumVariantArgs::Tuple(exprs) => {
-                    for e in exprs {
-                        visit_expr(ctx, e);
-                        if ctx.found.is_some() {
-                            return;
-                        }
+        Expr::EnumVariant { args, .. } => match args {
+            EnumVariantArgs::Tuple(exprs) => {
+                for e in exprs {
+                    visit_expr(ctx, e);
+                    if ctx.found.is_some() {
+                        return;
                     }
                 }
-                EnumVariantArgs::Struct(fields) => {
-                    for (_, e) in fields {
-                        visit_expr(ctx, e);
-                        if ctx.found.is_some() {
-                            return;
-                        }
-                    }
-                }
-                EnumVariantArgs::Unit => {}
             }
-        }
+            EnumVariantArgs::Struct(fields) => {
+                for (_, e) in fields {
+                    visit_expr(ctx, e);
+                    if ctx.found.is_some() {
+                        return;
+                    }
+                }
+            }
+            EnumVariantArgs::Unit => {}
+        },
 
         // Literals and other simple expressions
         _ => {}
@@ -1558,21 +1550,19 @@ fn add_pattern_bindings(ctx: &mut LookupContext, pattern: &Pattern, def_span: &S
                 add_pattern_bindings(ctx, pat, def_span);
             }
         }
-        Pattern::Enum { fields, .. } => {
-            match fields {
-                EnumPatternFields::Tuple(pats) => {
-                    for pat in pats {
-                        add_pattern_bindings(ctx, pat, def_span);
-                    }
+        Pattern::Enum { fields, .. } => match fields {
+            EnumPatternFields::Tuple(pats) => {
+                for pat in pats {
+                    add_pattern_bindings(ctx, pat, def_span);
                 }
-                EnumPatternFields::Struct(field_pats) => {
-                    for (_, pat) in field_pats {
-                        add_pattern_bindings(ctx, pat, def_span);
-                    }
-                }
-                EnumPatternFields::Unit => {}
             }
-        }
+            EnumPatternFields::Struct(field_pats) => {
+                for (_, pat) in field_pats {
+                    add_pattern_bindings(ctx, pat, def_span);
+                }
+            }
+            EnumPatternFields::Unit => {}
+        },
         _ => {}
     }
 }
@@ -1605,7 +1595,11 @@ mod tests {
         let x_ref_pos = source.rfind("\n        x").unwrap() + 9; // After "\n        "
         let info = find_symbol_at_offset(&module, x_ref_pos);
 
-        assert!(info.is_some(), "Expected to find symbol at offset {}", x_ref_pos);
+        assert!(
+            info.is_some(),
+            "Expected to find symbol at offset {}",
+            x_ref_pos
+        );
         if let Some(SymbolInfo::Variable { name, .. }) = info {
             assert_eq!(name, "x");
         } else {
@@ -1627,7 +1621,11 @@ mod tests {
         let call_pos = source.find("io::").unwrap();
         let info = find_symbol_at_offset(&module, call_pos);
 
-        assert!(info.is_some(), "Expected to find symbol at offset {}", call_pos);
+        assert!(
+            info.is_some(),
+            "Expected to find symbol at offset {}",
+            call_pos
+        );
         if let Some(SymbolInfo::FunctionCall { module, name, .. }) = info {
             assert_eq!(module, vec!["io"]);
             assert_eq!(name, "println");
@@ -1663,7 +1661,11 @@ mod tests {
 
         // Check that one is marked as definition
         let def_count = refs.iter().filter(|r| r.is_definition).count();
-        assert!(def_count >= 1, "Expected at least 1 definition, got {}", def_count);
+        assert!(
+            def_count >= 1,
+            "Expected at least 1 definition, got {}",
+            def_count
+        );
     }
 
     #[test]
@@ -1761,6 +1763,9 @@ mod tests {
 
         // Without definition should have no definitions
         let def_count_without = refs_without_def.iter().filter(|r| r.is_definition).count();
-        assert_eq!(def_count_without, 0, "Should have 0 definitions when excluding");
+        assert_eq!(
+            def_count_without, 0,
+            "Should have 0 definitions when excluding"
+        );
     }
 }

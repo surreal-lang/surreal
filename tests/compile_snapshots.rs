@@ -3,9 +3,9 @@
 //! These tests use insta to snapshot compiler output, ensuring we don't
 //! accidentally break error messages or introduce regressions.
 
-use surreal::compiler::{check_module, Parser, TypeError};
 use std::fs;
 use std::path::Path;
+use surreal::compiler::{Parser, TypeError, check_module};
 
 /// Format a type error for snapshot testing
 fn format_type_error(err: &TypeError) -> String {

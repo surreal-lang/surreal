@@ -141,7 +141,11 @@ impl Warning {
         }
     }
 
-    pub fn with_help_and_span(message: impl Into<String>, help: impl Into<String>, span: Span) -> Self {
+    pub fn with_help_and_span(
+        message: impl Into<String>,
+        help: impl Into<String>,
+        span: Span,
+    ) -> Self {
         Self {
             message: message.into(),
             help: Some(help.into()),

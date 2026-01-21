@@ -53,20 +53,16 @@ impl Module {
         let entry = self.code.len();
 
         self.code.extend(code);
-        self.functions.insert(
-            (name.clone(), arity),
-            FunctionDef { name, arity, entry },
-        );
+        self.functions
+            .insert((name.clone(), arity), FunctionDef { name, arity, entry });
     }
 
     /// Add a function definition at a specific entry point.
     ///
     /// Used by codegen when code is built separately.
     pub fn add_function_at(&mut self, name: String, arity: u8, entry: usize) {
-        self.functions.insert(
-            (name.clone(), arity),
-            FunctionDef { name, arity, entry },
-        );
+        self.functions
+            .insert((name.clone(), arity), FunctionDef { name, arity, entry });
     }
 
     /// Mark a function as exported (callable from other modules).

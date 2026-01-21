@@ -142,10 +142,16 @@ pub enum Instruction {
     Work { amount: u32 },
 
     /// Spawn a new process running `code`, store child PID in register
-    Spawn { code: Vec<Instruction>, dest: Register },
+    Spawn {
+        code: Vec<Instruction>,
+        dest: Register,
+    },
 
     /// Spawn a new process and atomically link to it
-    SpawnLink { code: Vec<Instruction>, dest: Register },
+    SpawnLink {
+        code: Vec<Instruction>,
+        dest: Register,
+    },
 
     /// Send a message to a process
     Send { to: Source, msg: String },
@@ -204,38 +210,82 @@ pub enum Instruction {
     Move { source: Register, dest: Register },
 
     /// Add two operands, store result in dest
-    Add { a: Operand, b: Operand, dest: Register },
+    Add {
+        a: Operand,
+        b: Operand,
+        dest: Register,
+    },
 
     /// Subtract b from a, store result in dest
-    Sub { a: Operand, b: Operand, dest: Register },
+    Sub {
+        a: Operand,
+        b: Operand,
+        dest: Register,
+    },
 
     /// Multiply two operands, store result in dest
-    Mul { a: Operand, b: Operand, dest: Register },
+    Mul {
+        a: Operand,
+        b: Operand,
+        dest: Register,
+    },
 
     /// Divide a by b, store result in dest (integer division)
-    Div { a: Operand, b: Operand, dest: Register },
+    Div {
+        a: Operand,
+        b: Operand,
+        dest: Register,
+    },
 
     /// Modulo a by b, store result in dest
-    Mod { a: Operand, b: Operand, dest: Register },
+    Mod {
+        a: Operand,
+        b: Operand,
+        dest: Register,
+    },
 
     // ========== Comparisons ==========
     /// Compare equal: dest = (a == b) ? 1 : 0
-    Eq { a: Operand, b: Operand, dest: Register },
+    Eq {
+        a: Operand,
+        b: Operand,
+        dest: Register,
+    },
 
     /// Compare not equal: dest = (a != b) ? 1 : 0
-    Ne { a: Operand, b: Operand, dest: Register },
+    Ne {
+        a: Operand,
+        b: Operand,
+        dest: Register,
+    },
 
     /// Compare less than: dest = (a < b) ? 1 : 0
-    Lt { a: Operand, b: Operand, dest: Register },
+    Lt {
+        a: Operand,
+        b: Operand,
+        dest: Register,
+    },
 
     /// Compare less than or equal: dest = (a <= b) ? 1 : 0
-    Lte { a: Operand, b: Operand, dest: Register },
+    Lte {
+        a: Operand,
+        b: Operand,
+        dest: Register,
+    },
 
     /// Compare greater than: dest = (a > b) ? 1 : 0
-    Gt { a: Operand, b: Operand, dest: Register },
+    Gt {
+        a: Operand,
+        b: Operand,
+        dest: Register,
+    },
 
     /// Compare greater than or equal: dest = (a >= b) ? 1 : 0
-    Gte { a: Operand, b: Operand, dest: Register },
+    Gte {
+        a: Operand,
+        b: Operand,
+        dest: Register,
+    },
 
     // ========== Control Flow ==========
     /// Unconditional jump to instruction index
@@ -337,7 +387,11 @@ pub enum Instruction {
 
     /// Get an element from a tuple by index (0-based)
     /// Crashes if not a tuple or index out of bounds
-    TupleElement { tuple: Register, index: u8, dest: Register },
+    TupleElement {
+        tuple: Register,
+        index: u8,
+        dest: Register,
+    },
 
     /// Get the arity (size) of a tuple
     /// Crashes if not a tuple
@@ -374,7 +428,11 @@ pub enum Instruction {
 
     /// Cons: prepend an element to a list [elem | list]
     /// Crashes if tail is not a list
-    Cons { head: Register, tail: Register, dest: Register },
+    Cons {
+        head: Register,
+        tail: Register,
+        dest: Register,
+    },
 
     /// Get the head (first element) of a list
     /// Crashes if not a list or empty
@@ -392,7 +450,11 @@ pub enum Instruction {
 
     /// Append two lists (a ++ b)
     /// Crashes if either is not a list
-    ListAppend { a: Register, b: Register, dest: Register },
+    ListAppend {
+        a: Register,
+        b: Register,
+        dest: Register,
+    },
 
     /// Reverse a list
     /// Crashes if not a list
@@ -400,11 +462,19 @@ pub enum Instruction {
 
     /// Get the nth element of a list (0-based)
     /// Crashes if not a list or index out of bounds
-    ListNth { list: Register, n: Register, dest: Register },
+    ListNth {
+        list: Register,
+        n: Register,
+        dest: Register,
+    },
 
     /// Check if an element is a member of a list
     /// Stores 1 (true) or 0 (false)
-    ListMember { elem: Register, list: Register, dest: Register },
+    ListMember {
+        elem: Register,
+        list: Register,
+        dest: Register,
+    },
 
     // ========== Type Checking ==========
     /// Check if value is an integer
@@ -441,7 +511,11 @@ pub enum Instruction {
 
     // ========== Process Dictionary ==========
     /// Store value in process dictionary, returns old value (or None) in dest
-    PutDict { key: Register, value: Register, dest: Register },
+    PutDict {
+        key: Register,
+        value: Register,
+        dest: Register,
+    },
 
     /// Get value from process dictionary, stores None if key not found
     GetDict { key: Register, dest: Register },
@@ -458,7 +532,11 @@ pub enum Instruction {
     MakeMap { count: u8, dest: Register },
 
     /// Get value from map by key, crashes if key not found
-    MapGet { map: Register, key: Register, dest: Register },
+    MapGet {
+        map: Register,
+        key: Register,
+        dest: Register,
+    },
 
     /// Get value from map by key, returns default if not found
     MapGetDefault {
@@ -477,10 +555,18 @@ pub enum Instruction {
     },
 
     /// Remove key from map, returns new map (maps are immutable)
-    MapRemove { map: Register, key: Register, dest: Register },
+    MapRemove {
+        map: Register,
+        key: Register,
+        dest: Register,
+    },
 
     /// Check if key exists in map, stores 1 (true) or 0 (false)
-    MapHas { map: Register, key: Register, dest: Register },
+    MapHas {
+        map: Register,
+        key: Register,
+        dest: Register,
+    },
 
     /// Get number of entries in map
     MapSize { map: Register, dest: Register },
@@ -500,7 +586,11 @@ pub enum Instruction {
 
     /// Get a byte at index (0-based)
     /// Crashes if not a binary or index out of bounds
-    BinaryAt { bin: Register, index: Register, dest: Register },
+    BinaryAt {
+        bin: Register,
+        index: Register,
+        dest: Register,
+    },
 
     /// Extract a slice from a binary
     /// Crashes if not a binary or range out of bounds
@@ -513,7 +603,11 @@ pub enum Instruction {
 
     /// Concatenate two binaries
     /// Crashes if either is not a binary
-    BinaryConcat { a: Register, b: Register, dest: Register },
+    BinaryConcat {
+        a: Register,
+        b: Register,
+        dest: Register,
+    },
 
     /// Check if value is a binary
     /// Stores 1 (true) or 0 (false)
@@ -632,7 +726,11 @@ pub enum Instruction {
     Abs { source: Register, dest: Register },
 
     /// Power: base^exponent (both operands, result is float)
-    Pow { base: Register, exp: Register, dest: Register },
+    Pow {
+        base: Register,
+        exp: Register,
+        dest: Register,
+    },
 
     // ========== Timers ==========
     /// Send a message to a process after a delay (in reductions)
@@ -646,7 +744,11 @@ pub enum Instruction {
 
     /// Start a timer that sends {:timeout, ref, msg} to self after delay
     /// Returns the timer reference in dest
-    StartTimer { delay: u32, msg: Register, dest: Register },
+    StartTimer {
+        delay: u32,
+        msg: Register,
+        dest: Register,
+    },
 
     /// Cancel a pending timer by its reference
     /// Returns the remaining time if timer was active, or :ok if already fired
@@ -669,7 +771,11 @@ pub enum Instruction {
 
     /// Write binary/string to file
     /// Returns :ok or {:error, reason}
-    FileWrite { path: Register, content: Register, dest: Register },
+    FileWrite {
+        path: Register,
+        content: Register,
+        dest: Register,
+    },
 
     /// Check if file exists
     /// Returns 1 (true) or 0 (false)

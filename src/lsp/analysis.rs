@@ -7,8 +7,8 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 use crate::compiler::{
-    check_modules_with_metadata, Module, ModuleLoader, ParseError, Parser, TypeError,
-    TypeCheckResult, Warning,
+    Module, ModuleLoader, ParseError, Parser, TypeCheckResult, TypeError, Warning,
+    check_modules_with_metadata,
 };
 
 /// Cached stdlib data for LSP analysis.
@@ -26,12 +26,18 @@ fn get_stdlib() -> &'static StdlibData {
 fn load_stdlib() -> StdlibData {
     let stdlib_dir = match find_stdlib_dir() {
         Some(dir) => dir,
-        None => return StdlibData { modules: Vec::new() },
+        None => {
+            return StdlibData {
+                modules: Vec::new(),
+            };
+        }
     };
 
     let mut loader = ModuleLoader::with_package("surreal".to_string(), stdlib_dir.clone());
     if loader.load_all_in_dir(&stdlib_dir).is_err() {
-        return StdlibData { modules: Vec::new() };
+        return StdlibData {
+            modules: Vec::new(),
+        };
     }
 
     StdlibData {

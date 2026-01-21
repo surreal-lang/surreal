@@ -97,9 +97,7 @@ impl Ty {
             Ty::Tuple(tys) => tys.iter().any(|t| t.has_infer()),
             Ty::List(t) => t.has_infer(),
             Ty::Named { args, .. } => args.iter().any(|t| t.has_infer()),
-            Ty::Fn { params, ret } => {
-                params.iter().any(|t| t.has_infer()) || ret.has_infer()
-            }
+            Ty::Fn { params, ret } => params.iter().any(|t| t.has_infer()) || ret.has_infer(),
             Ty::Union(tys) => tys.iter().any(|t| t.has_infer()),
             _ => false,
         }
@@ -587,7 +585,8 @@ impl TypeEnv {
 
     /// Get method info.
     pub fn get_method(&self, type_name: &str, method_name: &str) -> Option<&FnInfo> {
-        self.methods.get(&(type_name.to_string(), method_name.to_string()))
+        self.methods
+            .get(&(type_name.to_string(), method_name.to_string()))
     }
 
     /// Get trait info.
@@ -609,7 +608,12 @@ impl TypeEnv {
 
     /// Get external function info (from .surreal binding files).
     /// Resolves module aliases before lookup.
-    pub fn get_extern_function(&self, module: &str, function: &str, arity: usize) -> Option<&FnInfo> {
+    pub fn get_extern_function(
+        &self,
+        module: &str,
+        function: &str,
+        arity: usize,
+    ) -> Option<&FnInfo> {
         // Resolve module alias if present
         let resolved_module = self.resolve_module_alias(module);
         self.extern_functions
@@ -801,7 +805,10 @@ impl TypeChecker {
 
             // Bool unifies with :true and :false atoms (they're the same on BEAM)
             (Ty::Bool, Ty::AtomLiteral(a)) | (Ty::AtomLiteral(a), Ty::Bool)
-                if a == "true" || a == "false" => Ok(()),
+                if a == "true" || a == "false" =>
+            {
+                Ok(())
+            }
 
             // Union type unification:
             // A type T unifies with a union if T matches any variant in the union
@@ -815,7 +822,9 @@ impl TypeChecker {
                 // Also allow if ty is a union and all its variants are in the target union
                 if let Ty::Union(ty_variants) = ty {
                     let all_match = ty_variants.iter().all(|v| {
-                        variants.iter().any(|target| self.types_compatible(v, target))
+                        variants
+                            .iter()
+                            .any(|target| self.types_compatible(v, target))
                     });
                     if all_match {
                         return Ok(());
@@ -823,20 +832,22 @@ impl TypeChecker {
                 }
                 Err(TypeError::new(format!(
                     "type {} is not compatible with union {}",
-                    ty, Ty::Union(variants.clone())
+                    ty,
+                    Ty::Union(variants.clone())
                 )))
             }
 
             // Named types must have same name and unify args
             (
-                Ty::Named { name: n1, args: a1, .. },
-                Ty::Named { name: n2, args: a2, .. },
+                Ty::Named {
+                    name: n1, args: a1, ..
+                },
+                Ty::Named {
+                    name: n2, args: a2, ..
+                },
             ) => {
                 if n1 != n2 {
-                    return Err(TypeError::new(format!(
-                        "type mismatch: {} vs {}",
-                        ty1, ty2
-                    )));
+                    return Err(TypeError::new(format!("type mismatch: {} vs {}", ty1, ty2)));
                 }
                 // Unify type arguments pairwise
                 for (t1, t2) in a1.iter().zip(a2.iter()) {
@@ -864,7 +875,16 @@ impl TypeChecker {
             (Ty::List(t1), Ty::List(t2)) => self.unify(t1, t2),
 
             // Function types
-            (Ty::Fn { params: p1, ret: r1 }, Ty::Fn { params: p2, ret: r2 }) => {
+            (
+                Ty::Fn {
+                    params: p1,
+                    ret: r1,
+                },
+                Ty::Fn {
+                    params: p2,
+                    ret: r2,
+                },
+            ) => {
                 if p1.len() != p2.len() {
                     return Err(TypeError::new("function arity mismatch"));
                 }
@@ -875,10 +895,7 @@ impl TypeChecker {
             }
 
             // Primitives must match exactly (handled by ty1 == ty2 above)
-            _ => Err(TypeError::new(format!(
-                "cannot unify {} with {}",
-                ty1, ty2
-            ))),
+            _ => Err(TypeError::new(format!("cannot unify {} with {}", ty1, ty2))),
         }
     }
 
@@ -907,9 +924,7 @@ impl TypeChecker {
                     ty.clone()
                 }
             }
-            Ty::Tuple(tys) => {
-                Ty::Tuple(tys.iter().map(|t| self.apply_substitutions(t)).collect())
-            }
+            Ty::Tuple(tys) => Ty::Tuple(tys.iter().map(|t| self.apply_substitutions(t)).collect()),
             Ty::List(t) => Ty::List(Box::new(self.apply_substitutions(t))),
             Ty::Named { name, module, args } => Ty::Named {
                 name: name.clone(),
@@ -920,9 +935,7 @@ impl TypeChecker {
                 params: params.iter().map(|t| self.apply_substitutions(t)).collect(),
                 ret: Box::new(self.apply_substitutions(ret)),
             },
-            Ty::Union(tys) => {
-                Ty::Union(tys.iter().map(|t| self.apply_substitutions(t)).collect())
-            }
+            Ty::Union(tys) => Ty::Union(tys.iter().map(|t| self.apply_substitutions(t)).collect()),
             // Primitives and type variables don't need substitution
             _ => ty.clone(),
         }
@@ -1038,14 +1051,15 @@ impl TypeChecker {
                 .map(|(name, kind)| {
                     let new_kind = match kind {
                         VariantInfoKind::Unit => VariantInfoKind::Unit,
-                        VariantInfoKind::Tuple(fields) => {
-                            VariantInfoKind::Tuple(fields.iter().map(|t| t.substitute(&subst)).collect())
-                        }
-                        VariantInfoKind::Struct(fields) => {
-                            VariantInfoKind::Struct(fields.iter()
+                        VariantInfoKind::Tuple(fields) => VariantInfoKind::Tuple(
+                            fields.iter().map(|t| t.substitute(&subst)).collect(),
+                        ),
+                        VariantInfoKind::Struct(fields) => VariantInfoKind::Struct(
+                            fields
+                                .iter()
                                 .map(|(n, t)| (n.clone(), t.substitute(&subst)))
-                                .collect())
-                        }
+                                .collect(),
+                        ),
                     };
                     (name.clone(), new_kind)
                 })
@@ -1119,13 +1133,18 @@ impl TypeChecker {
             (VariantInfoKind::Struct(expected_fields), EnumVariantArgs::Struct(field_exprs)) => {
                 // Check each provided field
                 for (field_name, field_expr) in field_exprs {
-                    if let Some((_, expected_ty)) = expected_fields.iter().find(|(n, _)| n == field_name) {
+                    if let Some((_, expected_ty)) =
+                        expected_fields.iter().find(|(n, _)| n == field_name)
+                    {
                         let field_ty = self.infer_expr(field_expr)?;
                         if self.unify(&field_ty, expected_ty).is_err()
                             && !self.types_compatible(&field_ty, expected_ty)
                         {
                             self.error(TypeError::with_help(
-                                format!("type mismatch in field '{}' of variant '{}'", field_name, variant),
+                                format!(
+                                    "type mismatch in field '{}' of variant '{}'",
+                                    field_name, variant
+                                ),
                                 format!("expected {}, found {}", expected_ty, field_ty),
                             ));
                         }
@@ -1198,9 +1217,9 @@ impl TypeChecker {
                     "Map" => Ty::RawMap,
                     "Any" => Ty::Any,
                     "IoList" => Ty::List(Box::new(Ty::Union(vec![
-                        Ty::Int,      // byte
-                        Ty::Binary,   // binary
-                        Ty::List(Box::new(Ty::Any)),  // nested iolist
+                        Ty::Int,                     // byte
+                        Ty::Binary,                  // binary
+                        Ty::List(Box::new(Ty::Any)), // nested iolist
                     ]))),
                     _ => {
                         // Check if it's a type alias
@@ -1210,10 +1229,8 @@ impl TypeChecker {
                                 return alias_info.ty;
                             } else {
                                 // Generic alias - substitute type parameters
-                                let resolved_args: Vec<Ty> = type_args
-                                    .iter()
-                                    .map(|t| self.ast_type_to_ty(t))
-                                    .collect();
+                                let resolved_args: Vec<Ty> =
+                                    type_args.iter().map(|t| self.ast_type_to_ty(t)).collect();
 
                                 // Build substitution map: T -> int, E -> string, etc.
                                 let mut subst = HashMap::new();
@@ -1336,11 +1353,13 @@ impl TypeChecker {
                             let kind = match &v.kind {
                                 VariantKind::Unit => VariantInfoKind::Unit,
                                 VariantKind::Tuple(fields) => {
-                                    let field_tys = fields.iter().map(|t| self.ast_type_to_ty(t)).collect();
+                                    let field_tys =
+                                        fields.iter().map(|t| self.ast_type_to_ty(t)).collect();
                                     VariantInfoKind::Tuple(field_tys)
                                 }
                                 VariantKind::Struct(fields) => {
-                                    let field_tys = fields.iter()
+                                    let field_tys = fields
+                                        .iter()
                                         .map(|(name, ty)| (name.clone(), self.ast_type_to_ty(ty)))
                                         .collect();
                                     VariantInfoKind::Struct(field_tys)
@@ -1510,10 +1529,8 @@ impl TypeChecker {
                     let arity = info.params.len();
 
                     // Store the function info
-                    Arc::make_mut(&mut self.env.extern_functions).insert(
-                        (module_path.to_string(), func.name.clone(), arity),
-                        info,
-                    );
+                    Arc::make_mut(&mut self.env.extern_functions)
+                        .insert((module_path.to_string(), func.name.clone(), arity), info);
 
                     // Store the Surreal name -> BEAM name mapping if different
                     if beam_fn_name != func.name {
@@ -1534,9 +1551,23 @@ impl TypeChecker {
     /// Known Surreal stdlib modules that should NOT be treated as extern modules.
     /// These modules live under the surreal:: namespace and have their own implementations.
     const STDLIB_MODULES: &'static [&'static str] = &[
-        "io", "list", "enumerable", "iterator", "option", "result",
-        "string", "map", "file", "timer", "display", "convert",
-        "process", "genserver", "supervisor", "application", "logger",
+        "io",
+        "list",
+        "enumerable",
+        "iterator",
+        "option",
+        "result",
+        "string",
+        "map",
+        "file",
+        "timer",
+        "display",
+        "convert",
+        "process",
+        "genserver",
+        "supervisor",
+        "application",
+        "logger",
     ];
 
     /// Check if a module name is a Surreal stdlib module.
@@ -1550,7 +1581,11 @@ impl TypeChecker {
     /// Note: Surreal stdlib modules take priority over extern modules with the same name.
     fn collect_use_decl(&mut self, use_decl: &UseDecl) {
         match &use_decl.tree {
-            UseTree::Path { module, name, rename } => {
+            UseTree::Path {
+                module,
+                name,
+                rename,
+            } => {
                 // Check if this is a module alias: `use erlang::std::erlang as erl`
                 // Build the full path from module.segments + name
                 let full_path = if module.segments.is_empty() {
@@ -1579,10 +1614,12 @@ impl TypeChecker {
                     if let Some(alias) = rename {
                         // Register the module alias: alias -> extern module name (e.g., "erl" -> "erlang")
                         // NOT the full path - we want to resolve to the actual extern module name
-                        Arc::make_mut(&mut self.env.extern_module_aliases).insert(alias.clone(), name.clone());
+                        Arc::make_mut(&mut self.env.extern_module_aliases)
+                            .insert(alias.clone(), name.clone());
                         // Also add to extern_module_names if there's a BEAM name mapping
                         if let Some(beam_name) = self.env.extern_module_names.get(name).cloned() {
-                            Arc::make_mut(&mut self.env.extern_module_names).insert(alias.clone(), beam_name);
+                            Arc::make_mut(&mut self.env.extern_module_names)
+                                .insert(alias.clone(), beam_name);
                         }
                     }
                     return;
@@ -1594,9 +1631,12 @@ impl TypeChecker {
                 if module.segments.len() >= 1 && module.prefix == PathPrefix::None {
                     let first_segment = &module.segments[0];
                     // Register imports from both extern and stdlib modules
-                    if Self::is_stdlib_module(first_segment) || self.env.is_extern_module(first_segment) {
+                    if Self::is_stdlib_module(first_segment)
+                        || self.env.is_extern_module(first_segment)
+                    {
                         let local_name = rename.clone().unwrap_or_else(|| name.clone());
-                        self.env.add_extern_import(local_name, first_segment.clone(), name.clone());
+                        self.env
+                            .add_extern_import(local_name, first_segment.clone(), name.clone());
                     }
                 }
             }
@@ -1607,10 +1647,17 @@ impl TypeChecker {
                 if module.segments.len() >= 1 && module.prefix == PathPrefix::None {
                     let first_segment = &module.segments[0];
                     // Register imports from both extern and stdlib modules
-                    if Self::is_stdlib_module(first_segment) || self.env.is_extern_module(first_segment) {
+                    if Self::is_stdlib_module(first_segment)
+                        || self.env.is_extern_module(first_segment)
+                    {
                         for item in items {
-                            let local_name = item.rename.clone().unwrap_or_else(|| item.name.clone());
-                            self.env.add_extern_import(local_name, first_segment.clone(), item.name.clone());
+                            let local_name =
+                                item.rename.clone().unwrap_or_else(|| item.name.clone());
+                            self.env.add_extern_import(
+                                local_name,
+                                first_segment.clone(),
+                                item.name.clone(),
+                            );
                         }
                     }
                 }
@@ -1619,10 +1666,14 @@ impl TypeChecker {
                 // Glob imports: `use jason::*;` imports all functions from the module
                 if module.segments.len() >= 1 && module.prefix == PathPrefix::None {
                     let first_segment = &module.segments[0];
-                    if Self::is_stdlib_module(first_segment) || self.env.is_extern_module(first_segment) {
+                    if Self::is_stdlib_module(first_segment)
+                        || self.env.is_extern_module(first_segment)
+                    {
                         // Collect all function names for this module from extern_functions
                         // We need to collect first to avoid borrowing issues
-                        let functions_to_import: Vec<String> = self.env.extern_functions
+                        let functions_to_import: Vec<String> = self
+                            .env
+                            .extern_functions
                             .keys()
                             .filter(|(mod_name, _, _)| mod_name == first_segment)
                             .map(|(_, func_name, _)| func_name.clone())
@@ -1658,10 +1709,8 @@ impl TypeChecker {
                 Item::Impl(impl_block) => {
                     for method in &impl_block.methods {
                         let info = self.function_to_info(method);
-                        Arc::make_mut(&mut self.env.methods).insert(
-                            (impl_block.type_name.clone(), method.name.clone()),
-                            info,
-                        );
+                        Arc::make_mut(&mut self.env.methods)
+                            .insert((impl_block.type_name.clone(), method.name.clone()), info);
                     }
                 }
                 _ => {}
@@ -1784,11 +1833,8 @@ impl TypeChecker {
         };
 
         // Get implemented method names
-        let impl_methods: std::collections::HashSet<&str> = impl_def
-            .methods
-            .iter()
-            .map(|m| m.name.as_str())
-            .collect();
+        let impl_methods: std::collections::HashSet<&str> =
+            impl_def.methods.iter().map(|m| m.name.as_str()).collect();
 
         // Check each required method is implemented
         let mut missing_methods = Vec::new();
@@ -1859,7 +1905,13 @@ impl TypeChecker {
     /// Type check a statement.
     fn check_stmt(&mut self, stmt: &Stmt) -> TypeResult<()> {
         match stmt {
-            Stmt::Let { pattern, ty, value, else_block, .. } => {
+            Stmt::Let {
+                pattern,
+                ty,
+                value,
+                else_block,
+                ..
+            } => {
                 let value_ty = self.infer_expr(value)?;
 
                 // If there's a type annotation, check it matches
@@ -1994,7 +2046,11 @@ impl TypeChecker {
                     self.bind_pattern(p, &Ty::Any)?;
                 }
             }
-            Pattern::Enum { name: _, variant: _, fields } => {
+            Pattern::Enum {
+                name: _,
+                variant: _,
+                fields,
+            } => {
                 // For enum patterns, bind fields to Any for now
                 match fields {
                     EnumPatternFields::Unit => {}
@@ -2027,7 +2083,7 @@ impl TypeChecker {
         match expr {
             // Literals
             Expr::Int(_) => Ok(Ty::Int),
-            Expr::String(_) => Ok(Ty::String),  // Binary string (double quotes)
+            Expr::String(_) => Ok(Ty::String), // Binary string (double quotes)
             Expr::Charlist(_) => Ok(Ty::String), // Charlist (single quotes) - same type for now
             Expr::StringInterpolation(parts) => {
                 // Type check each expression part (any type is allowed)
@@ -2070,18 +2126,30 @@ impl TypeChecker {
             }
 
             // Function calls
-            Expr::Call { func, type_args, args, .. } => {
-                self.infer_call(func, type_args, args)
-            }
+            Expr::Call {
+                func,
+                type_args,
+                args,
+                ..
+            } => self.infer_call(func, type_args, args),
 
             // Method calls
-            Expr::MethodCall { receiver, method, args, .. } => {
+            Expr::MethodCall {
+                receiver,
+                method,
+                args,
+                ..
+            } => {
                 let recv_ty = self.infer_expr(receiver)?;
                 self.infer_method_call(&recv_ty, method, args)
             }
 
             // If expression
-            Expr::If { cond, then_block, else_block } => {
+            Expr::If {
+                cond,
+                then_block,
+                else_block,
+            } => {
                 let cond_ty = self.infer_expr(cond)?;
                 if !self.types_compatible(&cond_ty, &Ty::Bool) {
                     self.error(TypeError::with_help(
@@ -2099,7 +2167,9 @@ impl TypeChecker {
                         // (e.g., :ok with atom → atom, :ok with :ok → :ok)
                         if matches!(then_ty, Ty::AtomLiteral(_)) && matches!(else_ty, Ty::Atom) {
                             Ok(else_ty)
-                        } else if matches!(else_ty, Ty::AtomLiteral(_)) && matches!(then_ty, Ty::Atom) {
+                        } else if matches!(else_ty, Ty::AtomLiteral(_))
+                            && matches!(then_ty, Ty::Atom)
+                        {
                             Ok(then_ty)
                         } else {
                             Ok(then_ty)
@@ -2221,7 +2291,9 @@ impl TypeChecker {
                     // Check fields
                     for (field_name, field_expr) in fields {
                         let field_ty = self.infer_expr(field_expr)?;
-                        if let Some((_, expected_ty)) = info.fields.iter().find(|(n, _)| n == field_name) {
+                        if let Some((_, expected_ty)) =
+                            info.fields.iter().find(|(n, _)| n == field_name)
+                        {
                             if !self.types_compatible(&field_ty, expected_ty) {
                                 self.error(TypeError::with_help(
                                     format!("type mismatch for field '{}'", field_name),
@@ -2243,14 +2315,20 @@ impl TypeChecker {
             }
 
             // Enum variant
-            Expr::EnumVariant { type_name, variant, args } => {
+            Expr::EnumVariant {
+                type_name,
+                variant,
+                args,
+            } => {
                 let variant_as_enum = variant.clone();
                 let enum_name = type_name.as_ref().unwrap_or(&variant_as_enum);
                 if let Some(info) = self.env.get_enum(enum_name).cloned() {
                     // Instantiate the generic enum with fresh inference vars
                     let (instantiated, subst) = self.instantiate_enum(&info);
 
-                    if let Some((_, variant_kind)) = instantiated.variants.iter().find(|(v, _)| v == variant) {
+                    if let Some((_, variant_kind)) =
+                        instantiated.variants.iter().find(|(v, _)| v == variant)
+                    {
                         self.check_variant_args(variant, variant_kind, args)?;
                     } else {
                         self.error(TypeError::new(format!(
@@ -2280,14 +2358,19 @@ impl TypeChecker {
                     // Could be a variant without a type name (e.g., Some(x))
                     // Search all enums for this variant
                     // Clone the enum info to avoid borrow conflicts with &mut self methods
-                    let found_enum: Option<(String, EnumInfo)> = self.env.enums.iter()
+                    let found_enum: Option<(String, EnumInfo)> = self
+                        .env
+                        .enums
+                        .iter()
                         .find(|(_, info)| info.variants.iter().any(|(v, _)| v == variant))
                         .map(|(name, info)| (name.clone(), info.clone()));
 
                     if let Some((name, info)) = found_enum {
                         // Found the enum - instantiate it
                         let (instantiated, subst) = self.instantiate_enum(&info);
-                        if let Some((_, variant_kind)) = instantiated.variants.iter().find(|(v, _)| v == variant) {
+                        if let Some((_, variant_kind)) =
+                            instantiated.variants.iter().find(|(v, _)| v == variant)
+                        {
                             self.check_variant_args(variant, variant_kind, args)?;
                         }
 
@@ -2343,9 +2426,11 @@ impl TypeChecker {
                             // Check that function return type is Result<_, E>
                             if let Some(ret_ty) = &self.current_return_type {
                                 match ret_ty {
-                                    Ty::Named { name: ret_name, args: ret_args, .. }
-                                        if ret_name == "Result" && ret_args.len() >= 2 =>
-                                    {
+                                    Ty::Named {
+                                        name: ret_name,
+                                        args: ret_args,
+                                        ..
+                                    } if ret_name == "Result" && ret_args.len() >= 2 => {
                                         // Check error types are compatible
                                         if !self.types_compatible(&args[1], &ret_args[1]) {
                                             self.warn(Warning::new(format!(
@@ -2509,10 +2594,18 @@ impl TypeChecker {
             }
 
             // External call
-            Expr::ExternCall { module, function, args } => {
+            Expr::ExternCall {
+                module,
+                function,
+                args,
+            } => {
                 // Look up extern function signature from .surreal binding files (by arity)
                 let arity = args.len();
-                if let Some(info) = self.env.get_extern_function(module, function, arity).cloned() {
+                if let Some(info) = self
+                    .env
+                    .get_extern_function(module, function, arity)
+                    .cloned()
+                {
                     // Instantiate generic function
                     let instantiated = self.instantiate_function(&info);
 
@@ -2565,7 +2658,9 @@ impl TypeChecker {
                 // Process each clause - bind generator patterns, check filter expressions
                 for clause in clauses {
                     match clause {
-                        ForClause::Generator { pattern, source, .. } => {
+                        ForClause::Generator {
+                            pattern, source, ..
+                        } => {
                             // Infer the source type
                             let source_ty = self.infer_expr(source)?;
 
@@ -2711,7 +2806,9 @@ impl TypeChecker {
         match func.inner() {
             Expr::Ident(name) => {
                 // First try local module's qualified name, then fall back to simple name
-                let local_qualified = self.current_module.as_ref()
+                let local_qualified = self
+                    .current_module
+                    .as_ref()
                     .map(|m| format!("{}::{}", m, name));
 
                 // Track which name resolved so we can show it in error messages
@@ -2771,7 +2868,8 @@ impl TypeChecker {
 
                     // Apply substitutions to return type
                     Ok(self.apply_substitutions(&instantiated.ret))
-                } else if let Some((module, func_name)) = self.env.get_extern_import(name).cloned() {
+                } else if let Some((module, func_name)) = self.env.get_extern_import(name).cloned()
+                {
                     // This is an imported function: `use logger::info; info(msg)` or `use jason::encode; encode(data)`
 
                     // For stdlib imports, look up as a Surreal function
@@ -2779,7 +2877,11 @@ impl TypeChecker {
                         let qualified_name = format!("{}::{}", module, func_name);
                         if let Some(info) = self.env.get_function(&qualified_name).cloned() {
                             let instantiated = if !type_args.is_empty() {
-                                self.instantiate_function_with_args(&info, type_args, &qualified_name)?
+                                self.instantiate_function_with_args(
+                                    &info,
+                                    type_args,
+                                    &qualified_name,
+                                )?
                             } else {
                                 self.instantiate_function(&info)
                             };
@@ -2795,7 +2897,8 @@ impl TypeChecker {
                             }
 
                             // Check argument types
-                            for (arg, (_, param_ty)) in args.iter().zip(instantiated.params.iter()) {
+                            for (arg, (_, param_ty)) in args.iter().zip(instantiated.params.iter())
+                            {
                                 let arg_ty = self.infer_expr(arg)?;
                                 if self.unify(&arg_ty, param_ty).is_err()
                                     && !self.types_compatible(&arg_ty, param_ty)
@@ -2814,7 +2917,11 @@ impl TypeChecker {
                     // For extern imports, look up as an extern function
                     let arity = args.len();
                     let extern_qualified_name = format!("{}::{}", module, func_name);
-                    if let Some(info) = self.env.get_extern_function(&module, &func_name, arity).cloned() {
+                    if let Some(info) = self
+                        .env
+                        .get_extern_function(&module, &func_name, arity)
+                        .cloned()
+                    {
                         let instantiated = self.instantiate_function(&info);
 
                         // Check argument types
@@ -2860,7 +2967,11 @@ impl TypeChecker {
                         let stdlib_qualified = format!("surreal::{}::{}", module, func_name);
                         if let Some(info) = self.env.get_function(&stdlib_qualified).cloned() {
                             let instantiated = if !type_args.is_empty() {
-                                self.instantiate_function_with_args(&info, type_args, &stdlib_qualified)?
+                                self.instantiate_function_with_args(
+                                    &info,
+                                    type_args,
+                                    &stdlib_qualified,
+                                )?
                             } else {
                                 self.instantiate_function(&info)
                             };
@@ -2876,7 +2987,8 @@ impl TypeChecker {
                             }
 
                             // Check argument types
-                            for (arg, (_, param_ty)) in args.iter().zip(instantiated.params.iter()) {
+                            for (arg, (_, param_ty)) in args.iter().zip(instantiated.params.iter())
+                            {
                                 let arg_ty = self.infer_expr(arg)?;
                                 if self.unify(&arg_ty, param_ty).is_err()
                                     && !self.types_compatible(&arg_ty, param_ty)
@@ -2896,18 +3008,26 @@ impl TypeChecker {
                     if self.env.is_extern_module(module) {
                         // Look up extern function signature
                         let arity = args.len();
-                        if let Some(info) = self.env.get_extern_function(module, func_name, arity).cloned() {
+                        if let Some(info) = self
+                            .env
+                            .get_extern_function(module, func_name, arity)
+                            .cloned()
+                        {
                             // Instantiate generic function
                             let instantiated = self.instantiate_function(&info);
 
                             // Check argument types
-                            for (arg, (_, param_ty)) in args.iter().zip(instantiated.params.iter()) {
+                            for (arg, (_, param_ty)) in args.iter().zip(instantiated.params.iter())
+                            {
                                 let arg_ty = self.infer_expr(arg)?;
                                 if self.unify(&arg_ty, param_ty).is_err()
                                     && !self.types_compatible(&arg_ty, param_ty)
                                 {
                                     self.error(TypeError::with_help(
-                                        format!("type mismatch in call to '{}::{}'", module, func_name),
+                                        format!(
+                                            "type mismatch in call to '{}::{}'",
+                                            module, func_name
+                                        ),
                                         format!("expected {}, found {}", param_ty, arg_ty),
                                     ));
                                 }
@@ -3010,10 +3130,7 @@ impl TypeChecker {
                         "type argument does not satisfy bound in call to '{}'",
                         func_name
                     ),
-                    format!(
-                        "type {} does not implement trait {}",
-                        ty, missing_trait
-                    ),
+                    format!("type {} does not implement trait {}", ty, missing_trait),
                 ));
             }
 
@@ -3034,7 +3151,12 @@ impl TypeChecker {
     }
 
     /// Infer type of a method call.
-    fn infer_method_call(&mut self, recv_ty: &Ty, method: &str, args: &[SpannedExpr]) -> TypeResult<Ty> {
+    fn infer_method_call(
+        &mut self,
+        recv_ty: &Ty,
+        method: &str,
+        args: &[SpannedExpr],
+    ) -> TypeResult<Ty> {
         if let Ty::Named { name, .. } = recv_ty {
             if let Some(info) = self.env.get_method(name, method).cloned() {
                 // Instantiate generic method with fresh inference variables
@@ -3045,7 +3167,9 @@ impl TypeChecker {
                 if args.len() != expected_args {
                     self.error(TypeError::new(format!(
                         "method '{}' expects {} arguments, got {}",
-                        method, expected_args, args.len()
+                        method,
+                        expected_args,
+                        args.len()
                     )));
                 }
 
@@ -3200,26 +3324,45 @@ impl TypeChecker {
 
             (Ty::Tuple(tys1), Ty::Tuple(tys2)) => {
                 tys1.len() == tys2.len()
-                    && tys1.iter().zip(tys2.iter()).all(|(t1, t2)| self.types_compatible(t1, t2))
+                    && tys1
+                        .iter()
+                        .zip(tys2.iter())
+                        .all(|(t1, t2)| self.types_compatible(t1, t2))
             }
 
             (Ty::List(t1), Ty::List(t2)) => self.types_compatible(t1, t2),
 
             (
-                Ty::Named { name: n1, args: a1, .. },
-                Ty::Named { name: n2, args: a2, .. },
+                Ty::Named {
+                    name: n1, args: a1, ..
+                },
+                Ty::Named {
+                    name: n2, args: a2, ..
+                },
             ) => {
                 n1 == n2
                     && a1.len() == a2.len()
-                    && a1.iter().zip(a2.iter()).all(|(t1, t2)| self.types_compatible(t1, t2))
+                    && a1
+                        .iter()
+                        .zip(a2.iter())
+                        .all(|(t1, t2)| self.types_compatible(t1, t2))
             }
 
             (
-                Ty::Fn { params: p1, ret: r1 },
-                Ty::Fn { params: p2, ret: r2 },
+                Ty::Fn {
+                    params: p1,
+                    ret: r1,
+                },
+                Ty::Fn {
+                    params: p2,
+                    ret: r2,
+                },
             ) => {
                 p1.len() == p2.len()
-                    && p1.iter().zip(p2.iter()).all(|(t1, t2)| self.types_compatible(t1, t2))
+                    && p1
+                        .iter()
+                        .zip(p2.iter())
+                        .all(|(t1, t2)| self.types_compatible(t1, t2))
                     && self.types_compatible(r1, r2)
             }
 
@@ -3252,7 +3395,11 @@ impl TypeChecker {
             },
 
             // Enum variants
-            Pattern::Enum { name, variant, fields } => {
+            Pattern::Enum {
+                name,
+                variant,
+                fields,
+            } => {
                 // If name is empty, infer it from the scrutinee type
                 let enum_name = if name.is_empty() {
                     match ty {
@@ -3387,7 +3534,9 @@ impl TypeChecker {
                     return match vkind {
                         VariantInfoKind::Unit => vec![],
                         VariantInfoKind::Tuple(tys) => tys.clone(),
-                        VariantInfoKind::Struct(fields) => fields.iter().map(|(_, ty)| ty.clone()).collect(),
+                        VariantInfoKind::Struct(fields) => {
+                            fields.iter().map(|(_, ty)| ty.clone()).collect()
+                        }
                     };
                 }
             }
@@ -3469,12 +3618,16 @@ impl TypeChecker {
             let all_ctors = self.all_constructors(&first.ty);
 
             // Check if type is non-exhaustive (open types like int)
-            if all_ctors.iter().any(|c| matches!(c, Constructor::NonExhaustive)) {
+            if all_ctors
+                .iter()
+                .any(|c| matches!(c, Constructor::NonExhaustive))
+            {
                 // For non-exhaustive types, wildcard is always useful if matrix doesn't
                 // have a wildcard covering all cases
-                let has_full_coverage = matrix.rows.iter().any(|row| {
-                    row.first().map(|p| p.is_wildcard()).unwrap_or(false)
-                });
+                let has_full_coverage = matrix
+                    .rows
+                    .iter()
+                    .any(|row| row.first().map(|p| p.is_wildcard()).unwrap_or(false));
                 return !has_full_coverage;
             }
 
@@ -3670,7 +3823,11 @@ impl TypeChecker {
         Module {
             attrs: module.attrs.clone(),
             name: module.name.clone(),
-            items: module.items.iter().map(|item| self.annotate_item(item)).collect(),
+            items: module
+                .items
+                .iter()
+                .map(|item| self.annotate_item(item))
+                .collect(),
             source: module.source.clone(),
             source_path: module.source_path.clone(),
         }
@@ -3702,7 +3859,11 @@ impl TypeChecker {
     fn annotate_impl_block(&mut self, impl_block: &ImplBlock) -> ImplBlock {
         ImplBlock {
             type_name: impl_block.type_name.clone(),
-            methods: impl_block.methods.iter().map(|m| self.annotate_function(m)).collect(),
+            methods: impl_block
+                .methods
+                .iter()
+                .map(|m| self.annotate_function(m))
+                .collect(),
             span: impl_block.span.clone(),
         }
     }
@@ -3717,22 +3878,37 @@ impl TypeChecker {
 
     fn annotate_stmt(&mut self, stmt: &Stmt) -> Stmt {
         match stmt {
-            Stmt::Let { pattern, ty, value, else_block, span } => Stmt::Let {
+            Stmt::Let {
+                pattern,
+                ty,
+                value,
+                else_block,
+                span,
+            } => Stmt::Let {
                 pattern: pattern.clone(),
                 ty: ty.clone(),
                 value: self.annotate_expr(value),
                 else_block: else_block.as_ref().map(|b| self.annotate_block(b)),
                 span: span.clone(),
             },
-            Stmt::Expr { expr: e, span } => Stmt::Expr { expr: self.annotate_expr(e), span: span.clone() },
+            Stmt::Expr { expr: e, span } => Stmt::Expr {
+                expr: self.annotate_expr(e),
+                span: span.clone(),
+            },
         }
     }
 
     fn annotate_expr(&mut self, expr: &SpannedExpr) -> SpannedExpr {
         let span = expr.span.clone();
         let inner = match expr.inner() {
-            Expr::Call { func, type_args, args, .. } => {
-                let annotated_args: Vec<SpannedExpr> = args.iter().map(|a| self.annotate_expr(a)).collect();
+            Expr::Call {
+                func,
+                type_args,
+                args,
+                ..
+            } => {
+                let annotated_args: Vec<SpannedExpr> =
+                    args.iter().map(|a| self.annotate_expr(a)).collect();
 
                 // Check if this is a call to an extern module: module::func(args)
                 if let Expr::Path { segments } = func.inner() {
@@ -3748,25 +3924,48 @@ impl TypeChecker {
 
                             // Transform to ExternCall with Result wrapping if needed
                             let arity = args.len();
-                            if let Some(info) = self.env.get_extern_function(module, func_name, arity).cloned() {
+                            if let Some(info) = self
+                                .env
+                                .get_extern_function(module, func_name, arity)
+                                .cloned()
+                            {
                                 // Check for Result<T, E> return type
-                                if let Ty::Named { name, args: type_args, .. } = &info.ret {
+                                if let Ty::Named {
+                                    name,
+                                    args: type_args,
+                                    ..
+                                } = &info.ret
+                                {
                                     if name == "Result" && type_args.len() == 2 {
                                         let is_unit_ok = matches!(&type_args[0], Ty::Unit);
-                                        return self.transform_extern_to_result(&resolved_module, func_name, annotated_args, is_unit_ok, span.clone());
+                                        return self.transform_extern_to_result(
+                                            &resolved_module,
+                                            func_name,
+                                            annotated_args,
+                                            is_unit_ok,
+                                            span.clone(),
+                                        );
                                     }
                                     if name == "Option" && type_args.len() == 1 {
-                                        return self.transform_extern_to_option(&resolved_module, func_name, annotated_args, span.clone());
+                                        return self.transform_extern_to_option(
+                                            &resolved_module,
+                                            func_name,
+                                            annotated_args,
+                                            span.clone(),
+                                        );
                                     }
                                 }
                             }
 
                             // Plain extern call without Result/Option transformation
-                            return SpannedExpr::new(Expr::ExternCall {
-                                module: resolved_module,
-                                function: func_name.clone(),
-                                args: annotated_args,
-                            }, span.clone());
+                            return SpannedExpr::new(
+                                Expr::ExternCall {
+                                    module: resolved_module,
+                                    function: func_name.clone(),
+                                    args: annotated_args,
+                                },
+                                span.clone(),
+                            );
                         }
                     }
                 }
@@ -3778,37 +3977,63 @@ impl TypeChecker {
                         // If this is a stdlib module import, transform to Path call
                         // so it gets the surreal:: prefix in codegen
                         if Self::is_stdlib_module(&module) {
-                            return SpannedExpr::new(Expr::Call {
-                                func: SpannedExpr::boxed(Expr::Path {
-                                    segments: vec![module, func_name],
-                                }),
-                                type_args: type_args.clone(),
-                                inferred_type_args: vec![],
-                                args: annotated_args,
-                            }, span.clone());
+                            return SpannedExpr::new(
+                                Expr::Call {
+                                    func: SpannedExpr::boxed(Expr::Path {
+                                        segments: vec![module, func_name],
+                                    }),
+                                    type_args: type_args.clone(),
+                                    inferred_type_args: vec![],
+                                    args: annotated_args,
+                                },
+                                span.clone(),
+                            );
                         }
 
                         // Transform to ExternCall with Result wrapping if needed
                         let arity = args.len();
-                        if let Some(info) = self.env.get_extern_function(&module, &func_name, arity).cloned() {
+                        if let Some(info) = self
+                            .env
+                            .get_extern_function(&module, &func_name, arity)
+                            .cloned()
+                        {
                             // Check for Result<T, E> return type
-                            if let Ty::Named { name: type_name, args: type_args, .. } = &info.ret {
+                            if let Ty::Named {
+                                name: type_name,
+                                args: type_args,
+                                ..
+                            } = &info.ret
+                            {
                                 if type_name == "Result" && type_args.len() == 2 {
                                     let is_unit_ok = matches!(&type_args[0], Ty::Unit);
-                                    return self.transform_extern_to_result(&module, &func_name, annotated_args, is_unit_ok, span.clone());
+                                    return self.transform_extern_to_result(
+                                        &module,
+                                        &func_name,
+                                        annotated_args,
+                                        is_unit_ok,
+                                        span.clone(),
+                                    );
                                 }
                                 if type_name == "Option" && type_args.len() == 1 {
-                                    return self.transform_extern_to_option(&module, &func_name, annotated_args, span.clone());
+                                    return self.transform_extern_to_option(
+                                        &module,
+                                        &func_name,
+                                        annotated_args,
+                                        span.clone(),
+                                    );
                                 }
                             }
                         }
 
                         // Plain extern call without Result/Option transformation
-                        return SpannedExpr::new(Expr::ExternCall {
-                            module,
-                            function: func_name,
-                            args: annotated_args,
-                        }, span.clone());
+                        return SpannedExpr::new(
+                            Expr::ExternCall {
+                                module,
+                                function: func_name,
+                                args: annotated_args,
+                            },
+                            span.clone(),
+                        );
                     }
                 }
 
@@ -3816,12 +4041,15 @@ impl TypeChecker {
 
                 // If explicit type_args provided, no need to infer
                 if !type_args.is_empty() {
-                    return SpannedExpr::new(Expr::Call {
-                        func: annotated_func,
-                        type_args: type_args.clone(),
-                        inferred_type_args: vec![],
-                        args: annotated_args,
-                    }, span.clone());
+                    return SpannedExpr::new(
+                        Expr::Call {
+                            func: annotated_func,
+                            type_args: type_args.clone(),
+                            inferred_type_args: vec![],
+                            args: annotated_args,
+                        },
+                        span.clone(),
+                    );
                 }
 
                 // Try to infer type args for generic functions
@@ -3835,9 +4063,17 @@ impl TypeChecker {
                 }
             }
 
-            Expr::MethodCall { receiver, method, type_args, args, resolved_module, .. } => {
+            Expr::MethodCall {
+                receiver,
+                method,
+                type_args,
+                args,
+                resolved_module,
+                ..
+            } => {
                 let annotated_receiver = Box::new(self.annotate_expr(receiver));
-                let annotated_args: Vec<SpannedExpr> = args.iter().map(|a| self.annotate_expr(a)).collect();
+                let annotated_args: Vec<SpannedExpr> =
+                    args.iter().map(|a| self.annotate_expr(a)).collect();
 
                 // If explicit type_args provided, no need to infer
                 let inferred = if type_args.is_empty() {
@@ -3869,7 +4105,11 @@ impl TypeChecker {
                 expr: Box::new(self.annotate_expr(expr)),
             },
 
-            Expr::If { cond, then_block, else_block } => Expr::If {
+            Expr::If {
+                cond,
+                then_block,
+                else_block,
+            } => Expr::If {
                 cond: Box::new(self.annotate_expr(cond)),
                 then_block: self.annotate_block(then_block),
                 else_block: else_block.as_ref().map(|b| self.annotate_block(b)),
@@ -3877,17 +4117,22 @@ impl TypeChecker {
 
             Expr::Match { expr, arms } => Expr::Match {
                 expr: Box::new(self.annotate_expr(expr)),
-                arms: arms.iter().map(|arm| MatchArm {
-                    pattern: arm.pattern.clone(),
-                    guard: arm.guard.as_ref().map(|g| Box::new(self.annotate_expr(g))),
-                    body: self.annotate_expr(&arm.body),
-                    span: arm.span.clone(),
-                }).collect(),
+                arms: arms
+                    .iter()
+                    .map(|arm| MatchArm {
+                        pattern: arm.pattern.clone(),
+                        guard: arm.guard.as_ref().map(|g| Box::new(self.annotate_expr(g))),
+                        body: self.annotate_expr(&arm.body),
+                        span: arm.span.clone(),
+                    })
+                    .collect(),
             },
 
             Expr::Block(block) => Expr::Block(self.annotate_block(block)),
 
-            Expr::Tuple(exprs) => Expr::Tuple(exprs.iter().map(|e| self.annotate_expr(e)).collect()),
+            Expr::Tuple(exprs) => {
+                Expr::Tuple(exprs.iter().map(|e| self.annotate_expr(e)).collect())
+            }
 
             Expr::List(exprs) => Expr::List(exprs.iter().map(|e| self.annotate_expr(e)).collect()),
 
@@ -3897,7 +4142,10 @@ impl TypeChecker {
             },
 
             Expr::MapLiteral(pairs) => Expr::MapLiteral(
-                pairs.iter().map(|(k, v)| (self.annotate_expr(k), self.annotate_expr(v))).collect()
+                pairs
+                    .iter()
+                    .map(|(k, v)| (self.annotate_expr(k), self.annotate_expr(v)))
+                    .collect(),
             ),
 
             Expr::FieldAccess { expr, field } => Expr::FieldAccess {
@@ -3907,23 +4155,31 @@ impl TypeChecker {
 
             Expr::StructInit { name, fields, base } => Expr::StructInit {
                 name: name.clone(),
-                fields: fields.iter().map(|(n, e)| (n.clone(), self.annotate_expr(e))).collect(),
+                fields: fields
+                    .iter()
+                    .map(|(n, e)| (n.clone(), self.annotate_expr(e)))
+                    .collect(),
                 base: base.as_ref().map(|b| Box::new(self.annotate_expr(b))),
             },
 
-            Expr::EnumVariant { type_name, variant, args } => Expr::EnumVariant {
+            Expr::EnumVariant {
+                type_name,
+                variant,
+                args,
+            } => Expr::EnumVariant {
                 type_name: type_name.clone(),
                 variant: variant.clone(),
                 args: match args {
                     EnumVariantArgs::Unit => EnumVariantArgs::Unit,
-                    EnumVariantArgs::Tuple(exprs) => {
-                        EnumVariantArgs::Tuple(exprs.iter().map(|a| self.annotate_expr(a)).collect())
-                    }
-                    EnumVariantArgs::Struct(fields) => {
-                        EnumVariantArgs::Struct(
-                            fields.iter().map(|(n, e)| (n.clone(), self.annotate_expr(e))).collect()
-                        )
-                    }
+                    EnumVariantArgs::Tuple(exprs) => EnumVariantArgs::Tuple(
+                        exprs.iter().map(|a| self.annotate_expr(a)).collect(),
+                    ),
+                    EnumVariantArgs::Struct(fields) => EnumVariantArgs::Struct(
+                        fields
+                            .iter()
+                            .map(|(n, e)| (n.clone(), self.annotate_expr(e)))
+                            .collect(),
+                    ),
                 },
             },
 
@@ -3941,13 +4197,18 @@ impl TypeChecker {
             },
 
             Expr::Receive { arms, timeout } => Expr::Receive {
-                arms: arms.iter().map(|arm| MatchArm {
-                    pattern: arm.pattern.clone(),
-                    guard: arm.guard.as_ref().map(|g| Box::new(self.annotate_expr(g))),
-                    body: self.annotate_expr(&arm.body),
-                    span: arm.span.clone(),
-                }).collect(),
-                timeout: timeout.as_ref().map(|(t, b)| (Box::new(self.annotate_expr(t)), self.annotate_block(b))),
+                arms: arms
+                    .iter()
+                    .map(|arm| MatchArm {
+                        pattern: arm.pattern.clone(),
+                        guard: arm.guard.as_ref().map(|g| Box::new(self.annotate_expr(g))),
+                        body: self.annotate_expr(&arm.body),
+                        span: arm.span.clone(),
+                    })
+                    .collect(),
+                timeout: timeout
+                    .as_ref()
+                    .map(|(t, b)| (Box::new(self.annotate_expr(t)), self.annotate_block(b))),
             },
 
             Expr::Pipe { left, right } => Expr::Pipe {
@@ -3959,23 +4220,48 @@ impl TypeChecker {
                 expr: Box::new(self.annotate_expr(expr)),
             },
 
-            Expr::ExternCall { module, function, args } => {
-                let annotated_args: Vec<SpannedExpr> = args.iter().map(|a| self.annotate_expr(a)).collect();
+            Expr::ExternCall {
+                module,
+                function,
+                args,
+            } => {
+                let annotated_args: Vec<SpannedExpr> =
+                    args.iter().map(|a| self.annotate_expr(a)).collect();
 
                 // Check if the extern function returns Result<T, E> or Option<T>
                 // If so, transform to a match expression that wraps the Erlang tuple
                 let arity = args.len();
-                if let Some(info) = self.env.get_extern_function(module, function, arity).cloned() {
+                if let Some(info) = self
+                    .env
+                    .get_extern_function(module, function, arity)
+                    .cloned()
+                {
                     // Check for Result<T, E> return type
-                    if let Ty::Named { name, args: type_args, .. } = &info.ret {
+                    if let Ty::Named {
+                        name,
+                        args: type_args,
+                        ..
+                    } = &info.ret
+                    {
                         if name == "Result" && type_args.len() == 2 {
                             // Check if Ok type is Unit - Erlang returns just 'ok' for Result<(), E>
                             let is_unit_ok = matches!(&type_args[0], Ty::Unit);
-                            return self.transform_extern_to_result(module, function, annotated_args, is_unit_ok, span.clone());
+                            return self.transform_extern_to_result(
+                                module,
+                                function,
+                                annotated_args,
+                                is_unit_ok,
+                                span.clone(),
+                            );
                         }
                         if name == "Option" && type_args.len() == 1 {
                             // Transform: :mod::func(args) => match :mod::func(args) { :undefined => None, v => Some(v) }
-                            return self.transform_extern_to_option(module, function, annotated_args, span.clone());
+                            return self.transform_extern_to_option(
+                                module,
+                                function,
+                                annotated_args,
+                                span.clone(),
+                            );
                         }
                     }
                 }
@@ -3989,28 +4275,38 @@ impl TypeChecker {
             }
 
             Expr::BitString(segments) => Expr::BitString(
-                segments.iter().map(|seg| ast::BitStringSegment {
-                    value: Box::new(self.annotate_expr(&seg.value)),
-                    size: seg.size.clone(), // size is Box<Expr>, not SpannedExpr - just clone it
-                    segment_type: seg.segment_type.clone(),
-                    endianness: seg.endianness.clone(),
-                    signedness: seg.signedness.clone(),
-                }).collect()
+                segments
+                    .iter()
+                    .map(|seg| ast::BitStringSegment {
+                        value: Box::new(self.annotate_expr(&seg.value)),
+                        size: seg.size.clone(), // size is Box<Expr>, not SpannedExpr - just clone it
+                        segment_type: seg.segment_type.clone(),
+                        endianness: seg.endianness.clone(),
+                        signedness: seg.signedness.clone(),
+                    })
+                    .collect(),
             ),
 
             Expr::Return(e) => Expr::Return(e.as_ref().map(|e| Box::new(self.annotate_expr(e)))),
 
             // Simple expressions that don't need annotation
-            Expr::Int(_) | Expr::String(_) | Expr::Charlist(_) | Expr::Atom(_)
-            | Expr::Bool(_) | Expr::Unit | Expr::Ident(_) | Expr::Path { .. } => expr.expr.clone(),
+            Expr::Int(_)
+            | Expr::String(_)
+            | Expr::Charlist(_)
+            | Expr::Atom(_)
+            | Expr::Bool(_)
+            | Expr::Unit
+            | Expr::Ident(_)
+            | Expr::Path { .. } => expr.expr.clone(),
 
             Expr::StringInterpolation(parts) => {
-                let annotated_parts = parts.iter().map(|part| {
-                    match part {
+                let annotated_parts = parts
+                    .iter()
+                    .map(|part| match part {
                         StringPart::Literal(s) => StringPart::Literal(s.clone()),
                         StringPart::Expr(e) => StringPart::Expr(Box::new(self.annotate_expr(e))),
-                    }
-                }).collect();
+                    })
+                    .collect();
                 Expr::StringInterpolation(annotated_parts)
             }
 
@@ -4070,20 +4366,36 @@ impl TypeChecker {
     ///
     /// For Result<(), E>, Erlang returns just 'ok' atom, which is also compatible
     /// with Surreal's `Ok(())` (both compile to just `'ok'`).
-    fn transform_extern_to_result(&mut self, module: &str, function: &str, args: Vec<SpannedExpr>, _is_unit_ok: bool, span: Span) -> SpannedExpr {
+    fn transform_extern_to_result(
+        &mut self,
+        module: &str,
+        function: &str,
+        args: Vec<SpannedExpr>,
+        _is_unit_ok: bool,
+        span: Span,
+    ) -> SpannedExpr {
         // Erlang's {ok, V} / {error, E} is already compatible with Surreal's Result type.
         // No transformation needed - just return the raw extern call.
-        SpannedExpr::new(Expr::ExternCall {
-            module: module.to_string(),
-            function: function.to_string(),
-            args,
-        }, span)
+        SpannedExpr::new(
+            Expr::ExternCall {
+                module: module.to_string(),
+                function: function.to_string(),
+                args,
+            },
+            span,
+        )
     }
 
     /// Transform an extern call with Option<T> return type into a match expression.
     /// Converts: :mod::func(args)
     /// Into: match :mod::func(args) { :undefined => None, v => Some(v) }
-    fn transform_extern_to_option(&mut self, module: &str, function: &str, args: Vec<SpannedExpr>, span: Span) -> SpannedExpr {
+    fn transform_extern_to_option(
+        &mut self,
+        module: &str,
+        function: &str,
+        args: Vec<SpannedExpr>,
+        span: Span,
+    ) -> SpannedExpr {
         // Create the raw extern call
         let extern_call = SpannedExpr::unspanned(Expr::ExternCall {
             module: module.to_string(),
@@ -4111,24 +4423,35 @@ impl TypeChecker {
             body: SpannedExpr::unspanned(Expr::EnumVariant {
                 type_name: Some("Option".to_string()),
                 variant: "Some".to_string(),
-                args: EnumVariantArgs::Tuple(vec![SpannedExpr::unspanned(Expr::Ident("__ffi_val".to_string()))]),
+                args: EnumVariantArgs::Tuple(vec![SpannedExpr::unspanned(Expr::Ident(
+                    "__ffi_val".to_string(),
+                ))]),
             }),
             span: 0..0,
         };
 
-        SpannedExpr::new(Expr::Match {
-            expr: Box::new(extern_call),
-            arms: vec![none_arm, some_arm],
-        }, span)
+        SpannedExpr::new(
+            Expr::Match {
+                expr: Box::new(extern_call),
+                arms: vec![none_arm, some_arm],
+            },
+            span,
+        )
     }
 
     /// Infer type arguments for a generic function call.
-    fn infer_type_args_for_call(&mut self, func: &SpannedExpr, args: &[SpannedExpr]) -> Vec<ast::Type> {
+    fn infer_type_args_for_call(
+        &mut self,
+        func: &SpannedExpr,
+        args: &[SpannedExpr],
+    ) -> Vec<ast::Type> {
         // Get function info - prefer local module's qualified name first
         let fn_info = match func.inner() {
             Expr::Ident(name) => {
                 // First try local module's qualified name, then fall back to simple name
-                let local_qualified = self.current_module.as_ref()
+                let local_qualified = self
+                    .current_module
+                    .as_ref()
                     .map(|m| format!("{}::{}", m, name));
 
                 local_qualified
@@ -4163,11 +4486,14 @@ impl TypeChecker {
         }
 
         // Substitute type params in function signature with inference vars
-        let subst: HashMap<String, Ty> = type_var_map.iter()
+        let subst: HashMap<String, Ty> = type_var_map
+            .iter()
             .map(|(name, id)| (name.clone(), Ty::Infer(*id)))
             .collect();
 
-        let instantiated_params: Vec<Ty> = fn_info.params.iter()
+        let instantiated_params: Vec<Ty> = fn_info
+            .params
+            .iter()
             .map(|(_, ty)| ty.substitute(&subst))
             .collect();
 
@@ -4179,7 +4505,9 @@ impl TypeChecker {
         }
 
         // Extract resolved types for each type param
-        fn_info.type_params.iter()
+        fn_info
+            .type_params
+            .iter()
             .map(|tp| {
                 if let Some(&var_id) = type_var_map.get(&tp.name) {
                     let resolved = self.apply_substitutions(&Ty::Infer(var_id));
@@ -4219,10 +4547,15 @@ impl TypeChecker {
         };
 
         // Look up method info - first try impl method, then resolved module
-        let method_info = self.env.get_method(&type_name, method).cloned()
+        let method_info = self
+            .env
+            .get_method(&type_name, method)
+            .cloned()
             .or_else(|| {
                 resolved_module.as_ref().and_then(|mod_name| {
-                    self.env.get_function(&format!("{}::{}", mod_name, method)).cloned()
+                    self.env
+                        .get_function(&format!("{}::{}", mod_name, method))
+                        .cloned()
                 })
             });
 
@@ -4246,12 +4579,15 @@ impl TypeChecker {
         }
 
         // Substitute type params in method signature with inference vars
-        let subst: HashMap<String, Ty> = type_var_map.iter()
+        let subst: HashMap<String, Ty> = type_var_map
+            .iter()
             .map(|(name, id)| (name.clone(), Ty::Infer(*id)))
             .collect();
 
         // Skip the first parameter (self) if it exists
-        let params_to_check: Vec<Ty> = method_info.params.iter()
+        let params_to_check: Vec<Ty> = method_info
+            .params
+            .iter()
             .skip(1) // Skip 'self' parameter
             .map(|(_, ty)| ty.substitute(&subst))
             .collect();
@@ -4264,7 +4600,9 @@ impl TypeChecker {
         }
 
         // Extract resolved types for each type param
-        method_info.type_params.iter()
+        method_info
+            .type_params
+            .iter()
             .map(|tp| {
                 if let Some(&var_id) = type_var_map.get(&tp.name) {
                     let resolved = self.apply_substitutions(&Ty::Infer(var_id));
@@ -4544,7 +4882,13 @@ impl MethodResolver {
 
     fn resolve_stmt(&mut self, stmt: &mut Stmt) {
         match stmt {
-            Stmt::Let { pattern, ty, value, else_block, .. } => {
+            Stmt::Let {
+                pattern,
+                ty,
+                value,
+                else_block,
+                ..
+            } => {
                 self.resolve_expr(value);
 
                 // Resolve else block if present
@@ -4650,21 +4994,19 @@ impl MethodResolver {
                     self.resolve_expr(e);
                 }
             }
-            Expr::EnumVariant { args, .. } => {
-                match args {
-                    EnumVariantArgs::Unit => {}
-                    EnumVariantArgs::Tuple(exprs) => {
-                        for arg in exprs {
-                            self.resolve_expr(arg);
-                        }
-                    }
-                    EnumVariantArgs::Struct(fields) => {
-                        for (_, expr) in fields {
-                            self.resolve_expr(expr);
-                        }
+            Expr::EnumVariant { args, .. } => match args {
+                EnumVariantArgs::Unit => {}
+                EnumVariantArgs::Tuple(exprs) => {
+                    for arg in exprs {
+                        self.resolve_expr(arg);
                     }
                 }
-            }
+                EnumVariantArgs::Struct(fields) => {
+                    for (_, expr) in fields {
+                        self.resolve_expr(expr);
+                    }
+                }
+            },
             Expr::FieldAccess { expr, .. } => {
                 self.resolve_expr(expr);
             }
@@ -4729,7 +5071,10 @@ impl MethodResolver {
             | Expr::Return(None) => {}
 
             // Quote/Unquote - resolve inner expressions
-            Expr::Quote(inner) | Expr::Unquote(inner) | Expr::UnquoteSplice(inner) | Expr::UnquoteAtom(inner) => {
+            Expr::Quote(inner)
+            | Expr::Unquote(inner)
+            | Expr::UnquoteSplice(inner)
+            | Expr::UnquoteAtom(inner) => {
                 self.resolve_expr(inner);
             }
 
@@ -4748,11 +5093,7 @@ impl MethodResolver {
             Expr::QuoteItem(_) => {}
 
             // For loop - resolve clauses and body
-            Expr::For {
-                clauses,
-                body,
-                ..
-            } => {
+            Expr::For { clauses, body, .. } => {
                 for clause in clauses {
                     match clause {
                         ForClause::Generator { source, .. } => {
@@ -4800,7 +5141,12 @@ impl MethodResolver {
                 }
                 Ty::Any
             }
-            Expr::MethodCall { receiver, method, resolved_module, .. } => {
+            Expr::MethodCall {
+                receiver,
+                method,
+                resolved_module,
+                ..
+            } => {
                 let recv_ty = self.infer_expr_type(receiver);
                 // If resolved to a stdlib module, infer return type
                 if let Some(module) = resolved_module {
@@ -4837,7 +5183,11 @@ impl MethodResolver {
                 // Infer return type from first arm's body
                 if let Some(arm) = arms.first() {
                     // Check if arm body is an EnumVariant (e.g., Ok(v) or Err(e))
-                    if let Expr::EnumVariant { type_name: Some(type_name), .. } = arm.body.inner() {
+                    if let Expr::EnumVariant {
+                        type_name: Some(type_name),
+                        ..
+                    } = arm.body.inner()
+                    {
                         // Return the enum type (e.g., Result, Option)
                         Ty::Named {
                             name: type_name.clone(),
@@ -4851,7 +5201,10 @@ impl MethodResolver {
                     Ty::Any
                 }
             }
-            Expr::EnumVariant { type_name: Some(type_name), .. } => {
+            Expr::EnumVariant {
+                type_name: Some(type_name),
+                ..
+            } => {
                 // Return the enum type (e.g., Result, Option)
                 Ty::Named {
                     name: type_name.clone(),
@@ -4859,7 +5212,11 @@ impl MethodResolver {
                     args: vec![Ty::Any, Ty::Any],
                 }
             }
-            Expr::EnumVariant { type_name: None, variant, .. } => {
+            Expr::EnumVariant {
+                type_name: None,
+                variant,
+                ..
+            } => {
                 // Infer type from well-known variant names
                 match variant.as_str() {
                     "Some" | "None" => Ty::Named {
@@ -4956,31 +5313,36 @@ mod tests {
 
     #[test]
     fn test_simple_function() {
-        let result = parse_and_check(r#"
+        let result = parse_and_check(
+            r#"
             mod test {
                 fn add(x: int, y: int) -> int {
                     x + y
                 }
             }
-        "#);
+        "#,
+        );
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_type_mismatch_return() {
-        let result = parse_and_check(r#"
+        let result = parse_and_check(
+            r#"
             mod test {
                 fn bad() -> int {
                     "hello"
                 }
             }
-        "#);
+        "#,
+        );
         assert!(result.is_err());
     }
 
     #[test]
     fn test_if_branch_types() {
-        let result = parse_and_check(r#"
+        let result = parse_and_check(
+            r#"
             mod test {
                 fn test(x: bool) -> int {
                     if x {
@@ -4990,13 +5352,15 @@ mod tests {
                     }
                 }
             }
-        "#);
+        "#,
+        );
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_if_condition_not_bool() {
-        let result = parse_and_check(r#"
+        let result = parse_and_check(
+            r#"
             mod test {
                 fn test(x: int) -> int {
                     if x {
@@ -5006,25 +5370,29 @@ mod tests {
                     }
                 }
             }
-        "#);
+        "#,
+        );
         assert!(result.is_err());
     }
 
     #[test]
     fn test_undefined_variable() {
-        let result = parse_and_check(r#"
+        let result = parse_and_check(
+            r#"
             mod test {
                 fn test() -> int {
                     x
                 }
             }
-        "#);
+        "#,
+        );
         assert!(result.is_err());
     }
 
     #[test]
     fn test_struct_field_access() {
-        let result = parse_and_check(r#"
+        let result = parse_and_check(
+            r#"
             mod test {
                 struct Point {
                     x: int,
@@ -5035,13 +5403,15 @@ mod tests {
                     p.x
                 }
             }
-        "#);
+        "#,
+        );
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_wrong_argument_count() {
-        let result = parse_and_check(r#"
+        let result = parse_and_check(
+            r#"
             mod test {
                 fn add(x: int, y: int) -> int {
                     x + y
@@ -5051,14 +5421,16 @@ mod tests {
                     add(1)
                 }
             }
-        "#);
+        "#,
+        );
         assert!(result.is_err());
     }
 
     #[test]
     fn test_extern_function_type_checking() {
         // Test that extern function stubs enable type checking of FFI calls
-        let result = parse_and_check(r#"
+        let result = parse_and_check(
+            r#"
             mod test {
                 extern mod erlang {
                     fn abs(x: int) -> int;
@@ -5069,7 +5441,8 @@ mod tests {
                     :erlang::abs(-5)
                 }
             }
-        "#);
+        "#,
+        );
         assert!(result.is_ok());
     }
 
@@ -5078,7 +5451,8 @@ mod tests {
         // With arity-based lookup, calling with wrong arity finds no stub
         // and returns Any (no type checking). This test verifies that
         // the correct arity IS found and type-checked.
-        let result = parse_and_check(r#"
+        let result = parse_and_check(
+            r#"
             mod test {
                 extern mod erlang {
                     fn abs(x: int) -> int;
@@ -5089,14 +5463,16 @@ mod tests {
                     :erlang::abs(1)
                 }
             }
-        "#);
+        "#,
+        );
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_extern_function_wrong_arg_type() {
         // Extern function with wrong argument type should error
-        let result = parse_and_check(r#"
+        let result = parse_and_check(
+            r#"
             mod test {
                 extern mod erlang {
                     fn abs(x: int) -> int;
@@ -5106,14 +5482,16 @@ mod tests {
                     :erlang::abs("hello")
                 }
             }
-        "#);
+        "#,
+        );
         assert!(result.is_err());
     }
 
     #[test]
     fn test_extern_function_return_type() {
         // Extern function return type should be used in type checking
-        let result = parse_and_check(r#"
+        let result = parse_and_check(
+            r#"
             mod test {
                 extern mod erlang {
                     fn abs(x: int) -> int;
@@ -5123,14 +5501,16 @@ mod tests {
                     :erlang::abs(-5)
                 }
             }
-        "#);
+        "#,
+        );
         assert!(result.is_err());
     }
 
     #[test]
     fn test_extern_maps_module() {
         // Test extern module for Erlang's maps module
-        let result = parse_and_check(r#"
+        let result = parse_and_check(
+            r#"
             mod test {
                 extern mod maps {
                     fn new() -> any;
@@ -5142,7 +5522,8 @@ mod tests {
                     :maps::get(:foo, m)
                 }
             }
-        "#);
+        "#,
+        );
         assert!(result.is_ok());
     }
 
@@ -5150,7 +5531,8 @@ mod tests {
     fn test_extern_function_result_return_type() {
         // Extern function with Result<T, E> return type should work
         // and the caller gets a Result type back
-        let result = parse_and_check(r#"
+        let result = parse_and_check(
+            r#"
             mod test {
                 extern mod file {
                     fn read_file(path: String) -> Result<Binary, Atom>;
@@ -5160,14 +5542,16 @@ mod tests {
                     :file::read_file("test.txt")
                 }
             }
-        "#);
+        "#,
+        );
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_extern_function_result_unwrap() {
         // Result from extern call can use Result methods
-        let result = parse_and_check(r#"
+        let result = parse_and_check(
+            r#"
             mod test {
                 extern mod file {
                     fn read_file(path: String) -> Result<Binary, Atom>;
@@ -5177,14 +5561,16 @@ mod tests {
                     :file::read_file("test.txt").unwrap()
                 }
             }
-        "#);
+        "#,
+        );
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_extern_function_option_return_type() {
         // Extern function with Option<T> return type should work
-        let result = parse_and_check(r#"
+        let result = parse_and_check(
+            r#"
             mod test {
                 extern mod erlang {
                     fn get(key: atom) -> Option<any>;
@@ -5194,7 +5580,8 @@ mod tests {
                     :erlang::get(:my_key)
                 }
             }
-        "#);
+        "#,
+        );
         assert!(result.is_ok());
     }
 
@@ -5202,43 +5589,50 @@ mod tests {
 
     #[test]
     fn test_atom_literal_return_type() {
-        let result = parse_and_check(r#"
+        let result = parse_and_check(
+            r#"
             mod test {
                 fn return_ok() -> :ok {
                     :ok
                 }
             }
-        "#);
+        "#,
+        );
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_atom_literal_wrong_return() {
-        let result = parse_and_check(r#"
+        let result = parse_and_check(
+            r#"
             mod test {
                 fn return_ok() -> :ok {
                     :error
                 }
             }
-        "#);
+        "#,
+        );
         assert!(result.is_err());
     }
 
     #[test]
     fn test_atom_literal_compatible_with_atom() {
-        let result = parse_and_check(r#"
+        let result = parse_and_check(
+            r#"
             mod test {
                 fn return_atom() -> atom {
                     :hello
                 }
             }
-        "#);
+        "#,
+        );
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_union_type_ok_or_error() {
-        let result = parse_and_check(r#"
+        let result = parse_and_check(
+            r#"
             mod test {
                 fn maybe_fail(succeed: bool) -> :ok | :error {
                     if succeed {
@@ -5248,13 +5642,15 @@ mod tests {
                     }
                 }
             }
-        "#);
+        "#,
+        );
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_union_type_int_or_string() {
-        let result = parse_and_check(r#"
+        let result = parse_and_check(
+            r#"
             mod test {
                 fn get_value(use_int: bool) -> int | string {
                     if use_int {
@@ -5264,52 +5660,60 @@ mod tests {
                     }
                 }
             }
-        "#);
+        "#,
+        );
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_union_type_value_matches_variant() {
         // :ok should be assignable to :ok | :error
-        let result = parse_and_check(r#"
+        let result = parse_and_check(
+            r#"
             mod test {
                 fn returns_union() -> :ok | :error {
                     :ok
                 }
             }
-        "#);
+        "#,
+        );
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_union_type_wrong_variant() {
         // :wrong should NOT be assignable to :ok | :error
-        let result = parse_and_check(r#"
+        let result = parse_and_check(
+            r#"
             mod test {
                 fn returns_union() -> :ok | :error {
                     :wrong
                 }
             }
-        "#);
+        "#,
+        );
         assert!(result.is_err());
     }
 
     #[test]
     fn test_if_creates_union_from_branches() {
         // If branches with different types should create a union
-        let result = parse_and_check(r#"
+        let result = parse_and_check(
+            r#"
             mod test {
                 fn infer_union(b: bool) -> int | string {
                     if b { 1 } else { "two" }
                 }
             }
-        "#);
+        "#,
+        );
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_union_with_three_variants() {
-        let result = parse_and_check(r#"
+        let result = parse_and_check(
+            r#"
             mod test {
                 fn three_way(x: int) -> :a | :b | :c {
                     if x == 1 {
@@ -5323,7 +5727,8 @@ mod tests {
                     }
                 }
             }
-        "#);
+        "#,
+        );
         assert!(result.is_ok());
     }
 
@@ -5331,7 +5736,8 @@ mod tests {
 
     #[test]
     fn test_simple_type_alias() {
-        let result = parse_and_check(r#"
+        let result = parse_and_check(
+            r#"
             mod test {
                 type UserId = int;
 
@@ -5339,13 +5745,15 @@ mod tests {
                     id
                 }
             }
-        "#);
+        "#,
+        );
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_type_alias_with_union() {
-        let result = parse_and_check(r#"
+        let result = parse_and_check(
+            r#"
             mod test {
                 type Status = :ok | :error;
 
@@ -5353,14 +5761,16 @@ mod tests {
                     if success { :ok } else { :error }
                 }
             }
-        "#);
+        "#,
+        );
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_type_alias_resolves_correctly() {
         // Using alias should be same as using the underlying type
-        let result = parse_and_check(r#"
+        let result = parse_and_check(
+            r#"
             mod test {
                 type Count = int;
 
@@ -5372,14 +5782,16 @@ mod tests {
                     add(1, 2)
                 }
             }
-        "#);
+        "#,
+        );
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_type_alias_wrong_type() {
         // Type alias should enforce the underlying type
-        let result = parse_and_check(r#"
+        let result = parse_and_check(
+            r#"
             mod test {
                 type UserId = int;
 
@@ -5387,13 +5799,15 @@ mod tests {
                     "not an int"
                 }
             }
-        "#);
+        "#,
+        );
         assert!(result.is_err());
     }
 
     #[test]
     fn test_pub_type_alias() {
-        let result = parse_and_check(r#"
+        let result = parse_and_check(
+            r#"
             mod test {
                 pub type Result = :ok | :error;
 
@@ -5401,13 +5815,15 @@ mod tests {
                     :ok
                 }
             }
-        "#);
+        "#,
+        );
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_type_alias_tuple() {
-        let result = parse_and_check(r#"
+        let result = parse_and_check(
+            r#"
             mod test {
                 type Point = (int, int);
 
@@ -5415,7 +5831,8 @@ mod tests {
                     (0, 0)
                 }
             }
-        "#);
+        "#,
+        );
         assert!(result.is_ok());
     }
 }

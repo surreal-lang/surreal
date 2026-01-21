@@ -5,8 +5,8 @@
 //! different types of identifiers (variables, functions, types, etc.).
 
 use tower_lsp::lsp_types::{
-    SemanticToken, SemanticTokenModifier, SemanticTokenType, SemanticTokens,
-    SemanticTokensLegend, SemanticTokensResult,
+    SemanticToken, SemanticTokenModifier, SemanticTokenType, SemanticTokens, SemanticTokensLegend,
+    SemanticTokensResult,
 };
 
 use crate::compiler::{
@@ -110,7 +110,13 @@ impl TokenCollector {
     }
 
     /// Add a token for an identifier at a calculated position.
-    fn add_token_for_name(&mut self, name: &str, start_offset: usize, token_type: u32, modifiers: u32) {
+    fn add_token_for_name(
+        &mut self,
+        name: &str,
+        start_offset: usize,
+        token_type: u32,
+        modifiers: u32,
+    ) {
         let span = start_offset..start_offset + name.len();
         self.add_token(&span, token_type, modifiers);
     }
@@ -118,9 +124,8 @@ impl TokenCollector {
     /// Convert collected tokens to delta-encoded SemanticTokens.
     fn into_semantic_tokens(mut self) -> SemanticTokens {
         // Sort by position (line, then column)
-        self.tokens.sort_by(|a, b| {
-            a.line.cmp(&b.line).then(a.col.cmp(&b.col))
-        });
+        self.tokens
+            .sort_by(|a, b| a.line.cmp(&b.line).then(a.col.cmp(&b.col)));
 
         // Delta encode
         let mut data = Vec::with_capacity(self.tokens.len() * 5);
@@ -172,7 +177,9 @@ pub fn handle_semantic_tokens_full(
         collect_item_tokens(&mut collector, item);
     }
 
-    Some(SemanticTokensResult::Tokens(collector.into_semantic_tokens()))
+    Some(SemanticTokensResult::Tokens(
+        collector.into_semantic_tokens(),
+    ))
 }
 
 fn collect_item_tokens(collector: &mut TokenCollector, item: &Item) {
@@ -193,7 +200,12 @@ fn collect_item_tokens(collector: &mut TokenCollector, item: &Item) {
                 // Field names in struct definition
                 // We don't have exact field spans, so we search in the struct span
                 if let Some(field_offset) = collector.find_name_in_span(field_name, &s.span) {
-                    collector.add_token_for_name(field_name, field_offset, TYPE_PROPERTY, MOD_DECLARATION);
+                    collector.add_token_for_name(
+                        field_name,
+                        field_offset,
+                        TYPE_PROPERTY,
+                        MOD_DECLARATION,
+                    );
                 }
                 // Field type
                 collect_type_tokens(collector, &field_type.ty, &field_type.span);
@@ -235,15 +247,23 @@ fn collect_item_tokens(collector: &mut TokenCollector, item: &Item) {
             for method in &t.methods {
                 if let Some(body) = &method.body {
                     // Method with default implementation
-                    if let Some(name_offset) = collector.find_name_in_span(&method.name, &body.span) {
-                        collector.add_token_for_name(&method.name, name_offset, TYPE_FUNCTION, MOD_DECLARATION);
+                    if let Some(name_offset) = collector.find_name_in_span(&method.name, &body.span)
+                    {
+                        collector.add_token_for_name(
+                            &method.name,
+                            name_offset,
+                            TYPE_FUNCTION,
+                            MOD_DECLARATION,
+                        );
                     }
                 }
             }
         }
         Item::Impl(impl_block) => {
             // Type name being implemented
-            if let Some(name_offset) = collector.find_name_in_span(&impl_block.type_name, &impl_block.span) {
+            if let Some(name_offset) =
+                collector.find_name_in_span(&impl_block.type_name, &impl_block.span)
+            {
                 collector.add_token_for_name(&impl_block.type_name, name_offset, TYPE_TYPE, 0);
             }
             // Methods
@@ -253,11 +273,20 @@ fn collect_item_tokens(collector: &mut TokenCollector, item: &Item) {
         }
         Item::TraitImpl(trait_impl) => {
             // Trait name
-            if let Some(name_offset) = collector.find_name_in_span(&trait_impl.trait_name, &trait_impl.span) {
-                collector.add_token_for_name(&trait_impl.trait_name, name_offset, TYPE_INTERFACE, 0);
+            if let Some(name_offset) =
+                collector.find_name_in_span(&trait_impl.trait_name, &trait_impl.span)
+            {
+                collector.add_token_for_name(
+                    &trait_impl.trait_name,
+                    name_offset,
+                    TYPE_INTERFACE,
+                    0,
+                );
             }
             // Type name
-            if let Some(name_offset) = collector.find_name_in_span(&trait_impl.type_name, &trait_impl.span) {
+            if let Some(name_offset) =
+                collector.find_name_in_span(&trait_impl.type_name, &trait_impl.span)
+            {
                 collector.add_token_for_name(&trait_impl.type_name, name_offset, TYPE_TYPE, 0);
             }
             // Methods
@@ -265,7 +294,11 @@ fn collect_item_tokens(collector: &mut TokenCollector, item: &Item) {
                 collect_function_tokens(collector, method, false);
             }
         }
-        Item::TypeAlias(_) | Item::ModDecl(_) | Item::Use(_) | Item::TraitDecl(_) | Item::ExternMod(_) => {
+        Item::TypeAlias(_)
+        | Item::ModDecl(_)
+        | Item::Use(_)
+        | Item::TraitDecl(_)
+        | Item::ExternMod(_) => {
             // These don't need special handling for now
         }
     }
@@ -274,7 +307,13 @@ fn collect_item_tokens(collector: &mut TokenCollector, item: &Item) {
 fn collect_function_tokens(collector: &mut TokenCollector, func: &Function, is_top_level: bool) {
     // Function name
     if let Some(name_offset) = collector.find_name_in_span(&func.name, &func.span) {
-        let modifiers = MOD_DECLARATION | MOD_DEFINITION | if is_top_level && func.is_pub { MOD_STATIC } else { 0 };
+        let modifiers = MOD_DECLARATION
+            | MOD_DEFINITION
+            | if is_top_level && func.is_pub {
+                MOD_STATIC
+            } else {
+                0
+            };
         collector.add_token_for_name(&func.name, name_offset, TYPE_FUNCTION, modifiers);
     }
 
@@ -292,7 +331,11 @@ fn collect_function_tokens(collector: &mut TokenCollector, func: &Function, is_t
     collect_block_tokens(collector, &func.body);
 }
 
-fn collect_param_tokens(collector: &mut TokenCollector, param: &crate::compiler::Param, func_span: &Span) {
+fn collect_param_tokens(
+    collector: &mut TokenCollector,
+    param: &crate::compiler::Param,
+    func_span: &Span,
+) {
     // Parameter name from pattern
     collect_pattern_tokens(collector, &param.pattern, func_span, true);
 
@@ -300,11 +343,20 @@ fn collect_param_tokens(collector: &mut TokenCollector, param: &crate::compiler:
     collect_type_tokens(collector, &param.ty.ty, &param.ty.span);
 }
 
-fn collect_pattern_tokens(collector: &mut TokenCollector, pattern: &Pattern, context_span: &Span, is_param: bool) {
+fn collect_pattern_tokens(
+    collector: &mut TokenCollector,
+    pattern: &Pattern,
+    context_span: &Span,
+    is_param: bool,
+) {
     match pattern {
         Pattern::Ident(name) => {
             if let Some(name_offset) = collector.find_name_in_span(name, context_span) {
-                let token_type = if is_param { TYPE_PARAMETER } else { TYPE_VARIABLE };
+                let token_type = if is_param {
+                    TYPE_PARAMETER
+                } else {
+                    TYPE_VARIABLE
+                };
                 collector.add_token_for_name(name, name_offset, token_type, MOD_DECLARATION);
             }
         }
@@ -330,7 +382,11 @@ fn collect_pattern_tokens(collector: &mut TokenCollector, pattern: &Pattern, con
                 collect_pattern_tokens(collector, field_pattern, context_span, is_param);
             }
         }
-        Pattern::Enum { name, variant, fields } => {
+        Pattern::Enum {
+            name,
+            variant,
+            fields,
+        } => {
             // Enum/Type name
             if let Some(name_offset) = collector.find_name_in_span(name, context_span) {
                 collector.add_token_for_name(name, name_offset, TYPE_ENUM, 0);
@@ -423,9 +479,18 @@ fn collect_type_tokens(collector: &mut TokenCollector, ty: &Type, span: &Span) {
             }
         }
         // Primitive types don't need extra highlighting - they're keywords
-        Type::Int | Type::String | Type::Atom | Type::Bool | Type::Float |
-        Type::Unit | Type::Pid | Type::Ref | Type::Binary | Type::Map | Type::Any |
-        Type::AtomLiteral(_) => {}
+        Type::Int
+        | Type::String
+        | Type::Atom
+        | Type::Bool
+        | Type::Float
+        | Type::Unit
+        | Type::Pid
+        | Type::Ref
+        | Type::Binary
+        | Type::Map
+        | Type::Any
+        | Type::AtomLiteral(_) => {}
     }
 }
 
@@ -441,7 +506,13 @@ fn collect_block_tokens(collector: &mut TokenCollector, block: &Block) {
 
 fn collect_stmt_tokens(collector: &mut TokenCollector, stmt: &Stmt) {
     match stmt {
-        Stmt::Let { pattern, ty, value, else_block, span } => {
+        Stmt::Let {
+            pattern,
+            ty,
+            value,
+            else_block,
+            span,
+        } => {
             // Pattern bindings (variables)
             collect_pattern_tokens(collector, pattern, span, false);
 
@@ -527,7 +598,12 @@ fn collect_expr_tokens(collector: &mut TokenCollector, expr: &SpannedExpr) {
             }
         }
 
-        Expr::MethodCall { receiver, method, args, .. } => {
+        Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } => {
             collect_expr_tokens(collector, receiver);
 
             // Method name comes after receiver and "."
@@ -556,7 +632,11 @@ fn collect_expr_tokens(collector: &mut TokenCollector, expr: &SpannedExpr) {
             collect_expr_tokens(collector, inner);
         }
 
-        Expr::If { cond, then_block, else_block } => {
+        Expr::If {
+            cond,
+            then_block,
+            else_block,
+        } => {
             collect_expr_tokens(collector, cond);
             collect_block_tokens(collector, then_block);
             if let Some(else_blk) = else_block {
@@ -600,7 +680,11 @@ fn collect_expr_tokens(collector: &mut TokenCollector, expr: &SpannedExpr) {
             }
         }
 
-        Expr::EnumVariant { type_name, variant, args } => {
+        Expr::EnumVariant {
+            type_name,
+            variant,
+            args,
+        } => {
             // Type name (if present)
             if let Some(tn) = type_name {
                 if let Some(offset) = collector.find_name_in_span(tn, &expr.span) {
@@ -694,7 +778,11 @@ fn collect_expr_tokens(collector: &mut TokenCollector, expr: &SpannedExpr) {
             collect_expr_tokens(collector, tail);
         }
 
-        Expr::ExternCall { module, function, args } => {
+        Expr::ExternCall {
+            module,
+            function,
+            args,
+        } => {
             // Module name
             if let Some(offset) = collector.find_name_in_span(module, &expr.span) {
                 collector.add_token_for_name(module, offset, TYPE_NAMESPACE, 0);
@@ -708,7 +796,10 @@ fn collect_expr_tokens(collector: &mut TokenCollector, expr: &SpannedExpr) {
             }
         }
 
-        Expr::Quote(inner) | Expr::Unquote(inner) | Expr::UnquoteSplice(inner) | Expr::UnquoteAtom(inner) => {
+        Expr::Quote(inner)
+        | Expr::Unquote(inner)
+        | Expr::UnquoteSplice(inner)
+        | Expr::UnquoteAtom(inner) => {
             collect_expr_tokens(collector, inner);
         }
 
@@ -717,8 +808,11 @@ fn collect_expr_tokens(collector: &mut TokenCollector, expr: &SpannedExpr) {
         }
 
         // These don't need additional handling
-        Expr::Unit | Expr::Return(None) | Expr::BitString(_) |
-        Expr::QuoteItem(_) | Expr::UnquoteFieldAccess { .. } => {}
+        Expr::Unit
+        | Expr::Return(None)
+        | Expr::BitString(_)
+        | Expr::QuoteItem(_)
+        | Expr::UnquoteFieldAccess { .. } => {}
     }
 }
 
@@ -737,7 +831,9 @@ fn collect_match_arm_tokens(collector: &mut TokenCollector, arm: &MatchArm) {
 
 fn collect_for_clause_tokens(collector: &mut TokenCollector, clause: &ForClause) {
     match clause {
-        ForClause::Generator { pattern, source, .. } => {
+        ForClause::Generator {
+            pattern, source, ..
+        } => {
             collect_expr_tokens(collector, source);
             collect_pattern_tokens(collector, pattern, &source.span, false);
         }
@@ -797,7 +893,10 @@ mod tests {
         };
 
         // Should have tokens for struct name and fields
-        assert!(!tokens.data.is_empty(), "Expected semantic tokens for struct");
+        assert!(
+            !tokens.data.is_empty(),
+            "Expected semantic tokens for struct"
+        );
     }
 
     #[test]

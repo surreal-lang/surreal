@@ -126,7 +126,10 @@ impl MacroRegistry {
         self.package_macros
             .entry(package.to_string())
             .or_default()
-            .insert(derive_name.to_string(), (module.to_string(), function.to_string()));
+            .insert(
+                derive_name.to_string(),
+                (module.to_string(), function.to_string()),
+            );
     }
 
     /// Check if a derive name is a built-in derive.
@@ -196,29 +199,44 @@ impl MacroRegistry {
         let expander = self.get_expander()?;
 
         // Call the macro on BEAM
-        let result = expander.expand_macro(&module, &function, &ast_term).map_err(|e| {
-            DeriveError::new(format!("macro expansion failed: {}", e.message), Span::default())
-        })?;
+        let result = expander
+            .expand_macro(&module, &function, &ast_term)
+            .map_err(|e| {
+                DeriveError::new(
+                    format!("macro expansion failed: {}", e.message),
+                    Span::default(),
+                )
+            })?;
 
         // Parse the result as Erlang term
         let term = ast_serde::parse_term(&result).map_err(|e| {
-            DeriveError::new(format!("failed to parse macro result: {}", e), Span::default())
+            DeriveError::new(
+                format!("failed to parse macro result: {}", e),
+                Span::default(),
+            )
         })?;
 
         // Convert to Item(s)
         // Macros can return a single item or a list of items
         match &term {
-            ast_serde::Term::List(items) => {
-                items.iter()
-                    .map(|t| ast_serde::term_to_item(t).map_err(|e| {
-                        DeriveError::new(format!("failed to convert macro result: {}", e), Span::default())
-                    }))
-                    .collect()
-            }
+            ast_serde::Term::List(items) => items
+                .iter()
+                .map(|t| {
+                    ast_serde::term_to_item(t).map_err(|e| {
+                        DeriveError::new(
+                            format!("failed to convert macro result: {}", e),
+                            Span::default(),
+                        )
+                    })
+                })
+                .collect(),
             _ => {
                 // Single item
                 let item = ast_serde::term_to_item(&term).map_err(|e| {
-                    DeriveError::new(format!("failed to convert macro result: {}", e), Span::default())
+                    DeriveError::new(
+                        format!("failed to convert macro result: {}", e),
+                        Span::default(),
+                    )
                 })?;
                 Ok(vec![item])
             }
@@ -245,27 +263,42 @@ impl MacroRegistry {
         let expander = self.get_expander()?;
 
         // Call the macro on BEAM
-        let result = expander.expand_macro(&module, &function, &ast_term).map_err(|e| {
-            DeriveError::new(format!("macro expansion failed: {}", e.message), Span::default())
-        })?;
+        let result = expander
+            .expand_macro(&module, &function, &ast_term)
+            .map_err(|e| {
+                DeriveError::new(
+                    format!("macro expansion failed: {}", e.message),
+                    Span::default(),
+                )
+            })?;
 
         // Parse the result as Erlang term
         let term = ast_serde::parse_term(&result).map_err(|e| {
-            DeriveError::new(format!("failed to parse macro result: {}", e), Span::default())
+            DeriveError::new(
+                format!("failed to parse macro result: {}", e),
+                Span::default(),
+            )
         })?;
 
         // Convert to Item(s)
         match &term {
-            ast_serde::Term::List(items) => {
-                items.iter()
-                    .map(|t| ast_serde::term_to_item(t).map_err(|e| {
-                        DeriveError::new(format!("failed to convert macro result: {}", e), Span::default())
-                    }))
-                    .collect()
-            }
+            ast_serde::Term::List(items) => items
+                .iter()
+                .map(|t| {
+                    ast_serde::term_to_item(t).map_err(|e| {
+                        DeriveError::new(
+                            format!("failed to convert macro result: {}", e),
+                            Span::default(),
+                        )
+                    })
+                })
+                .collect(),
             _ => {
                 let item = ast_serde::term_to_item(&term).map_err(|e| {
-                    DeriveError::new(format!("failed to convert macro result: {}", e), Span::default())
+                    DeriveError::new(
+                        format!("failed to convert macro result: {}", e),
+                        Span::default(),
+                    )
                 })?;
                 Ok(vec![item])
             }
@@ -294,27 +327,42 @@ impl MacroRegistry {
         let expander = self.get_expander()?;
 
         // Call the macro on BEAM
-        let result = expander.expand_macro(&module, &function, &ast_term).map_err(|e| {
-            DeriveError::new(format!("macro expansion failed: {}", e.message), Span::default())
-        })?;
+        let result = expander
+            .expand_macro(&module, &function, &ast_term)
+            .map_err(|e| {
+                DeriveError::new(
+                    format!("macro expansion failed: {}", e.message),
+                    Span::default(),
+                )
+            })?;
 
         // Parse the result as Erlang term
         let term = ast_serde::parse_term(&result).map_err(|e| {
-            DeriveError::new(format!("failed to parse macro result: {}", e), Span::default())
+            DeriveError::new(
+                format!("failed to parse macro result: {}", e),
+                Span::default(),
+            )
         })?;
 
         // Convert to Item(s)
         match &term {
-            ast_serde::Term::List(items) => {
-                items.iter()
-                    .map(|t| ast_serde::term_to_item(t).map_err(|e| {
-                        DeriveError::new(format!("failed to convert macro result: {}", e), Span::default())
-                    }))
-                    .collect()
-            }
+            ast_serde::Term::List(items) => items
+                .iter()
+                .map(|t| {
+                    ast_serde::term_to_item(t).map_err(|e| {
+                        DeriveError::new(
+                            format!("failed to convert macro result: {}", e),
+                            Span::default(),
+                        )
+                    })
+                })
+                .collect(),
             _ => {
                 let item = ast_serde::term_to_item(&term).map_err(|e| {
-                    DeriveError::new(format!("failed to convert macro result: {}", e), Span::default())
+                    DeriveError::new(
+                        format!("failed to convert macro result: {}", e),
+                        Span::default(),
+                    )
                 })?;
                 Ok(vec![item])
             }
@@ -343,27 +391,42 @@ impl MacroRegistry {
         let expander = self.get_expander()?;
 
         // Call the macro on BEAM
-        let result = expander.expand_macro(&module, &function, &ast_term).map_err(|e| {
-            DeriveError::new(format!("macro expansion failed: {}", e.message), Span::default())
-        })?;
+        let result = expander
+            .expand_macro(&module, &function, &ast_term)
+            .map_err(|e| {
+                DeriveError::new(
+                    format!("macro expansion failed: {}", e.message),
+                    Span::default(),
+                )
+            })?;
 
         // Parse the result as Erlang term
         let term = ast_serde::parse_term(&result).map_err(|e| {
-            DeriveError::new(format!("failed to parse macro result: {}", e), Span::default())
+            DeriveError::new(
+                format!("failed to parse macro result: {}", e),
+                Span::default(),
+            )
         })?;
 
         // Convert to Item(s)
         match &term {
-            ast_serde::Term::List(items) => {
-                items.iter()
-                    .map(|t| ast_serde::term_to_item(t).map_err(|e| {
-                        DeriveError::new(format!("failed to convert macro result: {}", e), Span::default())
-                    }))
-                    .collect()
-            }
+            ast_serde::Term::List(items) => items
+                .iter()
+                .map(|t| {
+                    ast_serde::term_to_item(t).map_err(|e| {
+                        DeriveError::new(
+                            format!("failed to convert macro result: {}", e),
+                            Span::default(),
+                        )
+                    })
+                })
+                .collect(),
             _ => {
                 let item = ast_serde::term_to_item(&term).map_err(|e| {
-                    DeriveError::new(format!("failed to convert macro result: {}", e), Span::default())
+                    DeriveError::new(
+                        format!("failed to convert macro result: {}", e),
+                        Span::default(),
+                    )
                 })?;
                 Ok(vec![item])
             }
@@ -415,7 +478,11 @@ fn register_imported_macros(module: &Module, registry: &mut MacroRegistry) {
 /// Process a use tree to find and register any imported macros.
 fn process_use_tree_for_macros(tree: &UseTree, registry: &mut MacroRegistry) {
     match tree {
-        UseTree::Path { module: mod_path, name, rename } => {
+        UseTree::Path {
+            module: mod_path,
+            name,
+            rename,
+        } => {
             // Check if this import refers to a macro from a known package
             // e.g., `use serde::Serialize;` -> package="serde", name="Serialize"
             if mod_path.prefix == PathPrefix::None && mod_path.segments.len() == 1 {
@@ -429,14 +496,19 @@ fn process_use_tree_for_macros(tree: &UseTree, registry: &mut MacroRegistry) {
                 }
             }
         }
-        UseTree::Group { module: mod_path, items } => {
+        UseTree::Group {
+            module: mod_path,
+            items,
+        } => {
             // e.g., `use serde::{Serialize, Deserialize};`
             if mod_path.prefix == PathPrefix::None && mod_path.segments.len() == 1 {
                 let package = &mod_path.segments[0];
                 // Collect all found macros first to avoid borrow issues
-                let found_macros: Vec<_> = items.iter()
+                let found_macros: Vec<_> = items
+                    .iter()
                     .filter_map(|item| {
-                        registry.get_qualified(&[package.clone()], &item.name)
+                        registry
+                            .get_qualified(&[package.clone()], &item.name)
                             .map(|(m, f)| {
                                 let local_name = item.rename.as_ref().unwrap_or(&item.name).clone();
                                 (local_name, m.to_string(), f.to_string())
@@ -465,18 +537,14 @@ pub fn expand_derives(module: &mut Module) -> Result<(), Vec<DeriveError>> {
 
     for item in &module.items {
         match item {
-            Item::Struct(struct_def) => {
-                match generate_struct_derives(struct_def, None) {
-                    Ok(impls) => new_items.extend(impls),
-                    Err(errs) => errors.extend(errs),
-                }
-            }
-            Item::Enum(enum_def) => {
-                match generate_enum_derives(enum_def, None) {
-                    Ok(impls) => new_items.extend(impls),
-                    Err(errs) => errors.extend(errs),
-                }
-            }
+            Item::Struct(struct_def) => match generate_struct_derives(struct_def, None) {
+                Ok(impls) => new_items.extend(impls),
+                Err(errs) => errors.extend(errs),
+            },
+            Item::Enum(enum_def) => match generate_enum_derives(enum_def, None) {
+                Ok(impls) => new_items.extend(impls),
+                Err(errs) => errors.extend(errs),
+            },
             _ => {}
         }
     }
@@ -507,18 +575,14 @@ pub fn expand_derives_with_registry(
 
     for item in &module.items {
         match item {
-            Item::Struct(struct_def) => {
-                match generate_struct_derives(struct_def, Some(registry)) {
-                    Ok(impls) => new_items.extend(impls),
-                    Err(errs) => errors.extend(errs),
-                }
-            }
-            Item::Enum(enum_def) => {
-                match generate_enum_derives(enum_def, Some(registry)) {
-                    Ok(impls) => new_items.extend(impls),
-                    Err(errs) => errors.extend(errs),
-                }
-            }
+            Item::Struct(struct_def) => match generate_struct_derives(struct_def, Some(registry)) {
+                Ok(impls) => new_items.extend(impls),
+                Err(errs) => errors.extend(errs),
+            },
+            Item::Enum(enum_def) => match generate_enum_derives(enum_def, Some(registry)) {
+                Ok(impls) => new_items.extend(impls),
+                Err(errs) => errors.extend(errs),
+            },
             _ => {}
         }
     }
@@ -769,10 +833,12 @@ fn generate_struct_debug(struct_def: &StructDef) -> Function {
     // Build args list: [self.x, self.y]
     let args: Vec<SpannedExpr> = fields
         .iter()
-        .map(|(field_name, _)| SpannedExpr::unspanned(Expr::FieldAccess {
-            expr: SpannedExpr::boxed(Expr::Ident("self".to_string())),
-            field: field_name.clone(),
-        }))
+        .map(|(field_name, _)| {
+            SpannedExpr::unspanned(Expr::FieldAccess {
+                expr: SpannedExpr::boxed(Expr::Ident("self".to_string())),
+                field: field_name.clone(),
+            })
+        })
         .collect();
 
     // :io_lib::format("Point { x: ~p, y: ~p }", [self.x, self.y])
@@ -814,7 +880,9 @@ fn generate_enum_debug(enum_def: &EnumDef) -> Function {
         function: "format".to_string(),
         args: vec![
             SpannedExpr::unspanned(Expr::Charlist(format!("{}::~p", name))),
-            SpannedExpr::unspanned(Expr::List(vec![SpannedExpr::unspanned(Expr::Ident("self".to_string()))])),
+            SpannedExpr::unspanned(Expr::List(vec![SpannedExpr::unspanned(Expr::Ident(
+                "self".to_string(),
+            ))])),
         ],
     };
 
@@ -923,7 +991,10 @@ fn generate_struct_default(struct_def: &StructDef) -> Function {
     let field_inits: Vec<(String, SpannedExpr)> = fields
         .iter()
         .map(|(field_name, field_type)| {
-            (field_name.clone(), SpannedExpr::unspanned(default_value_for_type(field_type)))
+            (
+                field_name.clone(),
+                SpannedExpr::unspanned(default_value_for_type(field_type)),
+            )
         })
         .collect();
 
@@ -977,13 +1048,11 @@ fn default_value_for_type(ty: &Type) -> Expr {
         Type::String => Expr::String(String::new()),
         Type::Bool => Expr::Bool(false),
         Type::List(_) => Expr::List(vec![]),
-        Type::Named { name, .. } if name == "Option" => {
-            Expr::EnumVariant {
-                type_name: Some("Option".to_string()),
-                variant: "None".to_string(),
-                args: EnumVariantArgs::Unit,
-            }
-        }
+        Type::Named { name, .. } if name == "Option" => Expr::EnumVariant {
+            type_name: Some("Option".to_string()),
+            variant: "None".to_string(),
+            args: EnumVariantArgs::Unit,
+        },
         // For other named types, try to call their default()
         Type::Named { name, .. } => Expr::Call {
             func: SpannedExpr::boxed(Expr::Path {
@@ -1021,18 +1090,16 @@ fn generate_struct_eq(struct_def: &StructDef) -> Function {
         // Build chain of field comparisons: self.x == other.x && self.y == other.y
         let comparisons: Vec<Expr> = fields
             .iter()
-            .map(|(field_name, _)| {
-                Expr::Binary {
-                    op: BinOp::Eq,
-                    left: SpannedExpr::boxed(Expr::FieldAccess {
-                        expr: SpannedExpr::boxed(Expr::Ident("self".to_string())),
-                        field: field_name.clone(),
-                    }),
-                    right: SpannedExpr::boxed(Expr::FieldAccess {
-                        expr: SpannedExpr::boxed(Expr::Ident("other".to_string())),
-                        field: field_name.clone(),
-                    }),
-                }
+            .map(|(field_name, _)| Expr::Binary {
+                op: BinOp::Eq,
+                left: SpannedExpr::boxed(Expr::FieldAccess {
+                    expr: SpannedExpr::boxed(Expr::Ident("self".to_string())),
+                    field: field_name.clone(),
+                }),
+                right: SpannedExpr::boxed(Expr::FieldAccess {
+                    expr: SpannedExpr::boxed(Expr::Ident("other".to_string())),
+                    field: field_name.clone(),
+                }),
             })
             .collect();
 
@@ -1105,12 +1172,7 @@ fn generate_hash() -> Function {
         args: vec![SpannedExpr::unspanned(Expr::Ident("self".to_string()))],
     };
 
-    make_method(
-        "hash",
-        vec![make_self_param()],
-        Some(Type::Int),
-        body_expr,
-    )
+    make_method("hash", vec![make_self_param()], Some(Type::Int), body_expr)
 }
 
 // =============================================================================

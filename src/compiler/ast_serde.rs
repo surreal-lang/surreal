@@ -37,8 +37,10 @@ fn escape_binary_string(s: &str) -> String {
 /// Escape a string for inclusion in an Erlang atom.
 fn escape_atom(s: &str) -> String {
     // Simple atoms don't need escaping
-    if s.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
-        && s.chars().next().map_or(false, |c| c.is_ascii_lowercase()) {
+    if s.chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+        && s.chars().next().map_or(false, |c| c.is_ascii_lowercase())
+    {
         s.to_string()
     } else {
         // Need to quote and escape
@@ -76,132 +78,162 @@ pub fn expr_to_erlang_term(expr: &Expr) -> String {
         Expr::Ident(name) => format!("{{ident, '{}'}}", escape_atom(name)),
 
         Expr::Path { segments } => {
-            let segs: Vec<String> = segments.iter()
+            let segs: Vec<String> = segments
+                .iter()
                 .map(|s| format!("'{}'", escape_atom(s)))
                 .collect();
             format!("{{path, [{}]}}", segs.join(", "))
         }
 
         Expr::Binary { op, left, right } => {
-            format!("{{binary_op, '{}', {}, {}}}",
+            format!(
+                "{{binary_op, '{}', {}, {}}}",
                 binop_to_atom(op),
                 expr_to_erlang_term(left),
-                expr_to_erlang_term(right))
+                expr_to_erlang_term(right)
+            )
         }
 
         Expr::Unary { op, expr } => {
-            format!("{{unary_op, '{}', {}}}",
+            format!(
+                "{{unary_op, '{}', {}}}",
                 unaryop_to_atom(op),
-                expr_to_erlang_term(expr))
+                expr_to_erlang_term(expr)
+            )
         }
 
         Expr::Call { func, args, .. } => {
-            let args_str: Vec<String> = args.iter()
-                .map(|a| expr_to_erlang_term(a))
-                .collect();
-            format!("{{call, {}, [{}]}}",
+            let args_str: Vec<String> = args.iter().map(|a| expr_to_erlang_term(a)).collect();
+            format!(
+                "{{call, {}, [{}]}}",
                 expr_to_erlang_term(func),
-                args_str.join(", "))
+                args_str.join(", ")
+            )
         }
 
-        Expr::MethodCall { receiver, method, args, .. } => {
-            let args_str: Vec<String> = args.iter()
-                .map(|a| expr_to_erlang_term(a))
-                .collect();
-            format!("{{method_call, {}, '{}', [{}]}}",
+        Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } => {
+            let args_str: Vec<String> = args.iter().map(|a| expr_to_erlang_term(a)).collect();
+            format!(
+                "{{method_call, {}, '{}', [{}]}}",
                 expr_to_erlang_term(receiver),
                 escape_atom(method),
-                args_str.join(", "))
+                args_str.join(", ")
+            )
         }
 
         Expr::FieldAccess { expr, field } => {
-            format!("{{field_access, {}, '{}'}}",
+            format!(
+                "{{field_access, {}, '{}'}}",
                 expr_to_erlang_term(expr),
-                escape_atom(field))
+                escape_atom(field)
+            )
         }
 
         Expr::Tuple(elems) => {
-            let elems_str: Vec<String> = elems.iter()
-                .map(|e| expr_to_erlang_term(e))
-                .collect();
+            let elems_str: Vec<String> = elems.iter().map(|e| expr_to_erlang_term(e)).collect();
             format!("{{tuple, [{}]}}", elems_str.join(", "))
         }
 
         Expr::List(elems) => {
-            let elems_str: Vec<String> = elems.iter()
-                .map(|e| expr_to_erlang_term(e))
-                .collect();
+            let elems_str: Vec<String> = elems.iter().map(|e| expr_to_erlang_term(e)).collect();
             format!("{{list, [{}]}}", elems_str.join(", "))
         }
 
         Expr::ListCons { head, tail } => {
-            format!("{{list_cons, {}, {}}}",
+            format!(
+                "{{list_cons, {}, {}}}",
                 expr_to_erlang_term(head),
-                expr_to_erlang_term(tail))
+                expr_to_erlang_term(tail)
+            )
         }
 
         Expr::MapLiteral(pairs) => {
-            let pairs_str: Vec<String> = pairs.iter()
+            let pairs_str: Vec<String> = pairs
+                .iter()
                 .map(|(k, v)| format!("{{{}, {}}}", expr_to_erlang_term(k), expr_to_erlang_term(v)))
                 .collect();
             format!("{{map_literal, [{}]}}", pairs_str.join(", "))
         }
 
         Expr::StructInit { name, fields, base } => {
-            let fields_str: Vec<String> = fields.iter()
+            let fields_str: Vec<String> = fields
+                .iter()
                 .map(|(n, e)| format!("{{'{}', {}}}", escape_atom(n), expr_to_erlang_term(e)))
                 .collect();
-            let base_str = base.as_ref()
+            let base_str = base
+                .as_ref()
                 .map(|b| format!(", {{base, {}}}", expr_to_erlang_term(b)))
                 .unwrap_or_default();
-            format!("{{struct_init, '{}', [{}]{}}}",
+            format!(
+                "{{struct_init, '{}', [{}]{}}}",
                 escape_atom(name),
                 fields_str.join(", "),
-                base_str)
+                base_str
+            )
         }
 
-        Expr::EnumVariant { type_name, variant, args } => {
-            let type_str = type_name.as_ref()
+        Expr::EnumVariant {
+            type_name,
+            variant,
+            args,
+        } => {
+            let type_str = type_name
+                .as_ref()
                 .map(|t| format!("'{}'", escape_atom(t)))
                 .unwrap_or_else(|| "none".to_string());
             let args_str = match args {
                 EnumVariantArgs::Unit => "unit".to_string(),
                 EnumVariantArgs::Tuple(exprs) => {
-                    let es: Vec<String> = exprs.iter()
-                        .map(|e| expr_to_erlang_term(e))
-                        .collect();
+                    let es: Vec<String> = exprs.iter().map(|e| expr_to_erlang_term(e)).collect();
                     format!("{{tuple, [{}]}}", es.join(", "))
                 }
                 EnumVariantArgs::Struct(fields) => {
-                    let fs: Vec<String> = fields.iter()
-                        .map(|(n, e)| format!("{{'{}', {}}}", escape_atom(n), expr_to_erlang_term(e)))
+                    let fs: Vec<String> = fields
+                        .iter()
+                        .map(|(n, e)| {
+                            format!("{{'{}', {}}}", escape_atom(n), expr_to_erlang_term(e))
+                        })
                         .collect();
                     format!("{{struct, [{}]}}", fs.join(", "))
                 }
             };
-            format!("{{enum_variant, {}, '{}', {}}}",
+            format!(
+                "{{enum_variant, {}, '{}', {}}}",
                 type_str,
                 escape_atom(variant),
-                args_str)
+                args_str
+            )
         }
 
-        Expr::If { cond, then_block, else_block } => {
-            let else_str = else_block.as_ref()
+        Expr::If {
+            cond,
+            then_block,
+            else_block,
+        } => {
+            let else_str = else_block
+                .as_ref()
                 .map(|b| format!(", {}", block_to_erlang_term(b)))
                 .unwrap_or_else(|| ", none".to_string());
-            format!("{{if, {}, {}{}}}",
+            format!(
+                "{{if, {}, {}{}}}",
                 expr_to_erlang_term(cond),
                 block_to_erlang_term(then_block),
-                else_str)
+                else_str
+            )
         }
 
         Expr::Match { expr, arms } => {
-            let arms_str: Vec<String> = arms.iter()
-                .map(|a| match_arm_to_erlang_term(a))
-                .collect();
-            format!("{{match, {}, [{}]}}",
+            let arms_str: Vec<String> = arms.iter().map(|a| match_arm_to_erlang_term(a)).collect();
+            format!(
+                "{{match, {}, [{}]}}",
                 expr_to_erlang_term(expr),
-                arms_str.join(", "))
+                arms_str.join(", ")
+            )
         }
 
         Expr::Block(block) => {
@@ -209,7 +241,8 @@ pub fn expr_to_erlang_term(expr: &Expr) -> String {
         }
 
         Expr::Return(e) => {
-            let inner = e.as_ref()
+            let inner = e
+                .as_ref()
                 .map(|e| expr_to_erlang_term(e))
                 .unwrap_or_else(|| "none".to_string());
             format!("{{return, {}}}", inner)
@@ -232,7 +265,11 @@ pub fn expr_to_erlang_term(expr: &Expr) -> String {
         }
 
         Expr::UnquoteFieldAccess { expr, field_expr } => {
-            format!("{{unquote_field_access, {}, {}}}", expr_to_erlang_term(expr), expr_to_erlang_term(field_expr))
+            format!(
+                "{{unquote_field_access, {}, {}}}",
+                expr_to_erlang_term(expr),
+                expr_to_erlang_term(field_expr)
+            )
         }
 
         Expr::QuoteItem(item) => {
@@ -245,39 +282,69 @@ pub fn expr_to_erlang_term(expr: &Expr) -> String {
                 Some(s) => format!("'{}'", s),
                 None => "none".to_string(),
             };
-            format!("{{quote_repetition, {}, {}}}", expr_to_erlang_term(pattern), sep_str)
+            format!(
+                "{{quote_repetition, {}, {}}}",
+                expr_to_erlang_term(pattern),
+                sep_str
+            )
         }
 
-        Expr::ExternCall { module, function, args } => {
-            let args_str: Vec<String> = args.iter()
-                .map(|a| expr_to_erlang_term(a))
-                .collect();
-            format!("{{extern_call, '{}', '{}', [{}]}}",
+        Expr::ExternCall {
+            module,
+            function,
+            args,
+        } => {
+            let args_str: Vec<String> = args.iter().map(|a| expr_to_erlang_term(a)).collect();
+            format!(
+                "{{extern_call, '{}', '{}', [{}]}}",
                 escape_atom(module),
                 escape_atom(function),
-                args_str.join(", "))
+                args_str.join(", ")
+            )
         }
 
         // Simplified handling for other expressions
         Expr::Spawn(e) => format!("{{spawn, {}}}", expr_to_erlang_term(e)),
         Expr::SpawnClosure(block) => format!("{{spawn_closure, {}}}", block_to_erlang_term(block)),
-        Expr::Send { to, msg } => format!("{{send, {}, {}}}", expr_to_erlang_term(to), expr_to_erlang_term(msg)),
-        Expr::Pipe { left, right } => format!("{{pipe, {}, {}}}", expr_to_erlang_term(left), expr_to_erlang_term(right)),
+        Expr::Send { to, msg } => format!(
+            "{{send, {}, {}}}",
+            expr_to_erlang_term(to),
+            expr_to_erlang_term(msg)
+        ),
+        Expr::Pipe { left, right } => format!(
+            "{{pipe, {}, {}}}",
+            expr_to_erlang_term(left),
+            expr_to_erlang_term(right)
+        ),
         Expr::Closure { params, body } => {
-            let params_str: Vec<String> = params.iter().map(|p| format!("'{}'", escape_atom(p))).collect();
-            format!("{{closure, [{}], {}}}", params_str.join(", "), block_to_erlang_term(body))
+            let params_str: Vec<String> = params
+                .iter()
+                .map(|p| format!("'{}'", escape_atom(p)))
+                .collect();
+            format!(
+                "{{closure, [{}], {}}}",
+                params_str.join(", "),
+                block_to_erlang_term(body)
+            )
         }
         Expr::Try { expr } => format!("{{try, {}}}", expr_to_erlang_term(expr)),
         Expr::Receive { arms, timeout } => {
             let arms_str: Vec<String> = arms.iter().map(|a| match_arm_to_erlang_term(a)).collect();
-            let timeout_str = timeout.as_ref()
-                .map(|(dur, block)| format!(", {{after, {}, {}}}", expr_to_erlang_term(dur), block_to_erlang_term(block)))
+            let timeout_str = timeout
+                .as_ref()
+                .map(|(dur, block)| {
+                    format!(
+                        ", {{after, {}, {}}}",
+                        expr_to_erlang_term(dur),
+                        block_to_erlang_term(block)
+                    )
+                })
                 .unwrap_or_default();
-            format!("{{receive, [{}]{}}}",  arms_str.join(", "), timeout_str)
+            format!("{{receive, [{}]{}}}", arms_str.join(", "), timeout_str)
         }
         Expr::BitString(_) => "{bitstring}".to_string(), // Simplified
         Expr::StringInterpolation(_) => "{string_interpolation}".to_string(), // Simplified
-        Expr::For { .. } => "{for}".to_string(), // Simplified
+        Expr::For { .. } => "{for}".to_string(),         // Simplified
     }
 }
 
@@ -310,10 +377,10 @@ fn unaryop_to_atom(op: &UnaryOp) -> &'static str {
 
 /// Convert a block to Erlang term format.
 pub fn block_to_erlang_term(block: &Block) -> String {
-    let stmts_str: Vec<String> = block.stmts.iter()
-        .map(|s| stmt_to_erlang_term(s))
-        .collect();
-    let expr_str = block.expr.as_ref()
+    let stmts_str: Vec<String> = block.stmts.iter().map(|s| stmt_to_erlang_term(s)).collect();
+    let expr_str = block
+        .expr
+        .as_ref()
         .map(|e| expr_to_erlang_term(e))
         .unwrap_or_else(|| "none".to_string());
     format!("{{[{}], {}}}", stmts_str.join(", "), expr_str)
@@ -322,18 +389,28 @@ pub fn block_to_erlang_term(block: &Block) -> String {
 /// Convert a statement to Erlang term format.
 pub fn stmt_to_erlang_term(stmt: &Stmt) -> String {
     match stmt {
-        Stmt::Let { pattern, ty, value, else_block, .. } => {
-            let ty_str = ty.as_ref()
+        Stmt::Let {
+            pattern,
+            ty,
+            value,
+            else_block,
+            ..
+        } => {
+            let ty_str = ty
+                .as_ref()
                 .map(|t| type_to_erlang_term(t))
                 .unwrap_or_else(|| "none".to_string());
-            let else_str = else_block.as_ref()
+            let else_str = else_block
+                .as_ref()
                 .map(|b| block_to_erlang_term(b))
                 .unwrap_or_else(|| "none".to_string());
-            format!("{{let, {}, {}, {}, {}}}",
+            format!(
+                "{{let, {}, {}, {}, {}}}",
                 pattern_to_erlang_term(pattern),
                 ty_str,
                 expr_to_erlang_term(value),
-                else_str)
+                else_str
+            )
         }
         Stmt::Expr { expr: e, .. } => {
             format!("{{expr, {}}}", expr_to_erlang_term(e))
@@ -343,13 +420,17 @@ pub fn stmt_to_erlang_term(stmt: &Stmt) -> String {
 
 /// Convert a match arm to Erlang term format.
 pub fn match_arm_to_erlang_term(arm: &MatchArm) -> String {
-    let guard_str = arm.guard.as_ref()
+    let guard_str = arm
+        .guard
+        .as_ref()
         .map(|g| expr_to_erlang_term(g))
         .unwrap_or_else(|| "none".to_string());
-    format!("{{{}, {}, {}}}",
+    format!(
+        "{{{}, {}, {}}}",
         pattern_to_erlang_term(&arm.pattern),
         guard_str,
-        expr_to_erlang_term(&arm.body))
+        expr_to_erlang_term(&arm.body)
+    )
 }
 
 /// Convert a pattern to Erlang term format.
@@ -363,49 +444,68 @@ pub fn pattern_to_erlang_term(pattern: &Pattern) -> String {
         Pattern::Atom(a) => format!("{{atom, '{}'}}", escape_atom(a)),
         Pattern::Bool(b) => format!("{{bool, {}}}", b),
         Pattern::Tuple(pats) => {
-            let pats_str: Vec<String> = pats.iter()
-                .map(|p| pattern_to_erlang_term(p))
-                .collect();
+            let pats_str: Vec<String> = pats.iter().map(|p| pattern_to_erlang_term(p)).collect();
             format!("{{tuple, [{}]}}", pats_str.join(", "))
         }
         Pattern::List(pats) => {
-            let pats_str: Vec<String> = pats.iter()
-                .map(|p| pattern_to_erlang_term(p))
-                .collect();
+            let pats_str: Vec<String> = pats.iter().map(|p| pattern_to_erlang_term(p)).collect();
             format!("{{list, [{}]}}", pats_str.join(", "))
         }
         Pattern::ListCons { head, tail } => {
-            format!("{{list_cons, {}, {}}}",
+            format!(
+                "{{list_cons, {}, {}}}",
                 pattern_to_erlang_term(head),
-                pattern_to_erlang_term(tail))
+                pattern_to_erlang_term(tail)
+            )
         }
         Pattern::Struct { name, fields } => {
-            let fields_str: Vec<String> = fields.iter()
+            let fields_str: Vec<String> = fields
+                .iter()
                 .map(|(n, p)| format!("{{'{}', {}}}", escape_atom(n), pattern_to_erlang_term(p)))
                 .collect();
-            format!("{{struct, '{}', [{}]}}", escape_atom(name), fields_str.join(", "))
+            format!(
+                "{{struct, '{}', [{}]}}",
+                escape_atom(name),
+                fields_str.join(", ")
+            )
         }
-        Pattern::Enum { name, variant, fields } => {
-            match fields {
-                EnumPatternFields::Unit => {
-                    format!("{{enum, '{}', '{}', unit}}", escape_atom(name), escape_atom(variant))
-                }
-                EnumPatternFields::Tuple(pats) => {
-                    let pats_str: Vec<String> = pats.iter()
-                        .map(|p| pattern_to_erlang_term(p))
-                        .collect();
-                    format!("{{enum, '{}', '{}', {{tuple, [{}]}}}}",
-                        escape_atom(name), escape_atom(variant), pats_str.join(", "))
-                }
-                EnumPatternFields::Struct(fields) => {
-                    let fields_str: Vec<String> = fields.iter()
-                        .map(|(n, p)| format!("{{'{}', {}}}", escape_atom(n), pattern_to_erlang_term(p)))
-                        .collect();
-                    format!("{{enum, '{}', '{}', {{struct, [{}]}}}}",
-                        escape_atom(name), escape_atom(variant), fields_str.join(", "))
-                }
+        Pattern::Enum {
+            name,
+            variant,
+            fields,
+        } => match fields {
+            EnumPatternFields::Unit => {
+                format!(
+                    "{{enum, '{}', '{}', unit}}",
+                    escape_atom(name),
+                    escape_atom(variant)
+                )
             }
-        }
+            EnumPatternFields::Tuple(pats) => {
+                let pats_str: Vec<String> =
+                    pats.iter().map(|p| pattern_to_erlang_term(p)).collect();
+                format!(
+                    "{{enum, '{}', '{}', {{tuple, [{}]}}}}",
+                    escape_atom(name),
+                    escape_atom(variant),
+                    pats_str.join(", ")
+                )
+            }
+            EnumPatternFields::Struct(fields) => {
+                let fields_str: Vec<String> = fields
+                    .iter()
+                    .map(|(n, p)| {
+                        format!("{{'{}', {}}}", escape_atom(n), pattern_to_erlang_term(p))
+                    })
+                    .collect();
+                format!(
+                    "{{enum, '{}', '{}', {{struct, [{}]}}}}",
+                    escape_atom(name),
+                    escape_atom(variant),
+                    fields_str.join(", ")
+                )
+            }
+        },
         Pattern::BitString(_) => "{bitstring}".to_string(), // Simplified
     }
 }
@@ -426,67 +526,84 @@ pub fn type_to_erlang_term(ty: &Type) -> String {
         Type::Map => "{type, map}".to_string(),
         Type::List(inner) => format!("{{list, {}}}", type_to_erlang_term(inner)),
         Type::Tuple(types) => {
-            let types_str: Vec<String> = types.iter()
-                .map(|t| type_to_erlang_term(t))
-                .collect();
+            let types_str: Vec<String> = types.iter().map(|t| type_to_erlang_term(t)).collect();
             format!("{{tuple, [{}]}}", types_str.join(", "))
         }
         Type::Named { name, type_args } => {
             if type_args.is_empty() {
                 format!("{{named, '{}'}}", escape_atom(name))
             } else {
-                let args_str: Vec<String> = type_args.iter()
-                    .map(|t| type_to_erlang_term(t))
-                    .collect();
-                format!("{{named, '{}', [{}]}}", escape_atom(name), args_str.join(", "))
+                let args_str: Vec<String> =
+                    type_args.iter().map(|t| type_to_erlang_term(t)).collect();
+                format!(
+                    "{{named, '{}', [{}]}}",
+                    escape_atom(name),
+                    args_str.join(", ")
+                )
             }
         }
         Type::TypeVar(name) => format!("{{type_var, '{}'}}", escape_atom(name)),
         Type::Fn { params, ret } => {
-            let params_str: Vec<String> = params.iter()
-                .map(|t| type_to_erlang_term(t))
-                .collect();
-            format!("{{fn, [{}], {}}}", params_str.join(", "), type_to_erlang_term(ret))
+            let params_str: Vec<String> = params.iter().map(|t| type_to_erlang_term(t)).collect();
+            format!(
+                "{{fn, [{}], {}}}",
+                params_str.join(", "),
+                type_to_erlang_term(ret)
+            )
         }
         Type::AtomLiteral(a) => format!("{{atom_literal, '{}'}}", escape_atom(a)),
         Type::Union(types) => {
-            let types_str: Vec<String> = types.iter()
-                .map(|t| type_to_erlang_term(t))
-                .collect();
+            let types_str: Vec<String> = types.iter().map(|t| type_to_erlang_term(t)).collect();
             format!("{{union, [{}]}}", types_str.join(", "))
         }
         Type::AssociatedType { base, name } => {
-            format!("{{assoc_type, '{}', '{}'}}", escape_atom(base), escape_atom(name))
+            format!(
+                "{{assoc_type, '{}', '{}'}}",
+                escape_atom(base),
+                escape_atom(name)
+            )
         }
     }
 }
 
 /// Convert a struct definition to Erlang term format.
 pub fn struct_def_to_erlang_term(s: &StructDef) -> String {
-    let fields_str: Vec<String> = s.fields.iter()
+    let fields_str: Vec<String> = s
+        .fields
+        .iter()
         .map(|(name, ty)| format!("{{'{}', {}}}", escape_atom(name), type_to_erlang_term(ty)))
         .collect();
-    let type_params_str: Vec<String> = s.type_params.iter()
+    let type_params_str: Vec<String> = s
+        .type_params
+        .iter()
         .map(|tp| format!("'{}'", escape_atom(&tp.name)))
         .collect();
-    format!("{{struct, '{}', [{}], [{}]}}",
+    format!(
+        "{{struct, '{}', [{}], [{}]}}",
         escape_atom(&s.name),
         fields_str.join(", "),
-        type_params_str.join(", "))
+        type_params_str.join(", ")
+    )
 }
 
 /// Convert an enum definition to Erlang term format.
 pub fn enum_def_to_erlang_term(e: &EnumDef) -> String {
-    let variants_str: Vec<String> = e.variants.iter()
+    let variants_str: Vec<String> = e
+        .variants
+        .iter()
         .map(|v| variant_def_to_erlang_term(v))
         .collect();
-    let type_params_str: Vec<String> = e.type_params.iter()
+    let type_params_str: Vec<String> = e
+        .type_params
+        .iter()
         .map(|tp| format!("'{}'", escape_atom(&tp.name)))
         .collect();
-    format!("{{enum, '{}', [{}], [{}]}}",
+    format!(
+        "{{enum, '{}', [{}], [{}]}}",
         escape_atom(&e.name),
         variants_str.join(", "),
-        type_params_str.join(", "))
+        type_params_str.join(", ")
+    )
 }
 
 /// Convert an enum variant definition to Erlang term format.
@@ -494,13 +611,12 @@ fn variant_def_to_erlang_term(v: &EnumVariant) -> String {
     let kind_str = match &v.kind {
         VariantKind::Unit => "unit".to_string(),
         VariantKind::Tuple(types) => {
-            let types_str: Vec<String> = types.iter()
-                .map(|t| type_to_erlang_term(t))
-                .collect();
+            let types_str: Vec<String> = types.iter().map(|t| type_to_erlang_term(t)).collect();
             format!("{{tuple, [{}]}}", types_str.join(", "))
         }
         VariantKind::Struct(fields) => {
-            let fields_str: Vec<String> = fields.iter()
+            let fields_str: Vec<String> = fields
+                .iter()
                 .map(|(n, t)| format!("{{'{}', {}}}", escape_atom(n), type_to_erlang_term(t)))
                 .collect();
             format!("{{struct, [{}]}}", fields_str.join(", "))
@@ -511,48 +627,64 @@ fn variant_def_to_erlang_term(v: &EnumVariant) -> String {
 
 /// Convert a function to Erlang term format.
 pub fn function_to_erlang_term(f: &Function) -> String {
-    let params_str: Vec<String> = f.params.iter()
-        .map(|p| param_to_erlang_term(p))
-        .collect();
-    let return_type_str = f.return_type.as_ref()
+    let params_str: Vec<String> = f.params.iter().map(|p| param_to_erlang_term(p)).collect();
+    let return_type_str = f
+        .return_type
+        .as_ref()
         .map(|t| type_to_erlang_term(t))
         .unwrap_or_else(|| "none".to_string());
-    let type_params_str: Vec<String> = f.type_params.iter()
+    let type_params_str: Vec<String> = f
+        .type_params
+        .iter()
         .map(|tp| format!("'{}'", escape_atom(&tp.name)))
         .collect();
-    format!("{{function, '{}', [{}], {}, {}, {}}}",
+    format!(
+        "{{function, '{}', [{}], {}, {}, {}}}",
         escape_atom(&f.name),
         type_params_str.join(", "),
         format!("[{}]", params_str.join(", ")),
         return_type_str,
-        block_to_erlang_term(&f.body))
+        block_to_erlang_term(&f.body)
+    )
 }
 
 /// Convert a function parameter to Erlang term format.
 fn param_to_erlang_term(p: &Param) -> String {
-    format!("{{{}, {}}}", pattern_to_erlang_term(&p.pattern), type_to_erlang_term(&p.ty))
+    format!(
+        "{{{}, {}}}",
+        pattern_to_erlang_term(&p.pattern),
+        type_to_erlang_term(&p.ty)
+    )
 }
 
 /// Convert an impl block to Erlang term format.
 pub fn impl_block_to_erlang_term(impl_block: &ImplBlock) -> String {
-    let methods_str: Vec<String> = impl_block.methods.iter()
+    let methods_str: Vec<String> = impl_block
+        .methods
+        .iter()
         .map(|m| function_to_erlang_term(m))
         .collect();
-    format!("{{impl, '{}', [{}]}}",
+    format!(
+        "{{impl, '{}', [{}]}}",
         escape_atom(&impl_block.type_name),
-        methods_str.join(", "))
+        methods_str.join(", ")
+    )
 }
 
 /// Convert a trait impl to Erlang term format.
 /// Format: {traitimpl, TraitName, TypeName, [Methods]}
 pub fn trait_impl_to_erlang_term(trait_impl: &TraitImpl) -> String {
-    let methods_str: Vec<String> = trait_impl.methods.iter()
+    let methods_str: Vec<String> = trait_impl
+        .methods
+        .iter()
         .map(|m| function_to_erlang_term(m))
         .collect();
-    format!("{{traitimpl, '{}', '{}', [{}]}}",
+    format!(
+        "{{traitimpl, '{}', '{}', [{}]}}",
         escape_atom(&trait_impl.trait_name),
         escape_atom(&trait_impl.type_name),
-        methods_str.join(", "))
+        methods_str.join(", ")
+    )
 }
 
 /// Convert an Item to Erlang term format.
@@ -585,25 +717,41 @@ pub fn item_to_erlang_term(item: &Item) -> String {
 /// }
 /// ```
 pub fn struct_to_derive_input(s: &StructDef) -> String {
-    let type_params_str: Vec<String> = s.type_params.iter()
+    let type_params_str: Vec<String> = s
+        .type_params
+        .iter()
         .map(|tp| {
-            let bounds: Vec<String> = tp.bounds.iter()
+            let bounds: Vec<String> = tp
+                .bounds
+                .iter()
                 .map(|b| format!("'{}'", escape_atom(b)))
                 .collect();
-            format!("{{type_param, '{}', [{}]}}", escape_atom(&tp.name), bounds.join(", "))
+            format!(
+                "{{type_param, '{}', [{}]}}",
+                escape_atom(&tp.name),
+                bounds.join(", ")
+            )
         })
         .collect();
 
-    let fields_str: Vec<String> = s.fields.iter()
+    let fields_str: Vec<String> = s
+        .fields
+        .iter()
         .map(|(name, ty)| {
-            format!("{{field, '{}', true, {}}}", escape_atom(name), type_to_erlang_term(ty))
+            format!(
+                "{{field, '{}', true, {}}}",
+                escape_atom(name),
+                type_to_erlang_term(ty)
+            )
         })
         .collect();
 
-    format!("{{derive_input, '{}', [{}], {{struct_data, named, [{}]}}}}",
+    format!(
+        "{{derive_input, '{}', [{}], {{struct_data, named, [{}]}}}}",
         escape_atom(&s.name),
         type_params_str.join(", "),
-        fields_str.join(", "))
+        fields_str.join(", ")
+    )
 }
 
 /// Convert an enum definition to DeriveInput format.
@@ -619,28 +767,44 @@ pub fn struct_to_derive_input(s: &StructDef) -> String {
 /// }
 /// ```
 pub fn enum_to_derive_input(e: &EnumDef) -> String {
-    let type_params_str: Vec<String> = e.type_params.iter()
+    let type_params_str: Vec<String> = e
+        .type_params
+        .iter()
         .map(|tp| {
-            let bounds: Vec<String> = tp.bounds.iter()
+            let bounds: Vec<String> = tp
+                .bounds
+                .iter()
                 .map(|b| format!("'{}'", escape_atom(b)))
                 .collect();
-            format!("{{type_param, '{}', [{}]}}", escape_atom(&tp.name), bounds.join(", "))
+            format!(
+                "{{type_param, '{}', [{}]}}",
+                escape_atom(&tp.name),
+                bounds.join(", ")
+            )
         })
         .collect();
 
-    let variants_str: Vec<String> = e.variants.iter()
+    let variants_str: Vec<String> = e
+        .variants
+        .iter()
         .map(|v| {
             let kind_str = match &v.kind {
                 VariantKind::Unit => "unit".to_string(),
                 VariantKind::Tuple(types) => {
-                    let types_str: Vec<String> = types.iter()
-                        .map(|t| type_to_erlang_term(t))
-                        .collect();
+                    let types_str: Vec<String> =
+                        types.iter().map(|t| type_to_erlang_term(t)).collect();
                     format!("{{tuple, [{}]}}", types_str.join(", "))
                 }
                 VariantKind::Struct(fields) => {
-                    let fields_str: Vec<String> = fields.iter()
-                        .map(|(n, t)| format!("{{field, '{}', true, {}}}", escape_atom(n), type_to_erlang_term(t)))
+                    let fields_str: Vec<String> = fields
+                        .iter()
+                        .map(|(n, t)| {
+                            format!(
+                                "{{field, '{}', true, {}}}",
+                                escape_atom(n),
+                                type_to_erlang_term(t)
+                            )
+                        })
                         .collect();
                     format!("{{struct, [{}]}}", fields_str.join(", "))
                 }
@@ -649,10 +813,12 @@ pub fn enum_to_derive_input(e: &EnumDef) -> String {
         })
         .collect();
 
-    format!("{{derive_input, '{}', [{}], {{enum_data, [{}]}}}}",
+    format!(
+        "{{derive_input, '{}', [{}], {{enum_data, [{}]}}}}",
         escape_atom(&e.name),
         type_params_str.join(", "),
-        variants_str.join(", "))
+        variants_str.join(", ")
+    )
 }
 
 /// Convert an Item to DeriveInput format (for derive macros).
@@ -709,7 +875,9 @@ pub fn struct_to_token_stream(s: &StructDef) -> String {
 
     // Type parameters
     if !s.type_params.is_empty() {
-        let params: Vec<String> = s.type_params.iter()
+        let params: Vec<String> = s
+            .type_params
+            .iter()
             .enumerate()
             .flat_map(|(i, tp)| {
                 let mut param_tokens = Vec::new();
@@ -733,7 +901,9 @@ pub fn struct_to_token_stream(s: &StructDef) -> String {
     }
 
     // Fields group
-    let fields: Vec<String> = s.fields.iter()
+    let fields: Vec<String> = s
+        .fields
+        .iter()
         .enumerate()
         .flat_map(|(i, (name, ty))| {
             let mut field_tokens = Vec::new();
@@ -767,7 +937,9 @@ pub fn enum_to_token_stream(e: &EnumDef) -> String {
 
     // Type parameters
     if !e.type_params.is_empty() {
-        let params: Vec<String> = e.type_params.iter()
+        let params: Vec<String> = e
+            .type_params
+            .iter()
             .enumerate()
             .flat_map(|(i, tp)| {
                 let mut param_tokens = Vec::new();
@@ -782,7 +954,9 @@ pub fn enum_to_token_stream(e: &EnumDef) -> String {
     }
 
     // Variants group
-    let variants: Vec<String> = e.variants.iter()
+    let variants: Vec<String> = e
+        .variants
+        .iter()
         .enumerate()
         .flat_map(|(i, v)| {
             let mut variant_tokens = Vec::new();
@@ -794,7 +968,8 @@ pub fn enum_to_token_stream(e: &EnumDef) -> String {
             match &v.kind {
                 VariantKind::Unit => {}
                 VariantKind::Tuple(types) => {
-                    let type_tokens: Vec<String> = types.iter()
+                    let type_tokens: Vec<String> = types
+                        .iter()
                         .enumerate()
                         .flat_map(|(j, ty)| {
                             let mut toks = Vec::new();
@@ -808,7 +983,8 @@ pub fn enum_to_token_stream(e: &EnumDef) -> String {
                     variant_tokens.push(format!("{{group, paren, [{}]}}", type_tokens.join(", ")));
                 }
                 VariantKind::Struct(fields) => {
-                    let field_tokens: Vec<String> = fields.iter()
+                    let field_tokens: Vec<String> = fields
+                        .iter()
                         .enumerate()
                         .flat_map(|(j, (name, ty))| {
                             let mut ftoks = Vec::new();
@@ -850,7 +1026,8 @@ fn type_to_tokens(ty: &Type) -> Vec<String> {
         Type::Named { name, type_args } => {
             let mut tokens = vec![format!("{{type_ident, '{}'}}", escape_atom(name))];
             if !type_args.is_empty() {
-                let args: Vec<String> = type_args.iter()
+                let args: Vec<String> = type_args
+                    .iter()
                     .enumerate()
                     .flat_map(|(i, t)| {
                         let mut arg_toks = Vec::new();
@@ -872,7 +1049,8 @@ fn type_to_tokens(ty: &Type) -> Vec<String> {
             tokens
         }
         Type::Tuple(types) => {
-            let inner: Vec<String> = types.iter()
+            let inner: Vec<String> = types
+                .iter()
                 .enumerate()
                 .flat_map(|(i, t)| {
                     let mut toks = Vec::new();
@@ -888,7 +1066,8 @@ fn type_to_tokens(ty: &Type) -> Vec<String> {
         Type::TypeVar(name) => vec![format!("{{type_ident, '{}'}}", escape_atom(name))],
         Type::Fn { params, ret } => {
             let mut tokens = vec!["{keyword, fn}".to_string()];
-            let param_tokens: Vec<String> = params.iter()
+            let param_tokens: Vec<String> = params
+                .iter()
                 .enumerate()
                 .flat_map(|(i, t)| {
                     let mut toks = Vec::new();
@@ -930,7 +1109,11 @@ impl TermParseError {
 
 impl std::fmt::Display for TermParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Parse error at position {}: {}", self.position, self.message)
+        write!(
+            f,
+            "Parse error at position {}: {}",
+            self.position, self.message
+        )
     }
 }
 
@@ -945,7 +1128,7 @@ pub enum Term {
     Atom(String),
     Int(i64),
     Float(f64),
-    String(String),      // Binary string: <<"...">>
+    String(String), // Binary string: <<"...">>
     Tuple(Vec<Term>),
     List(Vec<Term>),
 }
@@ -1017,10 +1200,12 @@ impl<'a> TermParser<'a> {
                     self.advance();
                     break;
                 }
-                Some(c) => return Err(TermParseError::new(
-                    format!("expected ',' or '}}', found '{}'", c),
-                    self.pos,
-                )),
+                Some(c) => {
+                    return Err(TermParseError::new(
+                        format!("expected ',' or '}}', found '{}'", c),
+                        self.pos,
+                    ));
+                }
                 None => return Err(TermParseError::new("unclosed tuple", self.pos)),
             }
         }
@@ -1051,10 +1236,12 @@ impl<'a> TermParser<'a> {
                     self.advance();
                     break;
                 }
-                Some(c) => return Err(TermParseError::new(
-                    format!("expected ',' or ']', found '{}'", c),
-                    self.pos,
-                )),
+                Some(c) => {
+                    return Err(TermParseError::new(
+                        format!("expected ',' or ']', found '{}'", c),
+                        self.pos,
+                    ));
+                }
                 None => return Err(TermParseError::new("unclosed list", self.pos)),
             }
         }
@@ -1075,12 +1262,29 @@ impl<'a> TermParser<'a> {
                 Some('\\') => {
                     self.advance();
                     match self.peek() {
-                        Some('\'') => { self.advance(); name.push('\''); }
-                        Some('\\') => { self.advance(); name.push('\\'); }
-                        Some('n') => { self.advance(); name.push('\n'); }
-                        Some('t') => { self.advance(); name.push('\t'); }
-                        Some(c) => { self.advance(); name.push(c); }
-                        None => return Err(TermParseError::new("unexpected end in escape", self.pos)),
+                        Some('\'') => {
+                            self.advance();
+                            name.push('\'');
+                        }
+                        Some('\\') => {
+                            self.advance();
+                            name.push('\\');
+                        }
+                        Some('n') => {
+                            self.advance();
+                            name.push('\n');
+                        }
+                        Some('t') => {
+                            self.advance();
+                            name.push('\t');
+                        }
+                        Some(c) => {
+                            self.advance();
+                            name.push(c);
+                        }
+                        None => {
+                            return Err(TermParseError::new("unexpected end in escape", self.pos));
+                        }
                     }
                 }
                 Some(c) => {
@@ -1128,13 +1332,36 @@ impl<'a> TermParser<'a> {
                     Some('\\') => {
                         self.advance();
                         match self.peek() {
-                            Some('"') => { self.advance(); content.push('"'); }
-                            Some('\\') => { self.advance(); content.push('\\'); }
-                            Some('n') => { self.advance(); content.push('\n'); }
-                            Some('r') => { self.advance(); content.push('\r'); }
-                            Some('t') => { self.advance(); content.push('\t'); }
-                            Some(c) => { self.advance(); content.push(c); }
-                            None => return Err(TermParseError::new("unexpected end in escape", self.pos)),
+                            Some('"') => {
+                                self.advance();
+                                content.push('"');
+                            }
+                            Some('\\') => {
+                                self.advance();
+                                content.push('\\');
+                            }
+                            Some('n') => {
+                                self.advance();
+                                content.push('\n');
+                            }
+                            Some('r') => {
+                                self.advance();
+                                content.push('\r');
+                            }
+                            Some('t') => {
+                                self.advance();
+                                content.push('\t');
+                            }
+                            Some(c) => {
+                                self.advance();
+                                content.push(c);
+                            }
+                            None => {
+                                return Err(TermParseError::new(
+                                    "unexpected end in escape",
+                                    self.pos,
+                                ));
+                            }
                         }
                     }
                     Some(c) => {
@@ -1176,10 +1403,14 @@ impl<'a> TermParser<'a> {
                 }
                 let num_str = &self.input[start..self.pos];
                 if num_str.is_empty() {
-                    return Err(TermParseError::new("expected byte value in binary", self.pos));
+                    return Err(TermParseError::new(
+                        "expected byte value in binary",
+                        self.pos,
+                    ));
                 }
-                let byte: u8 = num_str.parse()
-                    .map_err(|_| TermParseError::new(format!("invalid byte: {}", num_str), start))?;
+                let byte: u8 = num_str.parse().map_err(|_| {
+                    TermParseError::new(format!("invalid byte: {}", num_str), start)
+                })?;
                 bytes.push(byte);
 
                 self.skip_whitespace();
@@ -1213,13 +1444,33 @@ impl<'a> TermParser<'a> {
                 Some('\\') => {
                     self.advance();
                     match self.peek() {
-                        Some('"') => { self.advance(); content.push('"'); }
-                        Some('\\') => { self.advance(); content.push('\\'); }
-                        Some('n') => { self.advance(); content.push('\n'); }
-                        Some('r') => { self.advance(); content.push('\r'); }
-                        Some('t') => { self.advance(); content.push('\t'); }
-                        Some(c) => { self.advance(); content.push(c); }
-                        None => return Err(TermParseError::new("unexpected end in escape", self.pos)),
+                        Some('"') => {
+                            self.advance();
+                            content.push('"');
+                        }
+                        Some('\\') => {
+                            self.advance();
+                            content.push('\\');
+                        }
+                        Some('n') => {
+                            self.advance();
+                            content.push('\n');
+                        }
+                        Some('r') => {
+                            self.advance();
+                            content.push('\r');
+                        }
+                        Some('t') => {
+                            self.advance();
+                            content.push('\t');
+                        }
+                        Some(c) => {
+                            self.advance();
+                            content.push(c);
+                        }
+                        None => {
+                            return Err(TermParseError::new("unexpected end in escape", self.pos));
+                        }
                     }
                 }
                 Some(c) => {
@@ -1256,11 +1507,13 @@ impl<'a> TermParser<'a> {
         let num_str = &self.input[start..self.pos];
 
         if has_dot {
-            num_str.parse::<f64>()
+            num_str
+                .parse::<f64>()
                 .map(Term::Float)
                 .map_err(|_| TermParseError::new(format!("invalid float: {}", num_str), start))
         } else {
-            num_str.parse::<i64>()
+            num_str
+                .parse::<i64>()
                 .map(Term::Int)
                 .map_err(|_| TermParseError::new(format!("invalid integer: {}", num_str), start))
         }
@@ -1478,7 +1731,11 @@ pub fn term_to_expr(term: &Term) -> TermParseResult<Expr> {
                         .iter()
                         .map(|t| term_to_expr(t).map(SpannedExpr::unspanned))
                         .collect::<TermParseResult<Vec<_>>>()?;
-                    Ok(Expr::ExternCall { module, function, args })
+                    Ok(Expr::ExternCall {
+                        module,
+                        function,
+                        args,
+                    })
                 }
                 "quote" => {
                     let inner = term_to_expr(&elements[1])?;
@@ -1512,7 +1769,10 @@ pub fn term_to_expr(term: &Term) -> TermParseResult<Expr> {
                         right: SpannedExpr::boxed(right),
                     })
                 }
-                _ => Err(TermParseError::new(format!("unknown expression tag: {}", tag), 0)),
+                _ => Err(TermParseError::new(
+                    format!("unknown expression tag: {}", tag),
+                    0,
+                )),
             }
         }
         _ => Err(TermParseError::new("expected tuple for expression", 0)),
@@ -1537,7 +1797,11 @@ fn term_to_block(term: &Term) -> TermParseResult<Block> {
         Some(SpannedExpr::boxed(term_to_expr(&tuple[1])?))
     };
 
-    Ok(Block { stmts, expr, span: 0..0 })
+    Ok(Block {
+        stmts,
+        expr,
+        span: 0..0,
+    })
 }
 
 /// Convert an Erlang term to a Statement.
@@ -1559,13 +1823,22 @@ fn term_to_stmt(term: &Term) -> TermParseResult<Stmt> {
             } else {
                 None
             };
-            Ok(Stmt::Let { pattern, ty, value, else_block, span: 0..0 })
+            Ok(Stmt::Let {
+                pattern,
+                ty,
+                value,
+                else_block,
+                span: 0..0,
+            })
         }
         "expr" => {
             let expr = SpannedExpr::unspanned(term_to_expr(&tuple[1])?);
             Ok(Stmt::Expr { expr, span: None })
         }
-        _ => Err(TermParseError::new(format!("unknown statement tag: {}", tag), 0)),
+        _ => Err(TermParseError::new(
+            format!("unknown statement tag: {}", tag),
+            0,
+        )),
     }
 }
 
@@ -1594,7 +1867,10 @@ pub fn term_to_type(term: &Term) -> TermParseResult<Type> {
                         "binary" => Ok(Type::Binary),
                         "any" => Ok(Type::Any),
                         "map" => Ok(Type::Map),
-                        _ => Err(TermParseError::new(format!("unknown primitive type: {}", type_name), 0)),
+                        _ => Err(TermParseError::new(
+                            format!("unknown primitive type: {}", type_name),
+                            0,
+                        )),
                     }
                 }
                 "named" => {
@@ -1729,7 +2005,10 @@ pub fn term_to_pattern(term: &Term) -> TermParseResult<Pattern> {
                         .collect::<TermParseResult<Vec<_>>>()?;
                     Ok(Pattern::Struct { name, fields })
                 }
-                _ => Err(TermParseError::new(format!("unknown pattern tag: {}", tag), 0)),
+                _ => Err(TermParseError::new(
+                    format!("unknown pattern tag: {}", tag),
+                    0,
+                )),
             }
         }
         _ => Err(TermParseError::new("expected tuple for pattern", 0)),
@@ -1742,7 +2021,10 @@ pub fn term_to_impl_block(term: &Term) -> TermParseResult<ImplBlock> {
     let tag = expect_atom(&tuple[0])?;
 
     if tag != "impl" {
-        return Err(TermParseError::new(format!("expected 'impl' tag, found '{}'", tag), 0));
+        return Err(TermParseError::new(
+            format!("expected 'impl' tag, found '{}'", tag),
+            0,
+        ));
     }
 
     let type_name = expect_atom(&tuple[1])?;
@@ -1751,7 +2033,11 @@ pub fn term_to_impl_block(term: &Term) -> TermParseResult<ImplBlock> {
         .map(term_to_function)
         .collect::<TermParseResult<Vec<_>>>()?;
 
-    Ok(ImplBlock { type_name, methods, span: 0..0 })
+    Ok(ImplBlock {
+        type_name,
+        methods,
+        span: 0..0,
+    })
 }
 
 /// Convert an Erlang term to a TraitImpl.
@@ -1761,7 +2047,10 @@ pub fn term_to_trait_impl(term: &Term) -> TermParseResult<TraitImpl> {
     let tag = expect_atom(&tuple[0])?;
 
     if tag != "traitimpl" {
-        return Err(TermParseError::new(format!("expected 'traitimpl' tag, found '{}'", tag), 0));
+        return Err(TermParseError::new(
+            format!("expected 'traitimpl' tag, found '{}'", tag),
+            0,
+        ));
     }
 
     let trait_name = expect_atom(&tuple[1])?;
@@ -1787,7 +2076,10 @@ pub fn term_to_function(term: &Term) -> TermParseResult<Function> {
     let tag = expect_atom(&tuple[0])?;
 
     if tag != "function" {
-        return Err(TermParseError::new(format!("expected 'function' tag, found '{}'", tag), 0));
+        return Err(TermParseError::new(
+            format!("expected 'function' tag, found '{}'", tag),
+            0,
+        ));
     }
 
     let name = expect_atom(&tuple[1])?;
@@ -1833,7 +2125,10 @@ pub fn term_to_item(term: &Term) -> TermParseResult<Item> {
         "impl" => Ok(Item::Impl(term_to_impl_block(term)?)),
         "traitimpl" => Ok(Item::TraitImpl(term_to_trait_impl(term)?)),
         "function" => Ok(Item::Function(term_to_function(term)?)),
-        _ => Err(TermParseError::new(format!("unsupported item tag: {}", tag), 0)),
+        _ => Err(TermParseError::new(
+            format!("unsupported item tag: {}", tag),
+            0,
+        )),
     }
 }
 
@@ -2024,31 +2319,33 @@ mod tests {
     #[test]
     fn test_parse_tuple() {
         let term = parse_term("{int, 42}").unwrap();
-        assert_eq!(term, Term::Tuple(vec![
-            Term::Atom("int".to_string()),
-            Term::Int(42),
-        ]));
+        assert_eq!(
+            term,
+            Term::Tuple(vec![Term::Atom("int".to_string()), Term::Int(42),])
+        );
     }
 
     #[test]
     fn test_parse_list() {
         let term = parse_term("[1, 2, 3]").unwrap();
-        assert_eq!(term, Term::List(vec![
-            Term::Int(1),
-            Term::Int(2),
-            Term::Int(3),
-        ]));
+        assert_eq!(
+            term,
+            Term::List(vec![Term::Int(1), Term::Int(2), Term::Int(3),])
+        );
     }
 
     #[test]
     fn test_parse_nested() {
         let term = parse_term("{binary_op, '+', {int, 1}, {int, 2}}").unwrap();
-        assert_eq!(term, Term::Tuple(vec![
-            Term::Atom("binary_op".to_string()),
-            Term::Atom("+".to_string()),
-            Term::Tuple(vec![Term::Atom("int".to_string()), Term::Int(1)]),
-            Term::Tuple(vec![Term::Atom("int".to_string()), Term::Int(2)]),
-        ]));
+        assert_eq!(
+            term,
+            Term::Tuple(vec![
+                Term::Atom("binary_op".to_string()),
+                Term::Atom("+".to_string()),
+                Term::Tuple(vec![Term::Atom("int".to_string()), Term::Int(1)]),
+                Term::Tuple(vec![Term::Atom("int".to_string()), Term::Int(2)]),
+            ])
+        );
     }
 
     // =============================================================================
@@ -2080,11 +2377,14 @@ mod tests {
     fn test_term_to_expr_binary_op() {
         let term = parse_term("{binary_op, '+', {int, 1}, {int, 2}}").unwrap();
         let expr = term_to_expr(&term).unwrap();
-        assert_eq!(expr, Expr::Binary {
-            op: BinOp::Add,
-            left: SpannedExpr::boxed(Expr::Int(1)),
-            right: SpannedExpr::boxed(Expr::Int(2)),
-        });
+        assert_eq!(
+            expr,
+            Expr::Binary {
+                op: BinOp::Add,
+                left: SpannedExpr::boxed(Expr::Int(1)),
+                right: SpannedExpr::boxed(Expr::Int(2)),
+            }
+        );
     }
 
     #[test]
@@ -2098,7 +2398,13 @@ mod tests {
     fn test_term_to_type_named() {
         let term = parse_term("{named, 'Point'}").unwrap();
         let ty = term_to_type(&term).unwrap();
-        assert_eq!(ty, Type::Named { name: "Point".to_string(), type_args: vec![] });
+        assert_eq!(
+            ty,
+            Type::Named {
+                name: "Point".to_string(),
+                type_args: vec![]
+            }
+        );
     }
 
     // =============================================================================
@@ -2147,7 +2453,10 @@ mod tests {
 
     #[test]
     fn test_roundtrip_type_named() {
-        let original = Type::Named { name: "Point".to_string(), type_args: vec![] };
+        let original = Type::Named {
+            name: "Point".to_string(),
+            type_args: vec![],
+        };
         let term_str = type_to_erlang_term(&original);
         let term = parse_term(&term_str).unwrap();
         let result = term_to_type(&term).unwrap();
@@ -2187,12 +2496,14 @@ mod tests {
         let s = StructDef {
             is_pub: true,
             name: "Container".to_string(),
-            type_params: vec![
-                TypeParam { name: "T".to_string(), bounds: vec![] },
-            ],
-            fields: vec![
-                ("value".to_string(), SpannedType::unspanned(Type::TypeVar("T".to_string()))),
-            ],
+            type_params: vec![TypeParam {
+                name: "T".to_string(),
+                bounds: vec![],
+            }],
+            fields: vec![(
+                "value".to_string(),
+                SpannedType::unspanned(Type::TypeVar("T".to_string())),
+            )],
             attrs: vec![],
             span: 0..0,
         };
@@ -2208,12 +2519,21 @@ mod tests {
         let e = EnumDef {
             is_pub: true,
             name: "Option".to_string(),
-            type_params: vec![
-                TypeParam { name: "T".to_string(), bounds: vec![] },
-            ],
+            type_params: vec![TypeParam {
+                name: "T".to_string(),
+                bounds: vec![],
+            }],
             variants: vec![
-                EnumVariant { name: "Some".to_string(), kind: VariantKind::Tuple(vec![SpannedType::unspanned(Type::TypeVar("T".to_string()))]) },
-                EnumVariant { name: "None".to_string(), kind: VariantKind::Unit },
+                EnumVariant {
+                    name: "Some".to_string(),
+                    kind: VariantKind::Tuple(vec![SpannedType::unspanned(Type::TypeVar(
+                        "T".to_string(),
+                    ))]),
+                },
+                EnumVariant {
+                    name: "None".to_string(),
+                    kind: VariantKind::Unit,
+                },
             ],
             attrs: vec![],
             span: 0..0,

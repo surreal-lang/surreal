@@ -360,11 +360,7 @@ impl Scheduler {
                     } else {
                         // No handler - crash with exception
                         let exit_reason = Value::Tuple(vec![class, reason]);
-                        self.finish_process_with_reason(
-                            pid,
-                            ProcessStatus::Crashed,
-                            exit_reason,
-                        );
+                        self.finish_process_with_reason(pid, ProcessStatus::Crashed, exit_reason);
                         break;
                     }
                 }
@@ -637,17 +633,32 @@ impl Scheduler {
                 ExecResult::Continue(1)
             }
 
-            Instruction::Add { a, b, dest } => self.bigint_arith_op(pid, &a, &b, dest, |x, y| {
-                x.checked_add(y).map(Value::Int)
-            }, |x, y| x + y),
+            Instruction::Add { a, b, dest } => self.bigint_arith_op(
+                pid,
+                &a,
+                &b,
+                dest,
+                |x, y| x.checked_add(y).map(Value::Int),
+                |x, y| x + y,
+            ),
 
-            Instruction::Sub { a, b, dest } => self.bigint_arith_op(pid, &a, &b, dest, |x, y| {
-                x.checked_sub(y).map(Value::Int)
-            }, |x, y| x - y),
+            Instruction::Sub { a, b, dest } => self.bigint_arith_op(
+                pid,
+                &a,
+                &b,
+                dest,
+                |x, y| x.checked_sub(y).map(Value::Int),
+                |x, y| x - y,
+            ),
 
-            Instruction::Mul { a, b, dest } => self.bigint_arith_op(pid, &a, &b, dest, |x, y| {
-                x.checked_mul(y).map(Value::Int)
-            }, |x, y| x * y),
+            Instruction::Mul { a, b, dest } => self.bigint_arith_op(
+                pid,
+                &a,
+                &b,
+                dest,
+                |x, y| x.checked_mul(y).map(Value::Int),
+                |x, y| x * y,
+            ),
 
             Instruction::Div { a, b, dest } => {
                 let Some(process) = self.processes.get(&pid) else {
@@ -698,29 +709,17 @@ impl Scheduler {
             }
 
             // ========== Comparisons ==========
-            Instruction::Eq { a, b, dest } => {
-                self.bigint_cmp_op(pid, &a, &b, dest, |x, y| x == y)
-            }
+            Instruction::Eq { a, b, dest } => self.bigint_cmp_op(pid, &a, &b, dest, |x, y| x == y),
 
-            Instruction::Ne { a, b, dest } => {
-                self.bigint_cmp_op(pid, &a, &b, dest, |x, y| x != y)
-            }
+            Instruction::Ne { a, b, dest } => self.bigint_cmp_op(pid, &a, &b, dest, |x, y| x != y),
 
-            Instruction::Lt { a, b, dest } => {
-                self.bigint_cmp_op(pid, &a, &b, dest, |x, y| x < y)
-            }
+            Instruction::Lt { a, b, dest } => self.bigint_cmp_op(pid, &a, &b, dest, |x, y| x < y),
 
-            Instruction::Lte { a, b, dest } => {
-                self.bigint_cmp_op(pid, &a, &b, dest, |x, y| x <= y)
-            }
+            Instruction::Lte { a, b, dest } => self.bigint_cmp_op(pid, &a, &b, dest, |x, y| x <= y),
 
-            Instruction::Gt { a, b, dest } => {
-                self.bigint_cmp_op(pid, &a, &b, dest, |x, y| x > y)
-            }
+            Instruction::Gt { a, b, dest } => self.bigint_cmp_op(pid, &a, &b, dest, |x, y| x > y),
 
-            Instruction::Gte { a, b, dest } => {
-                self.bigint_cmp_op(pid, &a, &b, dest, |x, y| x >= y)
-            }
+            Instruction::Gte { a, b, dest } => self.bigint_cmp_op(pid, &a, &b, dest, |x, y| x >= y),
 
             // ========== Control Flow ==========
             Instruction::Jump { target } => ExecResult::Jump(target, 1),
@@ -743,7 +742,7 @@ impl Scheduler {
                 let val = self.resolve_operand(process, &cond);
                 match val {
                     Some(0) | None => ExecResult::Jump(target, 1), // Falsy, jump
-                    _ => ExecResult::Continue(1), // Truthy, continue
+                    _ => ExecResult::Continue(1),                  // Truthy, continue
                 }
             }
 
@@ -1250,10 +1249,8 @@ impl Scheduler {
                     return ExecResult::Crash;
                 }
                 // Drain elements - first pushed is at lower index, which becomes first tuple element
-                let elements: Vec<Value> = process
-                    .stack
-                    .drain(process.stack.len() - arity..)
-                    .collect();
+                let elements: Vec<Value> =
+                    process.stack.drain(process.stack.len() - arity..).collect();
                 process.registers[dest.0 as usize] = Value::Tuple(elements);
                 ExecResult::Continue(1)
             }
@@ -1587,7 +1584,11 @@ impl Scheduler {
                     return ExecResult::Crash;
                 };
                 let key_val = process.registers[key.0 as usize].clone();
-                let value = process.dictionary.get(&key_val).cloned().unwrap_or(Value::None);
+                let value = process
+                    .dictionary
+                    .get(&key_val)
+                    .cloned()
+                    .unwrap_or(Value::None);
                 process.registers[dest.0 as usize] = value;
                 ExecResult::Continue(1)
             }
@@ -1647,7 +1648,12 @@ impl Scheduler {
                 ExecResult::Continue(1)
             }
 
-            Instruction::MapGetDefault { map, key, default, dest } => {
+            Instruction::MapGetDefault {
+                map,
+                key,
+                default,
+                dest,
+            } => {
                 let Some(process) = self.processes.get_mut(&pid) else {
                     return ExecResult::Crash;
                 };
@@ -1663,7 +1669,12 @@ impl Scheduler {
                 ExecResult::Continue(1)
             }
 
-            Instruction::MapPut { map, key, value, dest } => {
+            Instruction::MapPut {
+                map,
+                key,
+                value,
+                dest,
+            } => {
                 let Some(process) = self.processes.get_mut(&pid) else {
                     return ExecResult::Crash;
                 };
@@ -1787,7 +1798,12 @@ impl Scheduler {
                 ExecResult::Continue(1)
             }
 
-            Instruction::BinarySlice { bin, start, len, dest } => {
+            Instruction::BinarySlice {
+                bin,
+                start,
+                len,
+                dest,
+            } => {
                 let Some(process) = self.processes.get_mut(&pid) else {
                     return ExecResult::Crash;
                 };
@@ -2062,7 +2078,10 @@ impl Scheduler {
                     crate::BitType::Utf8 => {
                         // Try to decode a UTF-8 codepoint
                         let slice = &bytes[byte_pos..];
-                        if let Some(c) = std::str::from_utf8(slice).ok().and_then(|s| s.chars().next()) {
+                        if let Some(c) = std::str::from_utf8(slice)
+                            .ok()
+                            .and_then(|s| s.chars().next())
+                        {
                             let char_len = c.len_utf8();
                             if char_len <= slice.len() {
                                 // Update size_bits to reflect actual UTF-8 character length
@@ -2204,7 +2223,8 @@ impl Scheduler {
                 match segment.endianness {
                     crate::Endianness::Big => {
                         for i in 0..size_bytes {
-                            new_bytes[byte_pos + i] = ((val >> ((size_bytes - 1 - i) * 8)) & 0xFF) as u8;
+                            new_bytes[byte_pos + i] =
+                                ((val >> ((size_bytes - 1 - i) * 8)) & 0xFF) as u8;
                         }
                     }
                     crate::Endianness::Little => {
@@ -2370,7 +2390,12 @@ impl Scheduler {
             }
 
             // ========== Timers ==========
-            Instruction::SendAfter { delay, to, msg, dest } => {
+            Instruction::SendAfter {
+                delay,
+                to,
+                msg,
+                dest,
+            } => {
                 let Some(process) = self.processes.get(&pid) else {
                     return ExecResult::Crash;
                 };
@@ -2442,13 +2467,14 @@ impl Scheduler {
                 };
 
                 // Find and remove the timer
-                let result = if let Some(idx) = self.timers.iter().position(|t| t.timer_ref == ref_id) {
-                    let timer = self.timers.remove(idx);
-                    Value::Int(timer.remaining as i64)
-                } else {
-                    // Timer already fired or doesn't exist
-                    Value::Atom("ok".to_string())
-                };
+                let result =
+                    if let Some(idx) = self.timers.iter().position(|t| t.timer_ref == ref_id) {
+                        let timer = self.timers.remove(idx);
+                        Value::Int(timer.remaining as i64)
+                    } else {
+                        // Timer already fired or doesn't exist
+                        Value::Atom("ok".to_string())
+                    };
 
                 let Some(process) = self.processes.get_mut(&pid) else {
                     return ExecResult::Crash;
@@ -2514,8 +2540,7 @@ impl Scheduler {
                         Ok(_) => {
                             // Trim trailing newline
                             let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
-                            process.registers[dest.0 as usize] =
-                                Value::String(trimmed.to_string());
+                            process.registers[dest.0 as usize] = Value::String(trimmed.to_string());
                         }
                         Err(_) => {
                             process.registers[dest.0 as usize] = Value::Atom("eof".to_string());
@@ -2535,10 +2560,8 @@ impl Scheduler {
                 };
                 match std::fs::read(&path_str) {
                     Ok(bytes) => {
-                        process.registers[dest.0 as usize] = Value::Tuple(vec![
-                            Value::Atom("ok".to_string()),
-                            Value::Binary(bytes),
-                        ]);
+                        process.registers[dest.0 as usize] =
+                            Value::Tuple(vec![Value::Atom("ok".to_string()), Value::Binary(bytes)]);
                     }
                     Err(e) => {
                         process.registers[dest.0 as usize] = Value::Tuple(vec![
@@ -2550,7 +2573,11 @@ impl Scheduler {
                 ExecResult::Continue(1)
             }
 
-            Instruction::FileWrite { path, content, dest } => {
+            Instruction::FileWrite {
+                path,
+                content,
+                dest,
+            } => {
                 let Some(process) = self.processes.get_mut(&pid) else {
                     return ExecResult::Crash;
                 };
@@ -2622,11 +2649,7 @@ impl Scheduler {
             }
 
             Instruction::ProcessList { dest } => {
-                let pids: Vec<Value> = self
-                    .processes
-                    .keys()
-                    .map(|p| Value::Pid(*p))
-                    .collect();
+                let pids: Vec<Value> = self.processes.keys().map(|p| Value::Pid(*p)).collect();
                 let Some(process) = self.processes.get_mut(&pid) else {
                     return ExecResult::Crash;
                 };
@@ -2643,7 +2666,10 @@ impl Scheduler {
                 ExecResult::Continue(1)
             }
 
-            Instruction::IsAlive { pid: target_pid, dest } => {
+            Instruction::IsAlive {
+                pid: target_pid,
+                dest,
+            } => {
                 let Some(process) = self.processes.get(&pid) else {
                     return ExecResult::Crash;
                 };
@@ -2659,7 +2685,10 @@ impl Scheduler {
                 ExecResult::Continue(1)
             }
 
-            Instruction::ProcessInfo { pid: target_pid, dest } => {
+            Instruction::ProcessInfo {
+                pid: target_pid,
+                dest,
+            } => {
                 let Some(process) = self.processes.get(&pid) else {
                     return ExecResult::Crash;
                 };
@@ -2784,20 +2813,19 @@ impl Scheduler {
                 let Some(process) = self.processes.get_mut(&pid) else {
                     return ExecResult::Crash;
                 };
-                let exception_tuple = if let Some((class, reason, stacktrace)) =
-                    &process.current_exception
-                {
-                    // Convert stacktrace to a list of strings
-                    let stacktrace_list = Value::List(
-                        stacktrace
-                            .iter()
-                            .map(|s| Value::String(s.clone()))
-                            .collect(),
-                    );
-                    Value::Tuple(vec![class.clone(), reason.clone(), stacktrace_list])
-                } else {
-                    Value::None
-                };
+                let exception_tuple =
+                    if let Some((class, reason, stacktrace)) = &process.current_exception {
+                        // Convert stacktrace to a list of strings
+                        let stacktrace_list = Value::List(
+                            stacktrace
+                                .iter()
+                                .map(|s| Value::String(s.clone()))
+                                .collect(),
+                        );
+                        Value::Tuple(vec![class.clone(), reason.clone(), stacktrace_list])
+                    } else {
+                        Value::None
+                    };
                 process.registers[dest.0 as usize] = exception_tuple;
                 ExecResult::Continue(1)
             }
@@ -2889,18 +2917,16 @@ impl Scheduler {
         let av = self.resolve_operand_value(process, a);
         let bv = self.resolve_operand_value(process, b);
         match (av, bv) {
-            (Some(a_val), Some(b_val)) => {
-                match (a_val.to_bigint(), b_val.to_bigint()) {
-                    (Some(x), Some(y)) => {
-                        let result = if op(&x, &y) { 1 } else { 0 };
-                        if let Some(p) = self.processes.get_mut(&pid) {
-                            p.registers[dest.0 as usize] = Value::Int(result);
-                        }
-                        ExecResult::Continue(1)
+            (Some(a_val), Some(b_val)) => match (a_val.to_bigint(), b_val.to_bigint()) {
+                (Some(x), Some(y)) => {
+                    let result = if op(&x, &y) { 1 } else { 0 };
+                    if let Some(p) = self.processes.get_mut(&pid) {
+                        p.registers[dest.0 as usize] = Value::Int(result);
                     }
-                    _ => ExecResult::Crash,
+                    ExecResult::Continue(1)
                 }
-            }
+                _ => ExecResult::Crash,
+            },
             _ => ExecResult::Crash,
         }
     }
@@ -3106,9 +3132,13 @@ impl Scheduler {
                         Value::Pid(pid),
                         reason.clone(),
                     ]);
-                    linked.mailbox.push_back(Message::System(SystemMsg::Exit(pid, reason.clone())));
+                    linked
+                        .mailbox
+                        .push_back(Message::System(SystemMsg::Exit(pid, reason.clone())));
                     // Also add as user message for pattern matching in receive
-                    linked.mailbox.push_back(Message::User(format!("{:?}", exit_tuple)));
+                    linked
+                        .mailbox
+                        .push_back(Message::User(format!("{:?}", exit_tuple)));
                     if linked.status == ProcessStatus::Waiting {
                         linked.status = ProcessStatus::Ready;
                         self.ready_queue.push_back(linked_pid);
@@ -3123,19 +3153,17 @@ impl Scheduler {
 
         // Crash linked processes that don't trap_exit (after releasing borrow)
         for linked_pid in to_crash {
-            self.finish_process_with_reason(
-                linked_pid,
-                ProcessStatus::Crashed,
-                reason.clone(),
-            );
+            self.finish_process_with_reason(linked_pid, ProcessStatus::Crashed, reason.clone());
         }
 
         // Notify monitoring processes (one-way, always send DOWN message)
         for (ref_id, monitor_pid) in monitors {
             if let Some(monitor) = self.processes.get_mut(&monitor_pid) {
-                monitor
-                    .mailbox
-                    .push_back(Message::System(SystemMsg::Down(ref_id, pid, reason.clone())));
+                monitor.mailbox.push_back(Message::System(SystemMsg::Down(
+                    ref_id,
+                    pid,
+                    reason.clone(),
+                )));
                 if monitor.status == ProcessStatus::Waiting {
                     monitor.status = ProcessStatus::Ready;
                     self.ready_queue.push_back(monitor_pid);
@@ -3224,10 +3252,7 @@ mod tests {
         let mut scheduler = Scheduler::new();
 
         // Child: receive message, then end
-        let child = vec![
-            Instruction::Receive { dest: Register(0) },
-            Instruction::End,
-        ];
+        let child = vec![Instruction::Receive { dest: Register(0) }, Instruction::End];
 
         // Parent: spawn child, send message, end
         let parent = vec![
@@ -3356,7 +3381,10 @@ mod tests {
                 assert!(matches!(elems[3], Value::Pid(_)));
                 assert_eq!(elems[4], Value::Atom("crashed".to_string()));
             }
-            _ => panic!("Expected DOWN tuple, got {:?}", observer_process.registers[1]),
+            _ => panic!(
+                "Expected DOWN tuple, got {:?}",
+                observer_process.registers[1]
+            ),
         }
     }
 
@@ -4298,10 +4326,7 @@ mod tests {
     fn test_pop_empty_crashes() {
         let mut scheduler = Scheduler::new();
 
-        let program = vec![
-            Instruction::Pop { dest: Register(0) },
-            Instruction::End,
-        ];
+        let program = vec![Instruction::Pop { dest: Register(0) }, Instruction::End];
 
         scheduler.spawn(program);
         run_to_idle(&mut scheduler);
@@ -4517,10 +4542,7 @@ mod tests {
         let process = scheduler.processes.get(&Pid(0)).unwrap();
         assert_eq!(
             process.registers[2],
-            Value::Tuple(vec![
-                Value::Atom("ok".to_string()),
-                Value::Int(42),
-            ])
+            Value::Tuple(vec![Value::Atom("ok".to_string()), Value::Int(42),])
         );
     }
 
@@ -6872,14 +6894,18 @@ mod tests {
 
         // Create a module with a function
         let mut math = Module::new("math".to_string());
-        math.add_function("add".to_string(), 2, vec![
-            Instruction::Add {
-                a: Operand::Reg(Register(0)),
-                b: Operand::Reg(Register(1)),
-                dest: Register(0),
-            },
-            Instruction::Return,
-        ]);
+        math.add_function(
+            "add".to_string(),
+            2,
+            vec![
+                Instruction::Add {
+                    a: Operand::Reg(Register(0)),
+                    b: Operand::Reg(Register(1)),
+                    dest: Register(0),
+                },
+                Instruction::Return,
+            ],
+        );
         math.export("add", 2);
         scheduler.load_module(math).unwrap();
 
@@ -7603,7 +7629,11 @@ mod tests {
         let process = scheduler.processes.get(&Pid(0)).unwrap();
 
         // Each ref should be unique
-        match (&process.registers[0], &process.registers[1], &process.registers[2]) {
+        match (
+            &process.registers[0],
+            &process.registers[1],
+            &process.registers[2],
+        ) {
             (Value::Ref(r0), Value::Ref(r1), Value::Ref(r2)) => {
                 assert_ne!(r0, r1);
                 assert_ne!(r1, r2);
@@ -7618,16 +7648,10 @@ mod tests {
         let mut scheduler = Scheduler::new();
 
         // First process creates a ref
-        let program1 = vec![
-            Instruction::MakeRef { dest: Register(0) },
-            Instruction::End,
-        ];
+        let program1 = vec![Instruction::MakeRef { dest: Register(0) }, Instruction::End];
 
         // Second process creates a ref
-        let program2 = vec![
-            Instruction::MakeRef { dest: Register(0) },
-            Instruction::End,
-        ];
+        let program2 = vec![Instruction::MakeRef { dest: Register(0) }, Instruction::End];
 
         scheduler.spawn(program1);
         scheduler.spawn(program2);
@@ -8068,10 +8092,7 @@ mod tests {
         let mut scheduler = Scheduler::new();
 
         // Worker will crash
-        let worker = vec![
-            Instruction::Work { amount: 100 },
-            Instruction::Crash,
-        ];
+        let worker = vec![Instruction::Work { amount: 100 }, Instruction::Crash];
 
         let observer = vec![
             Instruction::Spawn {
@@ -8311,10 +8332,7 @@ mod tests {
 
         let process = scheduler.processes.get(&Pid(0)).unwrap();
         assert_eq!(process.status, ProcessStatus::Crashed); // not :normal
-        assert_eq!(
-            process.exit_reason,
-            Value::Atom("my_reason".to_string())
-        );
+        assert_eq!(process.exit_reason, Value::Atom("my_reason".to_string()));
     }
 
     #[test]
@@ -8361,7 +8379,10 @@ mod tests {
                 assert!(matches!(elems[3], Value::Pid(_)));
                 assert_eq!(elems[4], Value::Atom("killed".to_string()));
             }
-            _ => panic!("Expected DOWN tuple, got {:?}", observer_process.registers[1]),
+            _ => panic!(
+                "Expected DOWN tuple, got {:?}",
+                observer_process.registers[1]
+            ),
         }
     }
 
@@ -8404,7 +8425,10 @@ mod tests {
                 assert!(s.contains("timeout"));
                 assert!(s.contains("ping"));
             }
-            _ => panic!("Expected timeout message string, got {:?}", process.registers[2]),
+            _ => panic!(
+                "Expected timeout message string, got {:?}",
+                process.registers[2]
+            ),
         }
     }
 
@@ -8414,10 +8438,7 @@ mod tests {
         let mut scheduler = Scheduler::new();
 
         // Receiver waits for message
-        let receiver = vec![
-            Instruction::Receive { dest: Register(0) },
-            Instruction::End,
-        ];
+        let receiver = vec![Instruction::Receive { dest: Register(0) }, Instruction::End];
 
         // Sender spawns receiver, then sends after delay
         let sender = vec![
@@ -8497,10 +8518,7 @@ mod tests {
         }
 
         // R3 should have TIMEOUT (timer was cancelled)
-        assert_eq!(
-            process.registers[3],
-            Value::String("TIMEOUT".to_string())
-        );
+        assert_eq!(process.registers[3], Value::String("TIMEOUT".to_string()));
 
         // Timer queue should be empty
         assert!(scheduler.timers.is_empty());
@@ -8984,10 +9002,7 @@ mod tests {
         run_to_idle(&mut scheduler);
 
         let process = scheduler.processes.get(&Pid(0)).unwrap();
-        assert_eq!(
-            process.registers[0],
-            Value::Binary(vec![1, 2, 3, 255])
-        );
+        assert_eq!(process.registers[0], Value::Binary(vec![1, 2, 3, 255]));
     }
 
     #[test]
@@ -9358,10 +9373,7 @@ mod tests {
     fn test_self_pid() {
         let mut scheduler = Scheduler::new();
 
-        let program = vec![
-            Instruction::SelfPid { dest: Register(0) },
-            Instruction::End,
-        ];
+        let program = vec![Instruction::SelfPid { dest: Register(0) }, Instruction::End];
 
         scheduler.spawn(program);
         run_to_idle(&mut scheduler);
@@ -9375,10 +9387,7 @@ mod tests {
         let mut scheduler = Scheduler::new();
 
         // Spawn 3 processes
-        let child_code = vec![
-            Instruction::Work { amount: 100 },
-            Instruction::End,
-        ];
+        let child_code = vec![Instruction::Work { amount: 100 }, Instruction::End];
 
         let program = vec![
             Instruction::Spawn {
@@ -9406,10 +9415,7 @@ mod tests {
     fn test_process_list() {
         let mut scheduler = Scheduler::new();
 
-        let child_code = vec![
-            Instruction::Work { amount: 100 },
-            Instruction::End,
-        ];
+        let child_code = vec![Instruction::Work { amount: 100 }, Instruction::End];
 
         let program = vec![
             Instruction::Spawn {
@@ -9982,9 +9988,7 @@ mod tests {
                 fail_target: 100,
             },
             // Get the rest
-            Instruction::BinaryMatchRest {
-                dest: Register(3),
-            },
+            Instruction::BinaryMatchRest { dest: Register(3) },
             Instruction::End,
         ];
 
@@ -10237,7 +10241,10 @@ mod tests {
         run_to_idle(&mut scheduler);
 
         let process = scheduler.processes.get(&Pid(0)).unwrap();
-        assert_eq!(process.registers[0], Value::Binary(vec![0x12, 0x34, 0x56, 0x78]));
+        assert_eq!(
+            process.registers[0],
+            Value::Binary(vec![0x12, 0x34, 0x56, 0x78])
+        );
         assert_eq!(process.registers[1], Value::Int(0x12));
         assert_eq!(process.registers[2], Value::Int(0x3456));
         assert_eq!(process.registers[3], Value::Int(0x78));

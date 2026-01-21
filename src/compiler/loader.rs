@@ -280,9 +280,9 @@ impl ModuleLoader {
     /// Load all modules from a file.
     /// Handles files with multiple `mod name { }` blocks.
     fn load_file_modules(&mut self, path: &Path, fallback_name: &str) -> LoadResult<Vec<Module>> {
-        let canonical = path
-            .canonicalize()
-            .map_err(|e| LoadError::with_path(format!("cannot access file: {}", e), path.to_path_buf()))?;
+        let canonical = path.canonicalize().map_err(|e| {
+            LoadError::with_path(format!("cannot access file: {}", e), path.to_path_buf())
+        })?;
 
         // Check if file was already processed
         if self.processed_files.contains(&canonical) {
@@ -291,7 +291,8 @@ impl ModuleLoader {
 
         // Check for cycles
         if self.loading.contains(&canonical) {
-            let chain: Vec<_> = self.loading
+            let chain: Vec<_> = self
+                .loading
                 .iter()
                 .map(|p| {
                     p.file_stem()
@@ -306,8 +307,9 @@ impl ModuleLoader {
         self.loading.push(canonical.clone());
 
         // Read and parse
-        let source = fs::read_to_string(&canonical)
-            .map_err(|e| LoadError::with_path(format!("cannot read file: {}", e), canonical.clone()))?;
+        let source = fs::read_to_string(&canonical).map_err(|e| {
+            LoadError::with_path(format!("cannot read file: {}", e), canonical.clone())
+        })?;
 
         let mut parser = Parser::new(&source);
         let modules = parser
@@ -448,12 +450,14 @@ impl ModuleLoader {
             return Ok(());
         }
 
-        let entries = fs::read_dir(dir)
-            .map_err(|e| LoadError::with_path(format!("cannot read directory: {}", e), dir.to_path_buf()))?;
+        let entries = fs::read_dir(dir).map_err(|e| {
+            LoadError::with_path(format!("cannot read directory: {}", e), dir.to_path_buf())
+        })?;
 
         for entry in entries {
-            let entry = entry
-                .map_err(|e| LoadError::with_path(format!("cannot read entry: {}", e), dir.to_path_buf()))?;
+            let entry = entry.map_err(|e| {
+                LoadError::with_path(format!("cannot read entry: {}", e), dir.to_path_buf())
+            })?;
             let path = entry.path();
 
             if path.is_dir() {
@@ -539,11 +543,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
 
         // Create lib.tb -> utils/mod.tb structure
-        create_temp_file(
-            dir.path(),
-            "lib.surreal",
-            "mod utils;",
-        );
+        create_temp_file(dir.path(), "lib.surreal", "mod utils;");
         create_temp_file(
             dir.path(),
             "utils/mod.surreal",

@@ -7,18 +7,21 @@ use std::process::{Command, ExitCode};
 
 use clap::{Parser, Subcommand};
 
-use surreal::{
-    compiler::{
-        cfg, check_modules_with_metadata, expand_derives_with_registry, expand_quotes,
-        get_derive_macro_name, is_derive_macro, is_macro, resolve_stdlib_methods,
-        CompilerError, CompilerWarning, CoreErlangEmitter, GenericFunctionRegistry, Item, MacroRegistry,
-        Module, ModuleContext, ModuleLoader, Parser as SurrealParser, SharedGenericRegistry,
-    },
-    config::{generate_surreal_toml, generate_main_surreal, ApplicationConfig, CompileOptions, ProjectConfig},
-    deps::DepsManager,
-};
 use std::collections::HashSet;
 use std::sync::{Arc, OnceLock, RwLock};
+use surreal::{
+    compiler::{
+        CompilerError, CompilerWarning, CoreErlangEmitter, GenericFunctionRegistry, Item,
+        MacroRegistry, Module, ModuleContext, ModuleLoader, Parser as SurrealParser,
+        SharedGenericRegistry, cfg, check_modules_with_metadata, expand_derives_with_registry,
+        expand_quotes, get_derive_macro_name, is_derive_macro, is_macro, resolve_stdlib_methods,
+    },
+    config::{
+        ApplicationConfig, CompileOptions, ProjectConfig, generate_main_surreal,
+        generate_surreal_toml,
+    },
+    deps::DepsManager,
+};
 
 /// Cached stdlib data containing both modules and generic function registry.
 /// This eliminates redundant parsing of stdlib files within a compilation session.
@@ -223,9 +226,18 @@ fn main() -> ExitCode {
 
     match cli.command {
         Commands::New { name } => cmd_new(&name),
-        Commands::Build { file, target, output, features } | Commands::Compile { file, target, output, features } => {
-            cmd_build(file.as_deref(), &target, output.as_deref(), &features)
+        Commands::Build {
+            file,
+            target,
+            output,
+            features,
         }
+        | Commands::Compile {
+            file,
+            target,
+            output,
+            features,
+        } => cmd_build(file.as_deref(), &target, output.as_deref(), &features),
         Commands::Run {
             file,
             function,
@@ -235,7 +247,16 @@ fn main() -> ExitCode {
             env,
             features,
             args,
-        } => cmd_run(file.as_deref(), function.as_deref(), eval, no_halt, shell, &env, &features, &args),
+        } => cmd_run(
+            file.as_deref(),
+            function.as_deref(),
+            eval,
+            no_halt,
+            shell,
+            &env,
+            &features,
+            &args,
+        ),
         Commands::Test { filter, features } => cmd_test(filter.as_deref(), &features),
         Commands::Bindgen {
             files,
@@ -259,6 +280,73 @@ fn main() -> ExitCode {
         Commands::Lsp => {
             let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
             rt.block_on(surreal::lsp::run_server());
+            ExitCode::SUCCESS
+        }
+    }
+}
+
+/// Manage NIF (Native Implemented Functions).
+fn cmd_nif(action: NifAction) -> ExitCode {
+    match action {
+        NifAction::Fetch { force } => {
+            println!("Fetching NIF for current platform...");
+
+            // Detect platform
+            let arch = std::env::consts::ARCH;
+            let os = std::env::consts::OS;
+
+            let target = match (arch, os) {
+                ("x86_64", "linux") => "x86_64-unknown-linux-gnu",
+                ("x86_64", "macos") => "x86_64-apple-darwin",
+                ("aarch64", "macos") => "aarch64-apple-darwin",
+                ("aarch64", "linux") => "aarch64-unknown-linux-gnu",
+                ("x86_64", "windows") => "x86_64-pc-windows-msvc",
+                _ => {
+                    eprintln!("Unsupported platform: {}-{}", arch, os);
+                    return ExitCode::from(1);
+                }
+            };
+
+            println!("Target: {}", target);
+
+            if force {
+                println!("Force flag set, will re-download even if NIF exists");
+            }
+
+            // TODO: Implement actual download from GitHub releases
+            println!("NIF download not yet implemented");
+            println!("For now, build from source: cargo build --release -p surreal_native");
+            ExitCode::SUCCESS
+        }
+        NifAction::Status => {
+            println!("NIF Status");
+            println!("----------");
+            println!(
+                "Platform: {}-{}",
+                std::env::consts::ARCH,
+                std::env::consts::OS
+            );
+
+            // Check if NIF exists in common locations
+            let locations = [
+                "packages/surreal_compiler/priv/libsurreal_native.so",
+                "packages/surreal_compiler/priv/libsurreal_native.dylib",
+                "packages/surreal_compiler/native/surreal_native/target/release/libsurreal_native.so",
+                "packages/surreal_compiler/native/surreal_native/target/release/libsurreal_native.dylib",
+            ];
+
+            let mut found = false;
+            for loc in locations {
+                if Path::new(loc).exists() {
+                    println!("Found: {}", loc);
+                    found = true;
+                }
+            }
+
+            if !found {
+                println!("No NIF found. Run 'surreal nif fetch' or build from source.");
+            }
+
             ExitCode::SUCCESS
         }
     }
@@ -386,7 +474,12 @@ fn cmd_deps(action: DepsAction) -> ExitCode {
 }
 
 /// Build the project or a standalone file.
-fn cmd_build(file: Option<&Path>, target: &str, output: Option<&Path>, features: &[String]) -> ExitCode {
+fn cmd_build(
+    file: Option<&Path>,
+    target: &str,
+    output: Option<&Path>,
+    features: &[String],
+) -> ExitCode {
     // Determine if we're building a standalone file or a project
     if let Some(source_file) = file {
         return build_standalone_file(source_file, target, output, features);
@@ -421,10 +514,7 @@ fn cmd_build(file: Option<&Path>, target: &str, output: Option<&Path>, features:
 
     // Load all .surreal files in src/ directory with package context
     // This enables Rust-style module naming (e.g., my_app::users::auth)
-    let mut loader = ModuleLoader::with_package(
-        config.package.name.clone(),
-        src_dir.clone(),
-    );
+    let mut loader = ModuleLoader::with_package(config.package.name.clone(), src_dir.clone());
 
     // Add _build/bindings/ to search path for auto-generated dependency bindings
     let bindings_dir = project_root.join("_build").join("bindings");
@@ -448,7 +538,8 @@ fn cmd_build(file: Option<&Path>, target: &str, output: Option<&Path>, features:
     let dep_ebin_paths = deps_manager.dep_ebin_paths();
 
     // Get dependency names for module resolution
-    let dependency_names: std::collections::HashSet<String> = config.dependencies.keys().cloned().collect();
+    let dependency_names: std::collections::HashSet<String> =
+        config.dependencies.keys().cloned().collect();
 
     // Compile all loaded modules with package name for module resolution
     let result = compile_modules_with_options(
@@ -472,7 +563,12 @@ fn cmd_build(file: Option<&Path>, target: &str, output: Option<&Path>, features:
 }
 
 /// Build a standalone .surreal file.
-fn build_standalone_file(source_file: &Path, target: &str, output: Option<&Path>, features: &[String]) -> ExitCode {
+fn build_standalone_file(
+    source_file: &Path,
+    target: &str,
+    output: Option<&Path>,
+    features: &[String],
+) -> ExitCode {
     if !source_file.exists() {
         eprintln!("Error: file not found: {}", source_file.display());
         return ExitCode::from(1);
@@ -499,10 +595,8 @@ fn build_standalone_file(source_file: &Path, target: &str, output: Option<&Path>
 
             println!("Compiling {}...", config.package.name);
 
-            let mut loader = ModuleLoader::with_package(
-                config.package.name.clone(),
-                src_dir.clone(),
-            );
+            let mut loader =
+                ModuleLoader::with_package(config.package.name.clone(), src_dir.clone());
 
             // Add _build/bindings/ to search path for auto-generated dependency bindings
             let bindings_dir = project_root.join("_build").join("bindings");
@@ -526,7 +620,8 @@ fn build_standalone_file(source_file: &Path, target: &str, output: Option<&Path>
             let dep_ebin_paths = deps_manager.dep_ebin_paths();
 
             // Get dependency names for module resolution
-            let dependency_names: std::collections::HashSet<String> = config.dependencies.keys().cloned().collect();
+            let dependency_names: std::collections::HashSet<String> =
+                config.dependencies.keys().cloned().collect();
 
             let result = compile_modules_with_options(
                 modules,
@@ -590,7 +685,12 @@ fn find_project_root(start: &Path) -> Option<PathBuf> {
 }
 
 /// Compile source file(s) and emit to build directory.
-fn compile_and_emit(entry_file: &Path, build_dir: &Path, target: &str, features: &[String]) -> ExitCode {
+fn compile_and_emit(
+    entry_file: &Path,
+    build_dir: &Path,
+    target: &str,
+    features: &[String],
+) -> ExitCode {
     // Load modules
     let mut loader = ModuleLoader::new();
     if let Err(e) = loader.load_project(entry_file) {
@@ -603,7 +703,15 @@ fn compile_and_emit(entry_file: &Path, build_dir: &Path, target: &str, features:
     let compile_options = CompileOptions::with_features(resolved_features);
 
     // Standalone files don't have a package context or dependencies
-    compile_modules_with_options(loader.into_modules(), build_dir, target, None, &compile_options, &[], &std::collections::HashSet::new())
+    compile_modules_with_options(
+        loader.into_modules(),
+        build_dir,
+        target,
+        None,
+        &compile_options,
+        &[],
+        &std::collections::HashSet::new(),
+    )
 }
 
 /// Compile modules to Core Erlang and optionally BEAM.
@@ -615,7 +723,14 @@ fn compile_modules(
 ) -> ExitCode {
     // Use cached stdlib generics registry
     let stdlib_registry = get_stdlib().generics.clone();
-    compile_modules_with_registry(modules, build_dir, target, stdlib_registry, package_name, &[])
+    compile_modules_with_registry(
+        modules,
+        build_dir,
+        target,
+        stdlib_registry,
+        package_name,
+        &[],
+    )
 }
 
 /// Compile modules to Core Erlang and optionally BEAM, with compile options for cfg filtering.
@@ -666,16 +781,15 @@ fn compile_modules_with_registry(
     let stdlib_modules_full = &stdlib_data.modules;
 
     // Check if we're compiling stdlib itself (by checking if any module shares a name with stdlib)
-    let stdlib_module_names_raw: std::collections::HashSet<_> = stdlib_modules_full
+    let stdlib_module_names_raw: std::collections::HashSet<_> =
+        stdlib_modules_full.iter().map(|m| m.name.clone()).collect();
+
+    let user_module_names: std::collections::HashSet<_> =
+        modules.iter().map(|m| m.name.clone()).collect();
+
+    let is_compiling_stdlib = user_module_names
         .iter()
-        .map(|m| m.name.clone())
-        .collect();
-
-    let user_module_names: std::collections::HashSet<_> = modules.iter()
-        .map(|m| m.name.clone())
-        .collect();
-
-    let is_compiling_stdlib = user_module_names.iter().any(|n| stdlib_module_names_raw.contains(n));
+        .any(|n| stdlib_module_names_raw.contains(n));
 
     // When compiling stdlib itself, filter out modules being compiled to avoid duplicates
     // but keep other stdlib modules for type checking (e.g., extern module definitions)
@@ -704,13 +818,14 @@ fn compile_modules_with_registry(
     let struct_info = type_check_result.struct_info.clone();
 
     // List of stdlib module names for filtering
-    let stdlib_module_names: std::collections::HashSet<_> = stdlib_modules.iter()
-        .map(|m| m.name.clone())
-        .collect();
+    let stdlib_module_names: std::collections::HashSet<_> =
+        stdlib_modules.iter().map(|m| m.name.clone()).collect();
 
     // Display warnings (filter out stdlib warnings) using miette
     for warning in &type_check_result.warnings {
-        let is_stdlib = warning.module.as_ref()
+        let is_stdlib = warning
+            .module
+            .as_ref()
             .map(|m| stdlib_module_names.contains(m))
             .unwrap_or(false);
         if !is_stdlib {
@@ -718,7 +833,8 @@ fn compile_modules_with_registry(
             if let Some(module_name) = &warning.module {
                 if let Some(module) = modules.iter().find(|m| &m.name == module_name) {
                     if let Some(ref source) = module.source {
-                        let compiler_warning = CompilerWarning::from_warning(module_name, source, warning.clone());
+                        let compiler_warning =
+                            CompilerWarning::from_warning(module_name, source, warning.clone());
                         eprintln!("{:?}", miette::Report::new(compiler_warning));
                         continue;
                     }
@@ -756,9 +872,17 @@ fn compile_modules_with_registry(
                     if let Some(module) = modules.iter().find(|m| m.name == module_name) {
                         if let Some(ref source) = module.source {
                             let err = CompilerError::type_error(&module_name, source, e);
-                            eprintln!("  Type error in {}:\n{:?}", module_name, miette::Report::new(err));
+                            eprintln!(
+                                "  Type error in {}:\n{:?}",
+                                module_name,
+                                miette::Report::new(err)
+                            );
                         } else {
-                            eprintln!("  Type error in {}: {:?}", module_name, miette::Report::new(e));
+                            eprintln!(
+                                "  Type error in {}: {:?}",
+                                module_name,
+                                miette::Report::new(e)
+                            );
                         }
                     } else {
                         // Module not found in user modules - this shouldn't happen
@@ -779,8 +903,8 @@ fn compile_modules_with_registry(
 
     // Create a shared registry for cross-module generic functions
     // Start with external (stdlib) generics if available
-    let generic_registry: SharedGenericRegistry = external_registry
-        .unwrap_or_else(|| Arc::new(RwLock::new(GenericFunctionRegistry::new())));
+    let generic_registry: SharedGenericRegistry =
+        external_registry.unwrap_or_else(|| Arc::new(RwLock::new(GenericFunctionRegistry::new())));
 
     // Collect local module short names for module resolution
     // These are the short names (e.g., "hello_handler") that can be referenced
@@ -838,9 +962,14 @@ fn compile_modules_with_registry(
             if let Some(module) = modules.iter().find(|m| &m.name == module_name) {
                 // Clone and expand only built-in derives for macro modules
                 let mut macro_module = module.clone();
-                if let Err(errors) = expand_derives_with_registry(&mut macro_module, &mut MacroRegistry::new()) {
+                if let Err(errors) =
+                    expand_derives_with_registry(&mut macro_module, &mut MacroRegistry::new())
+                {
                     for err in errors {
-                        eprintln!("Derive error in macro module {}: {}", module_name, err.message);
+                        eprintln!(
+                            "Derive error in macro module {}: {}",
+                            module_name, err.message
+                        );
                     }
                     return ExitCode::from(1);
                 }
@@ -912,10 +1041,8 @@ fn compile_modules_with_registry(
             None => ModuleContext::default(),
         };
 
-        let mut emitter = CoreErlangEmitter::with_registry_and_context(
-            generic_registry.clone(),
-            module_context,
-        );
+        let mut emitter =
+            CoreErlangEmitter::with_registry_and_context(generic_registry.clone(), module_context);
         // Set extern module name mappings for #[name = "..."] attribute support
         emitter.set_extern_module_names(extern_module_names.clone());
         // Set struct info for Erlang record compilation support
@@ -958,7 +1085,10 @@ fn compile_modules_with_registry(
     // If target is "core", we're done
     if target == "core" {
         println!();
-        println!("Build complete. Core Erlang files in {}", build_dir.display());
+        println!(
+            "Build complete. Core Erlang files in {}",
+            build_dir.display()
+        );
         return ExitCode::SUCCESS;
     }
 
@@ -1041,7 +1171,9 @@ fn compile_modules_with_registry_and_options(
     // Load stub modules for FFI type checking
     let t0 = Instant::now();
     let stub_modules = load_stub_modules();
-    if timing { eprintln!("  [timing] load_stub_modules: {:?}", t0.elapsed()); }
+    if timing {
+        eprintln!("  [timing] load_stub_modules: {:?}", t0.elapsed());
+    }
 
     // Use cached stdlib modules for type checking
     // This is needed even when compiling stdlib itself, because stdlib modules
@@ -1049,19 +1181,20 @@ fn compile_modules_with_registry_and_options(
     let t1 = Instant::now();
     let stdlib_data = get_stdlib();
     let stdlib_modules_full = &stdlib_data.modules;
-    if timing { eprintln!("  [timing] get_stdlib: {:?}", t1.elapsed()); }
+    if timing {
+        eprintln!("  [timing] get_stdlib: {:?}", t1.elapsed());
+    }
 
     // Check if we're compiling stdlib itself (by checking if any module shares a name with stdlib)
-    let stdlib_module_names_raw: std::collections::HashSet<_> = stdlib_modules_full
+    let stdlib_module_names_raw: std::collections::HashSet<_> =
+        stdlib_modules_full.iter().map(|m| m.name.clone()).collect();
+
+    let user_module_names: std::collections::HashSet<_> =
+        modules.iter().map(|m| m.name.clone()).collect();
+
+    let is_compiling_stdlib = user_module_names
         .iter()
-        .map(|m| m.name.clone())
-        .collect();
-
-    let user_module_names: std::collections::HashSet<_> = modules.iter()
-        .map(|m| m.name.clone())
-        .collect();
-
-    let is_compiling_stdlib = user_module_names.iter().any(|n| stdlib_module_names_raw.contains(n));
+        .any(|n| stdlib_module_names_raw.contains(n));
 
     // When compiling stdlib itself, filter out modules being compiled to avoid duplicates
     // but keep other stdlib modules for type checking (e.g., extern module definitions)
@@ -1075,7 +1208,9 @@ fn compile_modules_with_registry_and_options(
     } else {
         stdlib_modules_full.clone()
     };
-    if timing { eprintln!("  [timing] clone_stdlib: {:?}", t2.elapsed()); }
+    if timing {
+        eprintln!("  [timing] clone_stdlib: {:?}", t2.elapsed());
+    }
 
     // Early check: if no modules need recompilation, skip type checking entirely
     // This is a significant optimization for incremental builds
@@ -1091,8 +1226,13 @@ fn compile_modules_with_registry_and_options(
 
     if !any_needs_recompile && target == "beam" {
         println!();
-        println!("Build complete. All {} module(s) up to date.", modules.len());
-        if timing { eprintln!("  [timing] TOTAL (skipped): {:?}", total_start.elapsed()); }
+        println!(
+            "Build complete. All {} module(s) up to date.",
+            modules.len()
+        );
+        if timing {
+            eprintln!("  [timing] TOTAL (skipped): {:?}", total_start.elapsed());
+        }
         return ExitCode::SUCCESS;
     }
 
@@ -1101,7 +1241,9 @@ fn compile_modules_with_registry_and_options(
     let mut all_modules_for_typeck: Vec<Module> = stub_modules;
     all_modules_for_typeck.extend(stdlib_modules.iter().cloned());
     all_modules_for_typeck.extend(modules.iter().cloned());
-    if timing { eprintln!("  [timing] combine_modules: {:?}", t3.elapsed()); }
+    if timing {
+        eprintln!("  [timing] combine_modules: {:?}", t3.elapsed());
+    }
 
     // Type check all modules together (allows cross-module type references)
     // This also annotates the AST with inferred type arguments
@@ -1110,18 +1252,21 @@ fn compile_modules_with_registry_and_options(
     let t4 = Instant::now();
     let mut annotated_modules: Vec<Module> = Vec::new();
     let type_check_result = check_modules_with_metadata(&all_modules_for_typeck);
-    if timing { eprintln!("  [timing] type_check: {:?}", t4.elapsed()); }
+    if timing {
+        eprintln!("  [timing] type_check: {:?}", t4.elapsed());
+    }
     let extern_module_names = type_check_result.extern_module_names.clone();
     let struct_info = type_check_result.struct_info.clone();
 
     // List of stdlib module names for filtering
-    let stdlib_module_names: std::collections::HashSet<_> = stdlib_modules.iter()
-        .map(|m| m.name.clone())
-        .collect();
+    let stdlib_module_names: std::collections::HashSet<_> =
+        stdlib_modules.iter().map(|m| m.name.clone()).collect();
 
     // Display warnings (filter out stdlib warnings) using miette
     for warning in &type_check_result.warnings {
-        let is_stdlib = warning.module.as_ref()
+        let is_stdlib = warning
+            .module
+            .as_ref()
             .map(|m| stdlib_module_names.contains(m))
             .unwrap_or(false);
         if !is_stdlib {
@@ -1129,7 +1274,8 @@ fn compile_modules_with_registry_and_options(
             if let Some(module_name) = &warning.module {
                 if let Some(module) = modules.iter().find(|m| &m.name == module_name) {
                     if let Some(ref source) = module.source {
-                        let compiler_warning = CompilerWarning::from_warning(module_name, source, warning.clone());
+                        let compiler_warning =
+                            CompilerWarning::from_warning(module_name, source, warning.clone());
                         eprintln!("{:?}", miette::Report::new(compiler_warning));
                         continue;
                     }
@@ -1167,9 +1313,17 @@ fn compile_modules_with_registry_and_options(
                     if let Some(module) = modules.iter().find(|m| m.name == module_name) {
                         if let Some(ref source) = module.source {
                             let err = CompilerError::type_error(&module_name, source, e);
-                            eprintln!("  Type error in {}:\n{:?}", module_name, miette::Report::new(err));
+                            eprintln!(
+                                "  Type error in {}:\n{:?}",
+                                module_name,
+                                miette::Report::new(err)
+                            );
                         } else {
-                            eprintln!("  Type error in {}: {:?}", module_name, miette::Report::new(e));
+                            eprintln!(
+                                "  Type error in {}: {:?}",
+                                module_name,
+                                miette::Report::new(e)
+                            );
                         }
                     } else {
                         // Module not found in user modules - this shouldn't happen
@@ -1190,8 +1344,8 @@ fn compile_modules_with_registry_and_options(
 
     // Create a shared registry for cross-module generic functions
     // Start with external (stdlib) generics if available
-    let generic_registry: SharedGenericRegistry = external_registry
-        .unwrap_or_else(|| Arc::new(RwLock::new(GenericFunctionRegistry::new())));
+    let generic_registry: SharedGenericRegistry =
+        external_registry.unwrap_or_else(|| Arc::new(RwLock::new(GenericFunctionRegistry::new())));
 
     // Collect local module short names for module resolution
     // These are the short names (e.g., "hello_handler") that can be referenced
@@ -1249,9 +1403,14 @@ fn compile_modules_with_registry_and_options(
             if let Some(module) = modules.iter().find(|m| &m.name == module_name) {
                 // Clone and expand only built-in derives for macro modules
                 let mut macro_module = module.clone();
-                if let Err(errors) = expand_derives_with_registry(&mut macro_module, &mut MacroRegistry::new()) {
+                if let Err(errors) =
+                    expand_derives_with_registry(&mut macro_module, &mut MacroRegistry::new())
+                {
                     for err in errors {
-                        eprintln!("Derive error in macro module {}: {}", module_name, err.message);
+                        eprintln!(
+                            "Derive error in macro module {}: {}",
+                            module_name, err.message
+                        );
                     }
                     return ExitCode::from(1);
                 }
@@ -1377,17 +1536,28 @@ fn compile_modules_with_registry_and_options(
         let mut registry = generic_registry.write().unwrap();
         registry.register_batch(pending_generics);
     }
-    if timing { eprintln!("  [timing] codegen: {:?}", t5.elapsed()); }
+    if timing {
+        eprintln!("  [timing] codegen: {:?}", t5.elapsed());
+    }
 
     // If target is "core", we're done
     if target == "core" {
         println!();
         if skipped_count > 0 {
-            println!("Build complete. {} module(s) up to date, {} recompiled.", skipped_count, core_files.len());
+            println!(
+                "Build complete. {} module(s) up to date, {} recompiled.",
+                skipped_count,
+                core_files.len()
+            );
         } else {
-            println!("Build complete. Core Erlang files in {}", build_dir.display());
+            println!(
+                "Build complete. Core Erlang files in {}",
+                build_dir.display()
+            );
         }
-        if timing { eprintln!("  [timing] TOTAL: {:?}", total_start.elapsed()); }
+        if timing {
+            eprintln!("  [timing] TOTAL: {:?}", total_start.elapsed());
+        }
         return ExitCode::SUCCESS;
     }
 
@@ -1413,7 +1583,9 @@ fn compile_modules_with_registry_and_options(
         }
 
         let status = cmd.status();
-        if timing { eprintln!("  [timing] erlc: {:?}", t6.elapsed()); }
+        if timing {
+            eprintln!("  [timing] erlc: {:?}", t6.elapsed());
+        }
         match status {
             Ok(s) if s.success() => {
                 for core_file in &core_files {
@@ -1434,7 +1606,9 @@ fn compile_modules_with_registry_and_options(
         }
     }
 
-    if timing { eprintln!("  [timing] TOTAL: {:?}", total_start.elapsed()); }
+    if timing {
+        eprintln!("  [timing] TOTAL: {:?}", total_start.elapsed());
+    }
 
     // Generate .macros file if we have macros and a package name
     if !project_macros.is_empty() {
@@ -1447,9 +1621,16 @@ fn compile_modules_with_registry_and_options(
 
     println!();
     if skipped_count > 0 && core_files.is_empty() {
-        println!("Build complete. All {} module(s) up to date.", skipped_count);
+        println!(
+            "Build complete. All {} module(s) up to date.",
+            skipped_count
+        );
     } else if skipped_count > 0 {
-        println!("Build complete. {} module(s) up to date, {} recompiled.", skipped_count, core_files.len());
+        println!(
+            "Build complete. {} module(s) up to date, {} recompiled.",
+            skipped_count,
+            core_files.len()
+        );
     } else {
         println!("Build complete.");
     }
@@ -1482,11 +1663,7 @@ fn generate_app_file(
         .join(", ");
 
     // Get dependency application names
-    let deps: Vec<String> = config
-        .dependencies
-        .keys()
-        .map(|k| k.clone())
-        .collect();
+    let deps: Vec<String> = config.dependencies.keys().map(|k| k.clone()).collect();
 
     let deps_str = deps
         .iter()
@@ -1594,10 +1771,7 @@ fn generate_macros_file(
 /// This does NOT register them globally - they must be either:
 /// - Imported via `use serde::Serialize;` (for unqualified `#[derive(Serialize)]`)
 /// - Used with qualified path `#[derive(serde::Serialize)]`
-fn load_dependency_macros(
-    macro_registry: &mut MacroRegistry,
-    dep_ebin_paths: &[PathBuf],
-) {
+fn load_dependency_macros(macro_registry: &mut MacroRegistry, dep_ebin_paths: &[PathBuf]) {
     for ebin_dir in dep_ebin_paths {
         // Look for .macros files in the ebin directory
         if let Ok(entries) = fs::read_dir(ebin_dir) {
@@ -1605,10 +1779,7 @@ fn load_dependency_macros(
                 let path = entry.path();
                 if path.extension().map_or(false, |ext| ext == "macros") {
                     // Extract package name from filename (e.g., "serde.macros" -> "serde")
-                    let package_name = path
-                        .file_stem()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("");
+                    let package_name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
 
                     if package_name.is_empty() {
                         continue;
@@ -1628,11 +1799,7 @@ fn load_dependency_macros(
                                 }
                             }
                             Err(e) => {
-                                eprintln!(
-                                    "Warning: Failed to parse {}: {}",
-                                    path.display(),
-                                    e
-                                );
+                                eprintln!("Warning: Failed to parse {}: {}", path.display(), e);
                             }
                         }
                     }
@@ -1799,7 +1966,11 @@ fn load_stub_modules() -> Vec<Module> {
         match parser.parse_module() {
             Ok(module) => stub_modules.push(module),
             Err(e) => {
-                eprintln!("Warning: Failed to parse stub file {}: {:?}", path.display(), e);
+                eprintln!(
+                    "Warning: Failed to parse stub file {}: {:?}",
+                    path.display(),
+                    e
+                );
             }
         }
     }
@@ -2006,7 +2177,9 @@ fn cmd_run(
         // Determine module name: use application module or package name
         // Module names are prefixed with surreal:: and package:: (e.g., "surreal::http_api::http_api")
         let base_module = if let Some(ref app) = app_config {
-            app.module.clone().unwrap_or_else(|| config.package.name.clone())
+            app.module
+                .clone()
+                .unwrap_or_else(|| config.package.name.clone())
         } else {
             // Use package name as the default module (corresponds to lib.surreal)
             config.package.name.clone()
@@ -2062,7 +2235,14 @@ fn cmd_run(
     deps_dirs.extend(find_elixir_ebin_dirs());
 
     if use_app_mode {
-        run_application(&beam_dir, &module_name, &app_config.unwrap(), stdlib_dir.as_ref(), &deps_dirs, shell_mode)
+        run_application(
+            &beam_dir,
+            &module_name,
+            &app_config.unwrap(),
+            stdlib_dir.as_ref(),
+            &deps_dirs,
+            shell_mode,
+        )
     } else if has_script_module && function.is_none() && !eval_mode {
         // Run script mode: execute __script__:__main__()
         run_function(
@@ -2076,7 +2256,15 @@ fn cmd_run(
         )
     } else {
         let func = function.unwrap_or("main");
-        run_function(&beam_dir, &module_name, func, args, no_halt, stdlib_dir.as_ref(), &deps_dirs)
+        run_function(
+            &beam_dir,
+            &module_name,
+            func,
+            args,
+            no_halt,
+            stdlib_dir.as_ref(),
+            &deps_dirs,
+        )
     }
 }
 
@@ -2403,14 +2591,13 @@ fn compile_module_to_beam(
         None => ModuleContext::default(),
     };
 
-    let mut emitter = CoreErlangEmitter::with_registry_and_context(
-        generic_registry.clone(),
-        module_context,
-    );
+    let mut emitter =
+        CoreErlangEmitter::with_registry_and_context(generic_registry.clone(), module_context);
     emitter.set_extern_module_names(extern_module_names.clone());
     emitter.set_struct_info(struct_info.clone());
 
-    let core_erlang = emitter.emit_module(module)
+    let core_erlang = emitter
+        .emit_module(module)
         .map_err(|e| format!("Compile error in {}: {}", module.name, e))?;
 
     // Register this module's generic functions
@@ -2497,10 +2684,7 @@ fn cmd_test(filter: Option<&str>, features: &[String]) -> ExitCode {
     println!("Compiling {} in test mode...", config.package.name);
 
     // Load all .surreal files in src/ directory with package context
-    let mut loader = ModuleLoader::with_package(
-        config.package.name.clone(),
-        src_dir.clone(),
-    );
+    let mut loader = ModuleLoader::with_package(config.package.name.clone(), src_dir.clone());
 
     // Add _build/bindings/ to search path for auto-generated dependency bindings
     let bindings_dir = project_root.join("_build").join("bindings");
@@ -2550,7 +2734,8 @@ fn cmd_test(filter: Option<&str>, features: &[String]) -> ExitCode {
     let dep_ebin_paths = deps_manager.dep_ebin_paths();
 
     // Get dependency names for module resolution
-    let dependency_names: std::collections::HashSet<String> = config.dependencies.keys().cloned().collect();
+    let dependency_names: std::collections::HashSet<String> =
+        config.dependencies.keys().cloned().collect();
 
     // Compile all modules in test mode
     let result = compile_modules_with_options(
@@ -2594,7 +2779,11 @@ fn cmd_test(filter: Option<&str>, features: &[String]) -> ExitCode {
 
     // Run tests
     println!();
-    println!("Running {} test{}...", test_functions.len(), if test_functions.len() == 1 { "" } else { "s" });
+    println!(
+        "Running {} test{}...",
+        test_functions.len(),
+        if test_functions.len() == 1 { "" } else { "s" }
+    );
     println!();
 
     let mut passed = 0;
@@ -2647,7 +2836,10 @@ fn cmd_test(filter: Option<&str>, features: &[String]) -> ExitCode {
             Err(e) => {
                 failed += 1;
                 failures.push((module_name.clone(), func_name.clone(), e.to_string()));
-                println!("  {} {}::{} ... FAILED ({})", "\u{2717}", module_name, func_name, e);
+                println!(
+                    "  {} {}::{} ... FAILED ({})",
+                    "\u{2717}", module_name, func_name, e
+                );
             }
         }
     }
@@ -2668,7 +2860,11 @@ fn cmd_test(filter: Option<&str>, features: &[String]) -> ExitCode {
 
     let total = passed + failed;
     if failed == 0 {
-        println!("{} test{} passed.", total, if total == 1 { "" } else { "s" });
+        println!(
+            "{} test{} passed.",
+            total,
+            if total == 1 { "" } else { "s" }
+        );
         ExitCode::SUCCESS
     } else {
         println!("{} passed, {} failed.", passed, failed);

@@ -3,7 +3,7 @@
 use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position};
 
 use crate::compiler::{Function, Item, Module, Param, Pattern, Type};
-use crate::lsp::lookup::{find_symbol_at_offset, SymbolInfo};
+use crate::lsp::lookup::{SymbolInfo, find_symbol_at_offset};
 use crate::lsp::position::LineIndex;
 
 /// Handle hover request.
@@ -221,7 +221,10 @@ fn find_function_in_modules<'a>(
     None
 }
 
-fn find_struct<'a>(module: &'a Module, struct_name: &str) -> Option<&'a crate::compiler::StructDef> {
+fn find_struct<'a>(
+    module: &'a Module,
+    struct_name: &str,
+) -> Option<&'a crate::compiler::StructDef> {
     for item in &module.items {
         if let Item::Struct(s) = item {
             if s.name == struct_name {

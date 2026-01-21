@@ -753,10 +753,16 @@ pub enum Expr {
         args: EnumVariantArgs,
     },
     /// Field access: `expr.field`.
-    FieldAccess { expr: Box<SpannedExpr>, field: String },
+    FieldAccess {
+        expr: Box<SpannedExpr>,
+        field: String,
+    },
     /// Dynamic field access inside quote: `expr.#field_var`.
     /// The field name is determined at macro expansion time.
-    UnquoteFieldAccess { expr: Box<SpannedExpr>, field_expr: Box<SpannedExpr> },
+    UnquoteFieldAccess {
+        expr: Box<SpannedExpr>,
+        field_expr: Box<SpannedExpr>,
+    },
     /// Try operator: `expr?` - early return on Err/None.
     Try { expr: Box<SpannedExpr> },
     /// Module path access: `Module::item`.
@@ -766,14 +772,17 @@ pub enum Expr {
     /// Closure for spawn: `spawn || { ... }`.
     SpawnClosure(Block),
     /// Anonymous function / closure: `fn(x, y) { x + y }`.
-    Closure {
-        params: Vec<String>,
-        body: Block,
-    },
+    Closure { params: Vec<String>, body: Block },
     /// Message send: `pid ! message`.
-    Send { to: Box<SpannedExpr>, msg: Box<SpannedExpr> },
+    Send {
+        to: Box<SpannedExpr>,
+        msg: Box<SpannedExpr>,
+    },
     /// Pipe expression: `expr |> func(args)` transforms to `func(expr, args)`.
-    Pipe { left: Box<SpannedExpr>, right: Box<SpannedExpr> },
+    Pipe {
+        left: Box<SpannedExpr>,
+        right: Box<SpannedExpr>,
+    },
     /// Receive expression.
     Receive {
         arms: Vec<MatchArm>,
@@ -1049,10 +1058,7 @@ impl<T> BitStringSegment<T> {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     /// Named type with optional type arguments (e.g., `Foo` or `Option<T>`).
-    Named {
-        name: String,
-        type_args: Vec<Type>,
-    },
+    Named { name: String, type_args: Vec<Type> },
     /// Type variable (e.g., `T` in a generic context).
     TypeVar(String),
     /// Tuple type.
@@ -1086,10 +1092,7 @@ pub enum Type {
     /// Union type (e.g., `int | string` or `:ok | :error`).
     Union(Vec<Type>),
     /// Function type (e.g., `fn(T, U) -> R`).
-    Fn {
-        params: Vec<Type>,
-        ret: Box<Type>,
-    },
+    Fn { params: Vec<Type>, ret: Box<Type> },
     /// Associated type reference (e.g., `Self::State`).
     AssociatedType {
         /// The base type (usually "Self")

@@ -5,7 +5,7 @@ use crate::compiler::error::{ParseError, ParseResult};
 use crate::compiler::lexer::{Lexer, Span, SpannedToken};
 use crate::compiler::prelude::prelude_items_for_module;
 use crate::compiler::token::{
-    has_interpolation, parse_interpolated_string, process_escapes, LexStringPart, Token,
+    LexStringPart, Token, has_interpolation, parse_interpolated_string, process_escapes,
 };
 
 /// Recursive descent parser.
@@ -150,14 +150,20 @@ impl<'source> Parser<'source> {
                 // Check if followed by semicolon (statement) or not (trailing expr)
                 if self.check(&Token::Semi) {
                     self.advance();
-                    stmts.push(Stmt::Expr { expr: e, span: Some(span) });
+                    stmts.push(Stmt::Expr {
+                        expr: e,
+                        span: Some(span),
+                    });
                 } else if self.is_at_end() {
                     // Trailing expression (final result)
                     expr = Some(Box::new(e));
                 } else {
                     // Expression statements that don't need semicolons
                     if Self::is_block_expr_spanned(&e) {
-                        stmts.push(Stmt::Expr { expr: e, span: Some(span) });
+                        stmts.push(Stmt::Expr {
+                            expr: e,
+                            span: Some(span),
+                        });
                     } else {
                         let span = self.current_span();
                         return Err(ParseError::new("expected `;` or end of file", span));
@@ -175,7 +181,11 @@ impl<'source> Parser<'source> {
             params: vec![],
             guard: None,
             return_type: Some(SpannedType::unspanned(Type::Any)),
-            body: Block { stmts, expr, span: start_span.start..self.current_span().end },
+            body: Block {
+                stmts,
+                expr,
+                span: start_span.start..self.current_span().end,
+            },
             is_pub: true,
             span: Span {
                 start: start_span.start,
@@ -593,7 +603,10 @@ impl<'source> Parser<'source> {
                     methods.push(self.parse_function(is_pub, attrs)?);
                 } else {
                     let span = self.current_span();
-                    return Err(ParseError::new("expected `fn` or `type` in trait impl", span));
+                    return Err(ParseError::new(
+                        "expected `fn` or `type` in trait impl",
+                        span,
+                    ));
                 }
             }
 
@@ -714,7 +727,13 @@ impl<'source> Parser<'source> {
 
         self.expect(&Token::RBrace)?;
 
-        Ok(Item::Trait(TraitDef { name, type_params, associated_types, methods, span: 0..0 }))
+        Ok(Item::Trait(TraitDef {
+            name,
+            type_params,
+            associated_types,
+            methods,
+            span: 0..0,
+        }))
     }
 
     /// Parse an associated type declaration in a trait: `type Name;`
@@ -947,7 +966,11 @@ impl<'source> Parser<'source> {
                 None
             };
             self.expect(&Token::Semi)?;
-            UseTree::Path { module, name, rename }
+            UseTree::Path {
+                module,
+                name,
+                rename,
+            }
         };
 
         Ok(Item::Use(UseDecl { tree }))
@@ -1000,7 +1023,9 @@ impl<'source> Parser<'source> {
         };
 
         let body = self.parse_block()?;
-        let end = self.tokens.get(self.pos.saturating_sub(1))
+        let end = self
+            .tokens
+            .get(self.pos.saturating_sub(1))
             .map(|t| t.span.end)
             .unwrap_or(start);
 
@@ -1242,7 +1267,10 @@ impl<'source> Parser<'source> {
                 // Check if followed by semicolon (statement) or not (trailing expr)
                 if self.check(&Token::Semi) {
                     self.advance();
-                    stmts.push(Stmt::Expr { expr: e, span: Some(span) });
+                    stmts.push(Stmt::Expr {
+                        expr: e,
+                        span: Some(span),
+                    });
                 } else if self.check(&Token::RBrace) {
                     // Trailing expression
                     expr = Some(Box::new(e));
@@ -1250,7 +1278,10 @@ impl<'source> Parser<'source> {
                     // Expression statements that don't need semicolons
                     // (if, match, block, etc.)
                     if Self::is_block_expr_spanned(&e) {
-                        stmts.push(Stmt::Expr { expr: e, span: Some(span) });
+                        stmts.push(Stmt::Expr {
+                            expr: e,
+                            span: Some(span),
+                        });
                     } else {
                         let span = self.current_span();
                         return Err(ParseError::new("expected `;` or `}`", span));
@@ -1259,12 +1290,19 @@ impl<'source> Parser<'source> {
             }
         }
 
-        Ok(Block { stmts, expr, span: 0..0 })
+        Ok(Block {
+            stmts,
+            expr,
+            span: 0..0,
+        })
     }
 
     /// Parse block contents when we've already parsed the first expression (as SpannedExpr).
     /// Used when disambiguating between map literals and blocks.
-    fn parse_block_contents_with_first_spanned(&mut self, first: SpannedExpr) -> ParseResult<Block> {
+    fn parse_block_contents_with_first_spanned(
+        &mut self,
+        first: SpannedExpr,
+    ) -> ParseResult<Block> {
         let mut stmts = Vec::new();
         let mut expr = None;
 
@@ -1273,12 +1311,22 @@ impl<'source> Parser<'source> {
         // Handle the first expression we already parsed
         if self.check(&Token::Semi) {
             self.advance();
-            stmts.push(Stmt::Expr { expr: first, span: Some(first_span) });
+            stmts.push(Stmt::Expr {
+                expr: first,
+                span: Some(first_span),
+            });
         } else if self.check(&Token::RBrace) {
             // It's the trailing expression
-            return Ok(Block { stmts, expr: Some(Box::new(first)), span: 0..0 });
+            return Ok(Block {
+                stmts,
+                expr: Some(Box::new(first)),
+                span: 0..0,
+            });
         } else if Self::is_block_expr_spanned(&first) {
-            stmts.push(Stmt::Expr { expr: first, span: Some(first_span) });
+            stmts.push(Stmt::Expr {
+                expr: first,
+                span: Some(first_span),
+            });
         } else {
             let span = self.current_span();
             return Err(ParseError::new("expected `;` or `}`", span));
@@ -1295,11 +1343,17 @@ impl<'source> Parser<'source> {
 
                 if self.check(&Token::Semi) {
                     self.advance();
-                    stmts.push(Stmt::Expr { expr: e, span: Some(span) });
+                    stmts.push(Stmt::Expr {
+                        expr: e,
+                        span: Some(span),
+                    });
                 } else if self.check(&Token::RBrace) {
                     expr = Some(Box::new(e));
                 } else if Self::is_block_expr_spanned(&e) {
-                    stmts.push(Stmt::Expr { expr: e, span: Some(span) });
+                    stmts.push(Stmt::Expr {
+                        expr: e,
+                        span: Some(span),
+                    });
                 } else {
                     let span = self.current_span();
                     return Err(ParseError::new("expected `;` or `}`", span));
@@ -1307,7 +1361,11 @@ impl<'source> Parser<'source> {
             }
         }
 
-        Ok(Block { stmts, expr, span: 0..0 })
+        Ok(Block {
+            stmts,
+            expr,
+            span: 0..0,
+        })
     }
 
     /// Check if a SpannedExpr is a "block expression" that doesn't need a semicolon.
@@ -1396,7 +1454,13 @@ impl<'source> Parser<'source> {
         self.expect(&Token::Semi)?;
         let end = self.previous_span().end;
 
-        Ok(Stmt::Let { pattern, ty, value, else_block, span: start..end })
+        Ok(Stmt::Let {
+            pattern,
+            ty,
+            value,
+            else_block,
+            span: start..end,
+        })
     }
 
     /// Parse an expression.
@@ -1644,7 +1708,10 @@ impl<'source> Parser<'source> {
             } else if !type_args.is_empty() {
                 // Had turbofish but no function call - error
                 let span = self.current_span();
-                return Err(ParseError::new("expected function call after type arguments", span));
+                return Err(ParseError::new(
+                    "expected function call after type arguments",
+                    span,
+                ));
             } else if self.check(&Token::Dot) {
                 // Field access or method call
                 self.advance();
@@ -1708,7 +1775,10 @@ impl<'source> Parser<'source> {
                 } else if !type_args.is_empty() {
                     // Turbofish without parens is an error
                     let span = self.current_span();
-                    return Err(ParseError::new("expected '(' after turbofish type arguments", span));
+                    return Err(ParseError::new(
+                        "expected '(' after turbofish type arguments",
+                        span,
+                    ));
                 } else {
                     let end = self.previous_span().end;
                     spanned_expr = SpannedExpr::new(
@@ -1723,7 +1793,11 @@ impl<'source> Parser<'source> {
                 // Path access - only valid if expr is Ident or Path
                 self.advance();
                 let segment = self.expect_ident_or_type_ident()?;
-                let is_type_segment = segment.chars().next().map(|c| c.is_uppercase()).unwrap_or(false);
+                let is_type_segment = segment
+                    .chars()
+                    .next()
+                    .map(|c| c.is_uppercase())
+                    .unwrap_or(false);
 
                 let new_expr = match &spanned_expr.expr {
                     Expr::Ident(first) => Expr::Path {
@@ -1732,7 +1806,9 @@ impl<'source> Parser<'source> {
                     Expr::Path { segments } => {
                         let mut new_segments = segments.clone();
                         new_segments.push(segment.clone());
-                        Expr::Path { segments: new_segments }
+                        Expr::Path {
+                            segments: new_segments,
+                        }
                     }
                     _ => {
                         let span = self.current_span();
@@ -1777,10 +1853,8 @@ impl<'source> Parser<'source> {
                         }
                         self.expect(&Token::RBrace)?;
                         let end = self.previous_span().end;
-                        spanned_expr = SpannedExpr::new(
-                            Expr::StructInit { name, fields, base },
-                            start..end,
-                        );
+                        spanned_expr =
+                            SpannedExpr::new(Expr::StructInit { name, fields, base }, start..end);
                     }
                 }
 
@@ -1792,8 +1866,16 @@ impl<'source> Parser<'source> {
                         if segments.len() >= 3 {
                             let type_idx = segments.len() - 2;
                             let variant_idx = segments.len() - 1;
-                            let type_is_upper = segments[type_idx].chars().next().map(|c| c.is_uppercase()).unwrap_or(false);
-                            let variant_is_upper = segments[variant_idx].chars().next().map(|c| c.is_uppercase()).unwrap_or(false);
+                            let type_is_upper = segments[type_idx]
+                                .chars()
+                                .next()
+                                .map(|c| c.is_uppercase())
+                                .unwrap_or(false);
+                            let variant_is_upper = segments[variant_idx]
+                                .chars()
+                                .next()
+                                .map(|c| c.is_uppercase())
+                                .unwrap_or(false);
                             if type_is_upper && variant_is_upper {
                                 // This is mod::Type::Variant - treat as enum variant
                                 let variant = segments[variant_idx].clone();
@@ -1826,7 +1908,9 @@ impl<'source> Parser<'source> {
                                                 self.advance();
                                                 self.parse_expr()?
                                             } else {
-                                                SpannedExpr::unspanned(Expr::Ident(field_name.clone()))
+                                                SpannedExpr::unspanned(Expr::Ident(
+                                                    field_name.clone(),
+                                                ))
                                             };
                                             fields.push((field_name, field_value));
                                             if !self.check(&Token::Comma) {
@@ -1890,10 +1974,16 @@ impl<'source> Parser<'source> {
             if has_interpolation(&raw) {
                 let parts = parse_interpolated_string(&raw);
                 let ast_parts = self.parse_string_interpolation_parts(parts)?;
-                return Ok(SpannedExpr::new(Expr::StringInterpolation(ast_parts), start..end));
+                return Ok(SpannedExpr::new(
+                    Expr::StringInterpolation(ast_parts),
+                    start..end,
+                ));
             } else {
                 // Plain binary string - process escapes
-                return Ok(SpannedExpr::new(Expr::String(process_escapes(&raw)), start..end));
+                return Ok(SpannedExpr::new(
+                    Expr::String(process_escapes(&raw)),
+                    start..end,
+                ));
             }
         }
 
@@ -1902,7 +1992,10 @@ impl<'source> Parser<'source> {
             self.advance();
             let end = self.previous_span().end;
             // Process escapes for charlist
-            return Ok(SpannedExpr::new(Expr::Charlist(process_escapes(&raw)), start..end));
+            return Ok(SpannedExpr::new(
+                Expr::Charlist(process_escapes(&raw)),
+                start..end,
+            ));
         }
 
         // Check for atom or quoted atom (for extern calls or literal atoms)
@@ -1927,7 +2020,10 @@ impl<'source> Parser<'source> {
                 self.advance(); // consume #
                 let var_expr = self.parse_primary()?;
                 let end = self.previous_span().end;
-                return Ok(SpannedExpr::new(Expr::UnquoteAtom(Box::new(var_expr)), start..end));
+                return Ok(SpannedExpr::new(
+                    Expr::UnquoteAtom(Box::new(var_expr)),
+                    start..end,
+                ));
             }
         }
 
@@ -1947,11 +2043,14 @@ impl<'source> Parser<'source> {
                 }
                 self.expect(&Token::RParen)?;
                 let end = self.previous_span().end;
-                return Ok(SpannedExpr::new(Expr::ExternCall {
-                    module: a,
-                    function,
-                    args,
-                }, start..end));
+                return Ok(SpannedExpr::new(
+                    Expr::ExternCall {
+                        module: a,
+                        function,
+                        args,
+                    },
+                    start..end,
+                ));
             }
             let end = self.previous_span().end;
             return Ok(SpannedExpr::new(Expr::Atom(a), start..end));
@@ -1973,7 +2072,10 @@ impl<'source> Parser<'source> {
         if self.check(&Token::SelfKw) {
             self.advance();
             let end = self.previous_span().end;
-            return Ok(SpannedExpr::new(Expr::Ident("self".to_string()), start..end));
+            return Ok(SpannedExpr::new(
+                Expr::Ident("self".to_string()),
+                start..end,
+            ));
         }
 
         // Identifier or type identifier (for struct init or enum)
@@ -2036,7 +2138,10 @@ impl<'source> Parser<'source> {
                     }
                     self.expect(&Token::RBrace)?;
                     let end = self.previous_span().end;
-                    return Ok(SpannedExpr::new(Expr::StructInit { name, fields, base }, start..end));
+                    return Ok(SpannedExpr::new(
+                        Expr::StructInit { name, fields, base },
+                        start..end,
+                    ));
                 } else {
                     // Not a struct init, restore position and let other parsing handle it
                     self.pos = saved_pos;
@@ -2079,7 +2184,10 @@ impl<'source> Parser<'source> {
                 }
                 self.expect(&Token::RBrace)?;
                 let end = self.previous_span().end;
-                return Ok(SpannedExpr::new(Expr::StructInit { name, fields, base }, start..end));
+                return Ok(SpannedExpr::new(
+                    Expr::StructInit { name, fields, base },
+                    start..end,
+                ));
             }
 
             // Check for qualified path: Type::variant or Type::method
@@ -2105,11 +2213,14 @@ impl<'source> Parser<'source> {
                         }
                         self.expect(&Token::RParen)?;
                         let end = self.previous_span().end;
-                        return Ok(SpannedExpr::new(Expr::EnumVariant {
-                            type_name: Some(name),
-                            variant,
-                            args: EnumVariantArgs::Tuple(args),
-                        }, start..end));
+                        return Ok(SpannedExpr::new(
+                            Expr::EnumVariant {
+                                type_name: Some(name),
+                                variant,
+                                args: EnumVariantArgs::Tuple(args),
+                            },
+                            start..end,
+                        ));
                     }
 
                     // Check for struct fields: TypeIdent::Variant { field: value } or { field } shorthand
@@ -2136,27 +2247,36 @@ impl<'source> Parser<'source> {
                         }
                         self.expect(&Token::RBrace)?;
                         let end = self.previous_span().end;
-                        return Ok(SpannedExpr::new(Expr::EnumVariant {
-                            type_name: Some(name),
-                            variant,
-                            args: EnumVariantArgs::Struct(fields),
-                        }, start..end));
+                        return Ok(SpannedExpr::new(
+                            Expr::EnumVariant {
+                                type_name: Some(name),
+                                variant,
+                                args: EnumVariantArgs::Struct(fields),
+                            },
+                            start..end,
+                        ));
                     }
 
                     // Unit variant: TypeIdent::Variant
                     let end = self.previous_span().end;
-                    return Ok(SpannedExpr::new(Expr::EnumVariant {
-                        type_name: Some(name),
-                        variant,
-                        args: EnumVariantArgs::Unit,
-                    }, start..end));
+                    return Ok(SpannedExpr::new(
+                        Expr::EnumVariant {
+                            type_name: Some(name),
+                            variant,
+                            args: EnumVariantArgs::Unit,
+                        },
+                        start..end,
+                    ));
                 } else if let Some(Token::Ident(method)) = self.peek().cloned() {
                     // Static method path: Type::method
                     self.advance();
                     let end = self.previous_span().end;
-                    return Ok(SpannedExpr::new(Expr::Path {
-                        segments: vec![name, method],
-                    }, start..end));
+                    return Ok(SpannedExpr::new(
+                        Expr::Path {
+                            segments: vec![name, method],
+                        },
+                        start..end,
+                    ));
                 } else {
                     let span = self.current_span();
                     return Err(ParseError::new(
@@ -2181,20 +2301,26 @@ impl<'source> Parser<'source> {
                 }
                 self.expect(&Token::RParen)?;
                 let end = self.previous_span().end;
-                return Ok(SpannedExpr::new(Expr::EnumVariant {
-                    type_name: None,
-                    variant: name,
-                    args: EnumVariantArgs::Tuple(args),
-                }, start..end));
+                return Ok(SpannedExpr::new(
+                    Expr::EnumVariant {
+                        type_name: None,
+                        variant: name,
+                        args: EnumVariantArgs::Tuple(args),
+                    },
+                    start..end,
+                ));
             }
 
             // Unit variant without type qualifier: Variant (just an atom)
             let end = self.previous_span().end;
-            return Ok(SpannedExpr::new(Expr::EnumVariant {
-                type_name: None,
-                variant: name,
-                args: EnumVariantArgs::Unit,
-            }, start..end));
+            return Ok(SpannedExpr::new(
+                Expr::EnumVariant {
+                    type_name: None,
+                    variant: name,
+                    args: EnumVariantArgs::Unit,
+                },
+                start..end,
+            ));
         }
 
         // Parenthesized expression or tuple
@@ -2248,10 +2374,13 @@ impl<'source> Parser<'source> {
                 let tail = self.parse_expr()?;
                 self.expect(&Token::RBracket)?;
                 let end = self.previous_span().end;
-                return Ok(SpannedExpr::new(Expr::ListCons {
-                    head: Box::new(first),
-                    tail: Box::new(tail),
-                }, start..end));
+                return Ok(SpannedExpr::new(
+                    Expr::ListCons {
+                        head: Box::new(first),
+                        tail: Box::new(tail),
+                    },
+                    start..end,
+                ));
             }
 
             // Regular list with remaining elements
@@ -2389,7 +2518,10 @@ impl<'source> Parser<'source> {
                 self.advance();
                 let expr = self.parse_primary()?;
                 let end = self.previous_span().end;
-                return Ok(SpannedExpr::new(Expr::UnquoteSplice(Box::new(expr)), start..end));
+                return Ok(SpannedExpr::new(
+                    Expr::UnquoteSplice(Box::new(expr)),
+                    start..end,
+                ));
             }
             let expr = self.parse_primary()?;
             let end = self.previous_span().end;
@@ -2415,7 +2547,10 @@ impl<'source> Parser<'source> {
         if self.check(&Token::SelfKw) {
             self.advance();
             let end = self.previous_span().end;
-            return Ok(SpannedExpr::new(Expr::Ident("self".to_string()), start..end));
+            return Ok(SpannedExpr::new(
+                Expr::Ident("self".to_string()),
+                start..end,
+            ));
         }
 
         // Binary/bit string: <<segments>>
@@ -2509,7 +2644,10 @@ impl<'source> Parser<'source> {
     }
 
     /// Parse bit string type specifiers: `big-signed-integer`
-    fn parse_bitstring_specifiers<T>(&mut self, segment: &mut BitStringSegment<T>) -> ParseResult<()> {
+    fn parse_bitstring_specifiers<T>(
+        &mut self,
+        segment: &mut BitStringSegment<T>,
+    ) -> ParseResult<()> {
         loop {
             match self.peek() {
                 Some(Token::Big) => {
@@ -2573,7 +2711,11 @@ impl<'source> Parser<'source> {
         // Check if the content is an item (impl, fn, struct, enum, trait)
         let is_item = matches!(
             self.peek(),
-            Some(Token::Impl) | Some(Token::Fn) | Some(Token::Struct) | Some(Token::Enum) | Some(Token::Trait)
+            Some(Token::Impl)
+                | Some(Token::Fn)
+                | Some(Token::Struct)
+                | Some(Token::Enum)
+                | Some(Token::Trait)
         );
 
         let result = if is_item {
@@ -2581,13 +2723,19 @@ impl<'source> Parser<'source> {
             let item = self.parse_item()?;
             self.expect(&Token::RBrace)?;
             let end = self.previous_span().end;
-            Ok(SpannedExpr::new(Expr::QuoteItem(Box::new(item)), start..end))
+            Ok(SpannedExpr::new(
+                Expr::QuoteItem(Box::new(item)),
+                start..end,
+            ))
         } else {
             // Parse as a quoted block expression
             let block = self.parse_block_contents()?;
             self.expect(&Token::RBrace)?;
             let end = self.previous_span().end;
-            Ok(SpannedExpr::new(Expr::Quote(Box::new(SpannedExpr::unspanned(Expr::Block(block)))), start..end))
+            Ok(SpannedExpr::new(
+                Expr::Quote(Box::new(SpannedExpr::unspanned(Expr::Block(block)))),
+                start..end,
+            ))
         };
 
         // Restore quote mode
@@ -2628,10 +2776,13 @@ impl<'source> Parser<'source> {
         self.expect(&Token::Star)?;
         let end = self.previous_span().end;
 
-        Ok(SpannedExpr::new(Expr::QuoteRepetition {
-            pattern: Box::new(pattern),
-            separator,
-        }, start..end))
+        Ok(SpannedExpr::new(
+            Expr::QuoteRepetition {
+                pattern: Box::new(pattern),
+                separator,
+            },
+            start..end,
+        ))
     }
 
     /// Parse an if expression.
@@ -2666,11 +2817,14 @@ impl<'source> Parser<'source> {
         };
 
         let end = self.previous_span().end;
-        Ok(SpannedExpr::new(Expr::If {
-            cond: Box::new(cond),
-            then_block,
-            else_block,
-        }, start..end))
+        Ok(SpannedExpr::new(
+            Expr::If {
+                cond: Box::new(cond),
+                then_block,
+                else_block,
+            },
+            start..end,
+        ))
     }
 
     /// Parse an `if let` expression with a given start position.
@@ -2716,10 +2870,13 @@ impl<'source> Parser<'source> {
         };
 
         let end = self.previous_span().end;
-        Ok(SpannedExpr::new(Expr::Match {
-            expr: Box::new(expr),
-            arms: vec![then_arm, else_arm],
-        }, start..end))
+        Ok(SpannedExpr::new(
+            Expr::Match {
+                expr: Box::new(expr),
+                arms: vec![then_arm, else_arm],
+            },
+            start..end,
+        ))
     }
 
     /// Parse a match expression.
@@ -2741,10 +2898,13 @@ impl<'source> Parser<'source> {
 
         self.expect(&Token::RBrace)?;
         let end = self.previous_span().end;
-        Ok(SpannedExpr::new(Expr::Match {
-            expr: Box::new(expr),
-            arms,
-        }, start..end))
+        Ok(SpannedExpr::new(
+            Expr::Match {
+                expr: Box::new(expr),
+                arms,
+            },
+            start..end,
+        ))
     }
 
     /// Parse a receive expression.
@@ -2776,7 +2936,10 @@ impl<'source> Parser<'source> {
 
         self.expect(&Token::RBrace)?;
         let end = self.previous_span().end;
-        Ok(SpannedExpr::new(Expr::Receive { arms, timeout }, start..end))
+        Ok(SpannedExpr::new(
+            Expr::Receive { arms, timeout },
+            start..end,
+        ))
     }
 
     /// Parse a for loop expression.
@@ -2822,11 +2985,14 @@ impl<'source> Parser<'source> {
         };
 
         let end = self.previous_span().end;
-        Ok(SpannedExpr::new(Expr::For {
-            clauses,
-            body,
-            is_comprehension,
-        }, start..end))
+        Ok(SpannedExpr::new(
+            Expr::For {
+                clauses,
+                body,
+                is_comprehension,
+            },
+            start..end,
+        ))
     }
 
     /// Parse a single clause in a for loop.
@@ -3045,11 +3211,17 @@ impl<'source> Parser<'source> {
                             }
                         }
                         self.expect(&Token::RBrace)?;
-                        return Ok(Pattern::Struct { name: full_name, fields });
+                        return Ok(Pattern::Struct {
+                            name: full_name,
+                            fields,
+                        });
                     }
                     // Just a type path without variant - treat as unit enum variant
                     let span = self.current_span();
-                    return Err(ParseError::new("expected `::` or `{` after module-qualified type", span));
+                    return Err(ParseError::new(
+                        "expected `::` or `{` after module-qualified type",
+                        span,
+                    ));
                 }
             }
 
@@ -3290,7 +3462,10 @@ impl<'source> Parser<'source> {
             Pattern::Ident(name)
         } else {
             let span = self.current_span();
-            return Err(ParseError::new("expected pattern in bit string segment", span));
+            return Err(ParseError::new(
+                "expected pattern in bit string segment",
+                span,
+            ));
         };
 
         let mut segment = BitStringSegment::new(Box::new(pattern));
@@ -4059,13 +4234,32 @@ mod tests {
         let module = parser.parse_module().unwrap();
 
         // Find the function
-        let func = module.items.iter().find_map(|item| {
-            if let Item::Function(f) = item { Some(f) } else { None }
-        }).expect("expected function");
+        let func = module
+            .items
+            .iter()
+            .find_map(|item| {
+                if let Item::Function(f) = item {
+                    Some(f)
+                } else {
+                    None
+                }
+            })
+            .expect("expected function");
 
         // Check the let statement
-        if let Some(Stmt::Let { pattern: _, ty: _, value: init, .. }) = func.body.stmts.first() {
-            if let Expr::EnumVariant { type_name, variant, args } = &**init {
+        if let Some(Stmt::Let {
+            pattern: _,
+            ty: _,
+            value: init,
+            ..
+        }) = func.body.stmts.first()
+        {
+            if let Expr::EnumVariant {
+                type_name,
+                variant,
+                args,
+            } = &**init
+            {
                 assert_eq!(type_name.as_deref(), Some("Message"));
                 assert_eq!(variant, "Move");
                 if let EnumVariantArgs::Struct(fields) = args {
@@ -4103,9 +4297,17 @@ mod tests {
         let module = parser.parse_module().unwrap();
 
         // Find the function
-        let func = module.items.iter().find_map(|item| {
-            if let Item::Function(f) = item { Some(f) } else { None }
-        }).expect("expected function");
+        let func = module
+            .items
+            .iter()
+            .find_map(|item| {
+                if let Item::Function(f) = item {
+                    Some(f)
+                } else {
+                    None
+                }
+            })
+            .expect("expected function");
 
         // Check the third let statement (let pt = ...)
         if let Some(Stmt::Let { value: init, .. }) = func.body.stmts.get(2) {
@@ -4149,9 +4351,17 @@ mod tests {
         let module = parser.parse_module().unwrap();
 
         // Find the function
-        let func = module.items.iter().find_map(|item| {
-            if let Item::Function(f) = item { Some(f) } else { None }
-        }).expect("expected function");
+        let func = module
+            .items
+            .iter()
+            .find_map(|item| {
+                if let Item::Function(f) = item {
+                    Some(f)
+                } else {
+                    None
+                }
+            })
+            .expect("expected function");
 
         // Check the third let statement (let pt = ...)
         if let Some(Stmt::Let { value: init, .. }) = func.body.stmts.get(2) {
@@ -4190,15 +4400,28 @@ mod tests {
         let module = parser.parse_module().unwrap();
 
         // Find the function
-        let func = module.items.iter().find_map(|item| {
-            if let Item::Function(f) = item { Some(f) } else { None }
-        }).expect("expected function");
+        let func = module
+            .items
+            .iter()
+            .find_map(|item| {
+                if let Item::Function(f) = item {
+                    Some(f)
+                } else {
+                    None
+                }
+            })
+            .expect("expected function");
 
         // Check the match expression
         if let Some(expr) = &func.body.expr {
             if let Expr::Match { arms, .. } = &**expr.as_ref() {
                 let arm = &arms[0];
-                if let Pattern::Enum { name, variant, fields } = &arm.pattern {
+                if let Pattern::Enum {
+                    name,
+                    variant,
+                    fields,
+                } = &arm.pattern
+                {
                     assert_eq!(name, "Message");
                     assert_eq!(variant, "Move");
                     if let EnumPatternFields::Struct(field_patterns) = fields {
@@ -4288,7 +4511,8 @@ mod tests {
         let module = parser.parse_module().unwrap();
 
         if let Item::Function(f) = first_user_item(&module) {
-            if let Some(Expr::Receive { arms, timeout }) = f.body.expr.as_deref().map(|e| e.inner()) {
+            if let Some(Expr::Receive { arms, timeout }) = f.body.expr.as_deref().map(|e| e.inner())
+            {
                 assert_eq!(arms.len(), 1);
                 assert!(timeout.is_some());
             } else {
@@ -4887,7 +5111,9 @@ mod tests {
     fn test_parse_binary_example_file() {
         let source = include_str!("../../examples/binary_example.surreal");
         let mut parser = Parser::new(source);
-        let modules = parser.parse_file_modules("binary_example").expect("binary_example.surreal should parse successfully");
+        let modules = parser
+            .parse_file_modules("binary_example")
+            .expect("binary_example.surreal should parse successfully");
 
         // Should have 1 module with 2 items (1 use import + 1 main function)
         assert_eq!(modules.len(), 1);
@@ -5069,15 +5295,28 @@ mod tests {
             .collect();
 
         // Should have 1 extern mod (lists)
-        assert_eq!(extern_mods.len(), 1, "expected 1 extern mod, got {}", extern_mods.len());
+        assert_eq!(
+            extern_mods.len(),
+            1,
+            "expected 1 extern mod, got {}",
+            extern_mods.len()
+        );
 
         // Verify lists module exists and has expected functions
         let lists = &extern_mods[0];
         assert_eq!(lists.name, "lists", "should be lists extern mod");
 
         // Count functions - stdlib lists module has many functions
-        let fn_count = lists.items.iter().filter(|item| matches!(item, ExternItem::Function(_))).count();
-        assert!(fn_count >= 20, "lists mod should have at least 20 functions, got {}", fn_count);
+        let fn_count = lists
+            .items
+            .iter()
+            .filter(|item| matches!(item, ExternItem::Function(_)))
+            .count();
+        assert!(
+            fn_count >= 20,
+            "lists mod should have at least 20 functions, got {}",
+            fn_count
+        );
     }
 
     // ========== Union Type Parser Tests ==========
@@ -5096,7 +5335,9 @@ mod tests {
 
         if let Item::Function(f) = first_user_item(&module) {
             assert_eq!(f.name, "returns_ok");
-            assert!(matches!(&f.return_type, Some(rt) if matches!(&rt.ty, Type::AtomLiteral(s) if s == "ok")));
+            assert!(
+                matches!(&f.return_type, Some(rt) if matches!(&rt.ty, Type::AtomLiteral(s) if s == "ok"))
+            );
         } else {
             panic!("expected function");
         }
@@ -5472,7 +5713,10 @@ mod tests {
         if let Item::Use(use_decl) = first_user_item(&module) {
             if let UseTree::Path { module, name, .. } = &use_decl.tree {
                 assert_eq!(module.prefix, PathPrefix::Super);
-                assert!(module.segments.is_empty(), "expected empty segments for direct super:: import");
+                assert!(
+                    module.segments.is_empty(),
+                    "expected empty segments for direct super:: import"
+                );
                 assert_eq!(name, "get_user_id");
             } else {
                 panic!("expected path use tree");
@@ -5498,7 +5742,10 @@ mod tests {
         if let Item::Use(use_decl) = first_user_item(&module) {
             if let UseTree::Path { module, name, .. } = &use_decl.tree {
                 assert_eq!(module.prefix, PathPrefix::Crate);
-                assert!(module.segments.is_empty(), "expected empty segments for direct crate:: import");
+                assert!(
+                    module.segments.is_empty(),
+                    "expected empty segments for direct crate:: import"
+                );
                 assert_eq!(name, "main_func");
             } else {
                 panic!("expected path use tree");

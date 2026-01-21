@@ -75,11 +75,13 @@ impl DepsManager {
 
         // Create deps directory
         let deps_dir = self.deps_dir();
-        fs::create_dir_all(&deps_dir).map_err(|e| {
-            DepsError::new(format!("Failed to create deps directory: {}", e))
-        })?;
+        fs::create_dir_all(&deps_dir)
+            .map_err(|e| DepsError::new(format!("Failed to create deps directory: {}", e)))?;
 
-        println!("Fetching {} dependencies...", self.config.dependencies.len());
+        println!(
+            "Fetching {} dependencies...",
+            self.config.dependencies.len()
+        );
 
         // Collect initial hex dependencies to fetch
         let mut pending_hex_deps: Vec<(String, String)> = self
@@ -113,7 +115,9 @@ impl DepsManager {
                     Ok(requirements) => {
                         // Add requirements we haven't seen yet
                         for (req_name, req_version) in requirements {
-                            if !fetched.contains(&req_name) && !new_requirements.iter().any(|(n, _)| n == &req_name) {
+                            if !fetched.contains(&req_name)
+                                && !new_requirements.iter().any(|(n, _)| n == &req_name)
+                            {
                                 new_requirements.push((req_name, req_version));
                             }
                         }
@@ -147,7 +151,11 @@ impl DepsManager {
     }
 
     /// Fetch a package from hex.pm and return its requirements.
-    async fn fetch_hex_package(&self, name: &str, version: &str) -> DepsResult<Vec<(String, String)>> {
+    async fn fetch_hex_package(
+        &self,
+        name: &str,
+        version: &str,
+    ) -> DepsResult<Vec<(String, String)>> {
         let deps_dir = self.deps_dir();
         let pkg_dir = deps_dir.join(name);
 
@@ -195,9 +203,8 @@ impl DepsManager {
 
         // Create a temporary directory for extraction
         let temp_dir = deps_dir.join(format!(".{}-extract", name));
-        fs::create_dir_all(&temp_dir).map_err(|e| {
-            DepsError::new(format!("Failed to create temp directory: {}", e))
-        })?;
+        fs::create_dir_all(&temp_dir)
+            .map_err(|e| DepsError::new(format!("Failed to create temp directory: {}", e)))?;
 
         // The hex tarball contains: VERSION, metadata.config, contents.tar.gz, CHECKSUM
         let mut archive = Archive::new(tarball);
@@ -205,9 +212,10 @@ impl DepsManager {
         let mut contents_tar_gz: Option<Vec<u8>> = None;
         let mut metadata_config: Option<String> = None;
 
-        for entry in archive.entries().map_err(|e| {
-            DepsError::new(format!("Failed to read tarball for {}: {}", name, e))
-        })? {
+        for entry in archive
+            .entries()
+            .map_err(|e| DepsError::new(format!("Failed to read tarball for {}: {}", name, e)))?
+        {
             let mut entry = entry.map_err(|e| {
                 DepsError::new(format!("Failed to read tarball entry for {}: {}", name, e))
             })?;
@@ -220,13 +228,19 @@ impl DepsManager {
             if path_str == "contents.tar.gz" {
                 let mut data = Vec::new();
                 entry.read_to_end(&mut data).map_err(|e| {
-                    DepsError::new(format!("Failed to read contents.tar.gz for {}: {}", name, e))
+                    DepsError::new(format!(
+                        "Failed to read contents.tar.gz for {}: {}",
+                        name, e
+                    ))
                 })?;
                 contents_tar_gz = Some(data);
             } else if path_str == "metadata.config" {
                 let mut data = String::new();
                 entry.read_to_string(&mut data).map_err(|e| {
-                    DepsError::new(format!("Failed to read metadata.config for {}: {}", name, e))
+                    DepsError::new(format!(
+                        "Failed to read metadata.config for {}: {}",
+                        name, e
+                    ))
                 })?;
                 metadata_config = Some(data);
             }
@@ -238,7 +252,10 @@ impl DepsManager {
 
         // Extract contents.tar.gz to the package directory
         fs::create_dir_all(&pkg_dir).map_err(|e| {
-            DepsError::new(format!("Failed to create package directory for {}: {}", name, e))
+            DepsError::new(format!(
+                "Failed to create package directory for {}: {}",
+                name, e
+            ))
         })?;
 
         let decoder = GzDecoder::new(&contents_data[..]);
@@ -302,7 +319,8 @@ impl DepsManager {
                             // Now find {<<"requirement">>,<<"version">>} within this entry's property list
                             // First, find the property list start
                             let props_search_start = name_start + name_end_rel;
-                            if let Some(props_start) = list_content[props_search_start..].find('[') {
+                            if let Some(props_start) = list_content[props_search_start..].find('[')
+                            {
                                 let props_abs_start = props_search_start + props_start;
                                 // Find matching ]
                                 let mut props_depth = 1;
@@ -319,14 +337,22 @@ impl DepsManager {
                                 let props_content = &list_content[props_abs_start..props_end];
 
                                 // Find {<<"requirement">>,<<"version">>} in props
-                                if let Some(req_key_pos) = props_content.find("{<<\"requirement\">>") {
+                                if let Some(req_key_pos) =
+                                    props_content.find("{<<\"requirement\">>")
+                                {
                                     let after_req_key = req_key_pos + "{<<\"requirement\">>".len();
                                     // Skip comma and find <<"version">>
-                                    if let Some(ver_start) = props_content[after_req_key..].find("<<\"") {
+                                    if let Some(ver_start) =
+                                        props_content[after_req_key..].find("<<\"")
+                                    {
                                         let ver_content_start = after_req_key + ver_start + 3;
-                                        if let Some(ver_end) = props_content[ver_content_start..].find("\">>") {
-                                            let version = &props_content[ver_content_start..ver_content_start + ver_end];
-                                            requirements.push((pkg_name.to_string(), version.to_string()));
+                                        if let Some(ver_end) =
+                                            props_content[ver_content_start..].find("\">>")
+                                        {
+                                            let version = &props_content
+                                                [ver_content_start..ver_content_start + ver_end];
+                                            requirements
+                                                .push((pkg_name.to_string(), version.to_string()));
                                         }
                                     }
                                 }
@@ -381,9 +407,9 @@ impl DepsManager {
 
         cmd.arg(url).arg(&pkg_dir);
 
-        let status = cmd.status().map_err(|e| {
-            DepsError::new(format!("Failed to clone {}: {}", name, e))
-        })?;
+        let status = cmd
+            .status()
+            .map_err(|e| DepsError::new(format!("Failed to clone {}: {}", name, e)))?;
 
         if !status.success() {
             return Err(DepsError::new(format!("Git clone failed for {}", name)));
@@ -424,17 +450,15 @@ impl DepsManager {
         // Create a symlink
         #[cfg(unix)]
         {
-            std::os::unix::fs::symlink(&source_path, &pkg_dir).map_err(|e| {
-                DepsError::new(format!("Failed to symlink {}: {}", name, e))
-            })?;
+            std::os::unix::fs::symlink(&source_path, &pkg_dir)
+                .map_err(|e| DepsError::new(format!("Failed to symlink {}: {}", name, e)))?;
         }
 
         #[cfg(windows)]
         {
             // On Windows, use junction for directories
-            std::os::windows::fs::symlink_dir(&source_path, &pkg_dir).map_err(|e| {
-                DepsError::new(format!("Failed to symlink {}: {}", name, e))
-            })?;
+            std::os::windows::fs::symlink_dir(&source_path, &pkg_dir)
+                .map_err(|e| DepsError::new(format!("Failed to symlink {}: {}", name, e)))?;
         }
 
         println!("  {} linked", name);
@@ -453,12 +477,11 @@ impl DepsManager {
 
         // Collect all dep names
         let mut pending: Vec<String> = Vec::new();
-        for entry in fs::read_dir(&deps_dir).map_err(|e| {
-            DepsError::new(format!("Failed to read deps directory: {}", e))
-        })? {
-            let entry = entry.map_err(|e| {
-                DepsError::new(format!("Failed to read deps entry: {}", e))
-            })?;
+        for entry in fs::read_dir(&deps_dir)
+            .map_err(|e| DepsError::new(format!("Failed to read deps directory: {}", e)))?
+        {
+            let entry =
+                entry.map_err(|e| DepsError::new(format!("Failed to read deps entry: {}", e)))?;
 
             let pkg_name = entry.file_name().to_string_lossy().to_string();
 
@@ -607,9 +630,8 @@ impl DepsManager {
             }
 
             // Copy the ebin directory (symlinks can cause issues across filesystems)
-            Self::copy_dir_recursive(&rebar3_ebin, &ebin_dir).map_err(|e| {
-                DepsError::new(format!("Failed to copy ebin for {}: {}", name, e))
-            })?;
+            Self::copy_dir_recursive(&rebar3_ebin, &ebin_dir)
+                .map_err(|e| DepsError::new(format!("Failed to copy ebin for {}: {}", name, e)))?;
         }
 
         println!("  {} compiled", name);
@@ -650,9 +672,8 @@ impl DepsManager {
         })?;
 
         // Copy all files from source ebin to target ebin
-        Self::copy_dir_recursive(&src_ebin, &dst_ebin).map_err(|e| {
-            DepsError::new(format!("Failed to install {} to build: {}", name, e))
-        })?;
+        Self::copy_dir_recursive(&src_ebin, &dst_ebin)
+            .map_err(|e| DepsError::new(format!("Failed to install {} to build: {}", name, e)))?;
 
         Ok(())
     }
@@ -688,9 +709,8 @@ impl DepsManager {
         println!("  Compiling {} (Elixir)...", name);
 
         // Create ebin directory
-        fs::create_dir_all(&ebin_dir).map_err(|e| {
-            DepsError::new(format!("Failed to create ebin for {}: {}", name, e))
-        })?;
+        fs::create_dir_all(&ebin_dir)
+            .map_err(|e| DepsError::new(format!("Failed to create ebin for {}: {}", name, e)))?;
 
         // Collect all dependency ebin paths for -pa flags
         let dep_paths: Vec<PathBuf> = self.dep_ebin_paths();
@@ -710,9 +730,9 @@ impl DepsManager {
             cmd.arg(ex_file);
         }
 
-        let status = cmd.status().map_err(|e| {
-            DepsError::new(format!("Failed to run elixirc for {}: {}", name, e))
-        })?;
+        let status = cmd
+            .status()
+            .map_err(|e| DepsError::new(format!("Failed to run elixirc for {}: {}", name, e)))?;
 
         if !status.success() {
             return Err(DepsError::new(format!(
@@ -909,21 +929,19 @@ impl DepsManager {
         }
 
         let bindings_dir = self.bindings_dir();
-        fs::create_dir_all(&bindings_dir).map_err(|e| {
-            DepsError::new(format!("Failed to create bindings directory: {}", e))
-        })?;
+        fs::create_dir_all(&bindings_dir)
+            .map_err(|e| DepsError::new(format!("Failed to create bindings directory: {}", e)))?;
 
         println!("Generating bindings for dependencies...");
 
         let mut generated_count = 0;
 
         // Iterate over all dependencies
-        for entry in fs::read_dir(&deps_dir).map_err(|e| {
-            DepsError::new(format!("Failed to read deps directory: {}", e))
-        })? {
-            let entry = entry.map_err(|e| {
-                DepsError::new(format!("Failed to read deps entry: {}", e))
-            })?;
+        for entry in fs::read_dir(&deps_dir)
+            .map_err(|e| DepsError::new(format!("Failed to read deps directory: {}", e)))?
+        {
+            let entry =
+                entry.map_err(|e| DepsError::new(format!("Failed to read deps entry: {}", e)))?;
 
             let pkg_name = entry.file_name().to_string_lossy().to_string();
 
@@ -945,7 +963,10 @@ impl DepsManager {
             if !all_files.is_empty() {
                 // Generate bindings for this dependency
                 if let Err(e) = self.generate_dep_bindings(&pkg_name, &all_files, &bindings_dir) {
-                    eprintln!("  Warning: Failed to generate bindings for {}: {}", pkg_name, e);
+                    eprintln!(
+                        "  Warning: Failed to generate bindings for {}: {}",
+                        pkg_name, e
+                    );
                 } else {
                     generated_count += 1;
                 }
@@ -957,10 +978,17 @@ impl DepsManager {
                 let ex_files = Self::find_ex_files(&lib_dir);
                 if !ex_files.is_empty() {
                     // Use bindgen to parse @spec and @type from .ex files
-                    if let Err(e) = self.generate_elixir_bindings(&pkg_name, &ex_files, &bindings_dir) {
+                    if let Err(e) =
+                        self.generate_elixir_bindings(&pkg_name, &ex_files, &bindings_dir)
+                    {
                         // Fall back to stub if bindgen produces empty output
-                        if let Err(e2) = self.generate_elixir_stub_bindings(&pkg_name, &bindings_dir) {
-                            eprintln!("  Warning: Failed to generate Elixir bindings for {}: {}, {}", pkg_name, e, e2);
+                        if let Err(e2) =
+                            self.generate_elixir_stub_bindings(&pkg_name, &bindings_dir)
+                        {
+                            eprintln!(
+                                "  Warning: Failed to generate Elixir bindings for {}: {}, {}",
+                                pkg_name, e, e2
+                            );
                         }
                     } else {
                         generated_count += 1;
@@ -970,7 +998,11 @@ impl DepsManager {
         }
 
         if generated_count > 0 {
-            println!("Generated bindings for {} dependencies in {}", generated_count, bindings_dir.display());
+            println!(
+                "Generated bindings for {} dependencies in {}",
+                generated_count,
+                bindings_dir.display()
+            );
         } else {
             println!("No source files with specs found in dependencies.");
         }

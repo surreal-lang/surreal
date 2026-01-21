@@ -55,7 +55,11 @@ impl Iterator for Lexer<'_> {
                 }
                 Some((Err(()), span)) => {
                     // Skip invalid tokens for now, parser will handle errors
-                    eprintln!("Lexer error at {:?}: {:?}", span, &self.source[span.clone()]);
+                    eprintln!(
+                        "Lexer error at {:?}: {:?}",
+                        span,
+                        &self.source[span.clone()]
+                    );
                     continue;
                 }
                 None => return None,

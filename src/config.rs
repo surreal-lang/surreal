@@ -142,13 +142,11 @@ fn default_src_dir() -> String {
 impl ProjectConfig {
     /// Load configuration from a surreal.toml file.
     pub fn load(path: &Path) -> ConfigResult<Self> {
-        let content = fs::read_to_string(path).map_err(|e| {
-            ConfigError::new(format!("Failed to read {}: {}", path.display(), e))
-        })?;
+        let content = fs::read_to_string(path)
+            .map_err(|e| ConfigError::new(format!("Failed to read {}: {}", path.display(), e)))?;
 
-        toml::from_str(&content).map_err(|e| {
-            ConfigError::new(format!("Failed to parse {}: {}", path.display(), e))
-        })
+        toml::from_str(&content)
+            .map_err(|e| ConfigError::new(format!("Failed to parse {}: {}", path.display(), e)))
     }
 
     /// Find the project root by looking for surreal.toml in current and parent directories.
@@ -377,7 +375,10 @@ env = { port = 8080, debug = true }
 "#;
         let config: ProjectConfig = toml::from_str(content).unwrap();
         assert!(config.is_application());
-        assert_eq!(config.application_module(), Some("my_app_server".to_string()));
+        assert_eq!(
+            config.application_module(),
+            Some("my_app_server".to_string())
+        );
 
         let env = config.application_env();
         assert_eq!(env.get("port"), Some(&toml::Value::Integer(8080)));
@@ -428,7 +429,10 @@ full = ["json", "async"]
         assert!(config.features.contains_key("json"));
         assert!(config.features.contains_key("async"));
         assert!(config.features.contains_key("full"));
-        assert_eq!(config.features.get("full"), Some(&vec!["json".to_string(), "async".to_string()]));
+        assert_eq!(
+            config.features.get("full"),
+            Some(&vec!["json".to_string(), "async".to_string()])
+        );
     }
 
     #[test]

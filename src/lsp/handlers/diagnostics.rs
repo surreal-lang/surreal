@@ -40,8 +40,14 @@ pub fn publish_diagnostics(
         } else {
             // If no span, put at start of file
             Some(tower_lsp::lsp_types::Range {
-                start: tower_lsp::lsp_types::Position { line: 0, character: 0 },
-                end: tower_lsp::lsp_types::Position { line: 0, character: 1 },
+                start: tower_lsp::lsp_types::Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: tower_lsp::lsp_types::Position {
+                    line: 0,
+                    character: 1,
+                },
             })
         };
 
@@ -73,8 +79,14 @@ pub fn publish_diagnostics(
         } else {
             // If no span, put at start of file
             Some(tower_lsp::lsp_types::Range {
-                start: tower_lsp::lsp_types::Position { line: 0, character: 0 },
-                end: tower_lsp::lsp_types::Position { line: 0, character: 1 },
+                start: tower_lsp::lsp_types::Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: tower_lsp::lsp_types::Position {
+                    line: 0,
+                    character: 1,
+                },
             })
         };
 

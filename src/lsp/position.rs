@@ -92,16 +92,40 @@ mod tests {
         let index = LineIndex::new(source);
 
         // Start of file
-        assert_eq!(index.offset_to_position(0), Some(Position { line: 0, character: 0 }));
+        assert_eq!(
+            index.offset_to_position(0),
+            Some(Position {
+                line: 0,
+                character: 0
+            })
+        );
 
         // "fn"
-        assert_eq!(index.offset_to_position(2), Some(Position { line: 0, character: 2 }));
+        assert_eq!(
+            index.offset_to_position(2),
+            Some(Position {
+                line: 0,
+                character: 2
+            })
+        );
 
         // Start of second line
-        assert_eq!(index.offset_to_position(12), Some(Position { line: 1, character: 0 }));
+        assert_eq!(
+            index.offset_to_position(12),
+            Some(Position {
+                line: 1,
+                character: 0
+            })
+        );
 
         // "println" on second line
-        assert_eq!(index.offset_to_position(16), Some(Position { line: 1, character: 4 }));
+        assert_eq!(
+            index.offset_to_position(16),
+            Some(Position {
+                line: 1,
+                character: 4
+            })
+        );
     }
 
     #[test]
@@ -110,13 +134,31 @@ mod tests {
         let index = LineIndex::new(source);
 
         // Start of file
-        assert_eq!(index.position_to_offset(Position { line: 0, character: 0 }), Some(0));
+        assert_eq!(
+            index.position_to_offset(Position {
+                line: 0,
+                character: 0
+            }),
+            Some(0)
+        );
 
         // Start of second line
-        assert_eq!(index.position_to_offset(Position { line: 1, character: 0 }), Some(12));
+        assert_eq!(
+            index.position_to_offset(Position {
+                line: 1,
+                character: 0
+            }),
+            Some(12)
+        );
 
         // End of file
-        assert_eq!(index.position_to_offset(Position { line: 2, character: 1 }), Some(source.len()));
+        assert_eq!(
+            index.position_to_offset(Position {
+                line: 2,
+                character: 1
+            }),
+            Some(source.len())
+        );
     }
 
     #[test]
@@ -126,7 +168,19 @@ mod tests {
 
         // "main" spans from offset 3 to 7
         let range = index.span_to_range(3..7).unwrap();
-        assert_eq!(range.start, Position { line: 0, character: 3 });
-        assert_eq!(range.end, Position { line: 0, character: 7 });
+        assert_eq!(
+            range.start,
+            Position {
+                line: 0,
+                character: 3
+            }
+        );
+        assert_eq!(
+            range.end,
+            Position {
+                line: 0,
+                character: 7
+            }
+        );
     }
 }

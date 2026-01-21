@@ -9,9 +9,9 @@ use crate::lsp::position::LineIndex;
 
 /// Surreal language keywords.
 const KEYWORDS: &[&str] = &[
-    "fn", "let", "mut", "if", "else", "match", "return", "true", "false", "struct", "enum",
-    "impl", "trait", "pub", "mod", "use", "spawn", "receive", "self", "for", "in", "while",
-    "loop", "break", "continue", "type", "extern", "when", "where",
+    "fn", "let", "mut", "if", "else", "match", "return", "true", "false", "struct", "enum", "impl",
+    "trait", "pub", "mod", "use", "spawn", "receive", "self", "for", "in", "while", "loop",
+    "break", "continue", "type", "extern", "when", "where",
 ];
 
 /// Handle completion request.

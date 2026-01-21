@@ -20,12 +20,12 @@ use rustyline::hint::Hinter;
 use rustyline::validate::Validator;
 use rustyline::{Context, Editor, ExternalPrinter, Helper};
 
-use surreal::compiler::{
-    check_modules, resolve_stdlib_methods, CompilerError, CoreErlangEmitter,
-    GenericFunctionRegistry, Item, ModuleContext, Parser,
-};
 use miette::{NamedSource, SourceSpan};
 use std::sync::{Arc, RwLock};
+use surreal::compiler::{
+    CompilerError, CoreErlangEmitter, GenericFunctionRegistry, Item, ModuleContext, Parser,
+    check_modules, resolve_stdlib_methods,
+};
 
 /// Counter for generating unique module names
 static EVAL_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -297,13 +297,24 @@ Loop()
 
 /// Keywords for completion
 const KEYWORDS: &[&str] = &[
-    "let", "if", "else", "match", "fn", "pub", "mod", "use", "struct", "enum",
-    "trait", "impl", "type", "extern", "spawn", "send", "receive", "self",
-    "true", "false",
+    "let", "if", "else", "match", "fn", "pub", "mod", "use", "struct", "enum", "trait", "impl",
+    "type", "extern", "spawn", "send", "receive", "self", "true", "false",
 ];
 
 /// REPL commands for completion
-const COMMANDS: &[&str] = &[":help", ":quit", ":q", ":clear", ":bindings", ":b", ":h", ":reload", ":edit", ":e", ":load"];
+const COMMANDS: &[&str] = &[
+    ":help",
+    ":quit",
+    ":q",
+    ":clear",
+    ":bindings",
+    ":b",
+    ":h",
+    ":reload",
+    ":edit",
+    ":e",
+    ":load",
+];
 
 /// Information about a module's exports
 #[derive(Clone, Debug, Default)]
@@ -334,9 +345,7 @@ impl ModuleRegistry {
         let mut info = ModuleInfo::default();
 
         // Extract the short module name (e.g., "surreal::map" -> "map")
-        let short_name = module_name
-            .strip_prefix("surreal::")
-            .unwrap_or(module_name);
+        let short_name = module_name.strip_prefix("surreal::").unwrap_or(module_name);
 
         // Expected struct name for this module (e.g., "map" -> "Map")
         let expected_struct = capitalize_first(short_name);
@@ -565,7 +574,11 @@ impl ReplState {
         }
     }
 
-    fn with_app(app_name: String, beam_dir: std::path::PathBuf, deps_dirs: Vec<std::path::PathBuf>) -> Self {
+    fn with_app(
+        app_name: String,
+        beam_dir: std::path::PathBuf,
+        deps_dirs: Vec<std::path::PathBuf>,
+    ) -> Self {
         let stdlib_path = find_stdlib_path();
         let temp_dir = std::env::temp_dir();
 
@@ -695,11 +708,14 @@ impl ReplState {
     fn send_command(&mut self, cmd: &str) -> Result<String, String> {
         let stdin = self.beam_stdin.as_mut().ok_or("BEAM not running")?;
         writeln!(stdin, "{}", cmd).map_err(|e| format!("Failed to send: {}", e))?;
-        stdin.flush().map_err(|e| format!("Failed to flush: {}", e))?;
+        stdin
+            .flush()
+            .map_err(|e| format!("Failed to flush: {}", e))?;
 
         // Wait for result from channel (output is printed by reader thread)
         let rx = self.result_rx.as_ref().ok_or("BEAM not running")?;
-        rx.recv().map_err(|_| "BEAM process terminated".to_string())?
+        rx.recv()
+            .map_err(|_| "BEAM process terminated".to_string())?
     }
 
     /// Load module registry by introspecting the BEAM
@@ -733,7 +749,13 @@ impl ReplState {
         // Parse
         let mut parser = Parser::new(&surreal_source);
         let modules = parser.parse_file_modules(&module_name).map_err(|e| {
-            format_repl_error(expr_source, expr_offset, &e.message, e.span, e.help.as_deref())
+            format_repl_error(
+                expr_source,
+                expr_offset,
+                &e.message,
+                e.span,
+                e.help.as_deref(),
+            )
         })?;
 
         if modules.is_empty() {
@@ -835,10 +857,7 @@ impl ReplState {
         if !bindings.is_empty() {
             source.push_str("    extern mod __repl_bindings {\n");
             for binding in bindings.iter() {
-                source.push_str(&format!(
-                    "        fn __get_{}__() -> any;\n",
-                    binding.name
-                ));
+                source.push_str(&format!("        fn __get_{}__() -> any;\n", binding.name));
             }
             source.push_str("    }\n\n");
         }
@@ -910,7 +929,10 @@ fn parse_atom_list(s: &str) -> Vec<String> {
         return Vec::new();
     }
 
-    let inner = s.strip_prefix('[').and_then(|s| s.strip_suffix(']')).unwrap_or(s);
+    let inner = s
+        .strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))
+        .unwrap_or(s);
 
     inner
         .split(',')
@@ -931,7 +953,10 @@ fn parse_exports(s: &str) -> Vec<(String, u8)> {
     }
 
     let mut exports = Vec::new();
-    let inner = s.strip_prefix('[').and_then(|s| s.strip_suffix(']')).unwrap_or(s);
+    let inner = s
+        .strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))
+        .unwrap_or(s);
 
     // Simple parser for {name, arity} tuples
     let mut i = 0;
@@ -961,7 +986,9 @@ fn parse_export_tuple(s: &str) -> Option<(String, u8)> {
     }
 
     let name = parts[0].trim();
-    let name = name.strip_prefix('\'').and_then(|n| n.strip_suffix('\''))
+    let name = name
+        .strip_prefix('\'')
+        .and_then(|n| n.strip_suffix('\''))
         .unwrap_or(name);
 
     let arity: u8 = parts[1].trim().parse().ok()?;
@@ -975,14 +1002,20 @@ fn find_stdlib_path() -> Option<String> {
         if let Some(exe_dir) = exe_path.parent() {
             let stdlib = exe_dir.join("../stdlib");
             if stdlib.exists() {
-                return stdlib.canonicalize().ok().map(|p| p.to_string_lossy().into_owned());
+                return stdlib
+                    .canonicalize()
+                    .ok()
+                    .map(|p| p.to_string_lossy().into_owned());
             }
         }
     }
 
     let target_stdlib = std::path::Path::new("target/stdlib");
     if target_stdlib.exists() {
-        return target_stdlib.canonicalize().ok().map(|p| p.to_string_lossy().into_owned());
+        return target_stdlib
+            .canonicalize()
+            .ok()
+            .map(|p| p.to_string_lossy().into_owned());
     }
 
     None
@@ -1003,13 +1036,19 @@ fn format_surreal_value(value: &str) -> String {
     if value == "none" {
         return "None".to_string();
     }
-    if let Some(inner) = value.strip_prefix("{some,").and_then(|s| s.strip_suffix('}')) {
+    if let Some(inner) = value
+        .strip_prefix("{some,")
+        .and_then(|s| s.strip_suffix('}'))
+    {
         return format!("Some({})", format_surreal_value(inner.trim()));
     }
     if let Some(inner) = value.strip_prefix("{ok,").and_then(|s| s.strip_suffix('}')) {
         return format!("Ok({})", format_surreal_value(inner.trim()));
     }
-    if let Some(inner) = value.strip_prefix("{error,").and_then(|s| s.strip_suffix('}')) {
+    if let Some(inner) = value
+        .strip_prefix("{error,")
+        .and_then(|s| s.strip_suffix('}'))
+    {
         return format!("Err({})", format_surreal_value(inner.trim()));
     }
 
@@ -1020,7 +1059,10 @@ fn format_surreal_value(value: &str) -> String {
         return format!(":{}", inner);
     }
 
-    if let Some(inner) = value.strip_prefix("<<\"").and_then(|s| s.strip_suffix("\">>")) {
+    if let Some(inner) = value
+        .strip_prefix("<<\"")
+        .and_then(|s| s.strip_suffix("\">>"))
+    {
         return format!("\"{}\"", inner);
     }
 
@@ -1081,13 +1123,19 @@ fn extract_map_content(s: &str) -> Option<String> {
             _ => {}
         }
     }
-    if end_idx > 0 { Some(s[..end_idx].to_string()) } else { None }
+    if end_idx > 0 {
+        Some(s[..end_idx].to_string())
+    } else {
+        None
+    }
 }
 
 fn format_map_fields(map_str: &str) -> String {
     let inner = map_str.strip_prefix("#{").and_then(|s| s.strip_suffix('}'));
     if let Some(inner) = inner {
-        if inner.is_empty() { return String::new(); }
+        if inner.is_empty() {
+            return String::new();
+        }
         inner.replace(" => ", ": ")
     } else {
         map_str.to_string()
@@ -1098,9 +1146,7 @@ fn format_map_fields(map_str: &str) -> String {
 /// Input: #{name => <<"Sonny">>,'__struct__' => 'repl_edit::User',age => 45}
 /// Output: name: "Sonny", age: 45
 fn format_struct_fields(map_str: &str, _struct_name: &str) -> String {
-    let inner = map_str
-        .strip_prefix("#{")
-        .and_then(|s| s.strip_suffix('}'));
+    let inner = map_str.strip_prefix("#{").and_then(|s| s.strip_suffix('}'));
 
     let Some(inner) = inner else {
         return String::new();
@@ -1397,7 +1443,10 @@ pub fn run_shell_with_app(
     }
 
     println!();
-    println!("Application '{}' started. Type :help for commands, :quit to exit.", app_name);
+    println!(
+        "Application '{}' started. Type :help for commands, :quit to exit.",
+        app_name
+    );
     println!();
 
     // Main REPL loop (same as run_shell)
@@ -1569,8 +1618,8 @@ fn load_and_compile(state: &mut ReplState, path: &str) -> Result<String, String>
         return Err(format!("File not found: {}", path.display()));
     }
 
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("Failed to read file: {}", e))?;
+    let content =
+        std::fs::read_to_string(path).map_err(|e| format!("Failed to read file: {}", e))?;
 
     let module_name = path
         .file_stem()
@@ -1620,15 +1669,18 @@ fn compile_and_run_source(
         let prefixed_module = module.clone();
 
         let mut module_context = ModuleContext::default();
-        module_context.skip_stdlib_prefix = true;  // REPL modules don't get surreal:: prefix
-        let mut emitter = CoreErlangEmitter::with_registry_and_context(registry.clone(), module_context);
+        module_context.skip_stdlib_prefix = true; // REPL modules don't get surreal:: prefix
+        let mut emitter =
+            CoreErlangEmitter::with_registry_and_context(registry.clone(), module_context);
 
         let core_erlang = emitter
             .emit_module(&prefixed_module)
             .map_err(|e| format!("Codegen error: {}", e))?;
 
         // Write Core Erlang to temp file
-        let core_file = state.temp_dir.join(format!("{}.core", prefixed_module.name));
+        let core_file = state
+            .temp_dir
+            .join(format!("{}.core", prefixed_module.name));
         std::fs::write(&core_file, &core_erlang)
             .map_err(|e| format!("Failed to write Core Erlang: {}", e))?;
 
@@ -1647,7 +1699,10 @@ fn compile_and_run_source(
                         }
                     }
                 }
-                state.registry.borrow_mut().add_module(&prefixed_module.name, &exports);
+                state
+                    .registry
+                    .borrow_mut()
+                    .add_module(&prefixed_module.name, &exports);
             }
             Err(e) => {
                 let _ = std::fs::remove_file(&core_file);
@@ -1733,10 +1788,7 @@ mod tests {
     #[test]
     fn test_module_registry_add_module() {
         let mut registry = ModuleRegistry::new();
-        let exports = vec![
-            ("add".to_string(), 2),
-            ("multiply".to_string(), 2),
-        ];
+        let exports = vec![("add".to_string(), 2), ("multiply".to_string(), 2)];
         registry.add_module("surreal::math", &exports);
 
         // Should be stored under short name "math"

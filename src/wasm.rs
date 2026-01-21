@@ -1,7 +1,7 @@
 //! WASM bindings - provides a JS-friendly API.
 
 use js_sys::{Array, Object, Reflect};
-use wasm_bindgen::prelude::{wasm_bindgen, JsError, JsValue};
+use wasm_bindgen::prelude::{JsError, JsValue, wasm_bindgen};
 
 use crate::{Instruction, Operand, Pattern, Pid, Register, Scheduler, Source, StepResult};
 
