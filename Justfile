@@ -71,9 +71,11 @@ ci:
     echo "==> Checking formatting..."
     cargo fmt --all -- --check
     echo "==> Running clippy..."
-    cargo clippy --all-targets --all-features
+    cargo clippy --all-targets --all-features -- -D warnings
     echo "==> Running tests..."
     cargo test --all-features
+    echo "==> Building NIF crate..."
+    cargo build --manifest-path packages/surreal_compiler/native/surreal_native/Cargo.toml
     echo "==> All CI checks passed!"
 
 # Install git hooks

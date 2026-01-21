@@ -14,7 +14,7 @@ mod format;
 /// Returns: {:ok, [{name, [{func_name, arity}, ...]}]} | {:error, reason}
 #[rustler::nif(schedule = "DirtyCpu")]
 fn parse<'a>(env: Env<'a>, source: String) -> Term<'a> {
-    use surreal_lang::compiler::Parser;
+    use surreal::compiler::Parser;
 
     let mut parser = Parser::new(&source);
 
@@ -23,7 +23,7 @@ fn parse<'a>(env: Env<'a>, source: String) -> Term<'a> {
             let module_infos: Vec<_> = modules.iter().map(|m| {
                 let name = m.name.as_str();
                 let funcs: Vec<_> = m.items.iter().filter_map(|item| {
-                    if let surreal_lang::compiler::Item::Function(f) = item {
+                    if let surreal::compiler::Item::Function(f) = item {
                         Some((f.name.as_str(), f.params.len()))
                     } else {
                         None
@@ -47,7 +47,7 @@ fn parse<'a>(env: Env<'a>, source: String) -> Term<'a> {
 /// The CoreErlangAST is in the format expected by compile:forms/2 with [from_core, binary].
 #[rustler::nif(schedule = "DirtyCpu")]
 fn generate_core_ast<'a>(env: Env<'a>, source: String) -> Term<'a> {
-    use surreal_lang::compiler::{Parser, check_modules};
+    use surreal::compiler::{Parser, check_modules};
 
     let mut parser = Parser::new(&source);
 
